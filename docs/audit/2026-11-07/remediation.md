@@ -1,6 +1,6 @@
 # Audit remediation candidate
 
-Implementation branch: `sol/audit-remediation-20261107`. Audit handoff: `9550a432a7a178473d152cdcc44efba3d74c4048`; audited product: `9b3004ff8c25c9879803a6c07fa8b28d04731438`. The implementation identifies itself as **v2.0.1-rc.1**, distinct from the published stable package. No release has been published by this work.
+Implementation branch: `sol/audit-remediation-20261107`. Audit handoff: `9550a432a7a178473d152cdcc44efba3d74c4048`; audited product: `9b3004ff8c25c9879803a6c07fa8b28d04731438`. The implementation identifies itself as **v2.0.1-rc.2**, distinct from the published stable package. No release has been published by this work.
 
 ## Findings and regression coverage
 
@@ -41,6 +41,8 @@ The following dispositions describe implementation and local fixtures. They do n
 ## Additional desktop and privacy corrections
 
 The published package fails on the observed Discord 1.0.9267 / Electron 44.10.0 client in a rewritten `libdiscore` module: `i.A is not a constructor`. A controlled disposable copy reproduced it. Current Rspack supplies direct value exports as the third argument of its export helper; the old wrapper discarded them. The candidate preserves those exports and selects the active Rspack queue. A causal fixture constructs the logger through the shipping early hook and checks that renderer discovery uses that same runtime. The narrow upstream adaptation is recorded in the provenance registry.
+
+Live RC1 acceptance reached Discord's login and signed-in client, then exposed a second pre-Core error: ContextMenu discovery called the runtime with an undefined module ID. RC2 broadens the exact parser-associated Rspack factory shape and fails closed when optional menu discovery is missing or throws. Actual import tests cover both legacy/Rspack results and absent, mismatched or throwing modules. One-argument CSS factories also retain their aliases. A renderer initialization failure now shows a dismissible notice instead of silently omitting Solcord.
 
 Strict Privacy now rejects contradictory persisted allow flags. Legacy settings without an explicit privacy receipt start strict. An early native guard blocks recognized optional science/track and Sentry store/envelope requests, independently of renderer adapter discovery. Generic addon IPC cannot grant new permissions: only a durable explicit choice may relax the guard, while strengthening is immediate even if renderer cleanup fails. The editor and bundled catalog require no remote fetch. Request diagnostics omit authorization, query values and response content.
 

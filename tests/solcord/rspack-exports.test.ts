@@ -1,4 +1,5 @@
 import {describe, expect, mock, test} from "bun:test";
+import vm from "node:vm";
 
 const noop = () => {};
 mock.module("@common/logger", () => ({"default": {error: noop, warn: noop, debug: noop, stacktrace: noop}}));
@@ -48,6 +49,32 @@ describe("Discord Rspack export compatibility", () => {
         expect(exports.live).toBe(2); expect(exports.direct).toBe(3);
         exports.live = 7; exports.direct = 9;
         expect(exports.live).toBe(7); expect(exports.direct).toBe(9);
+    });
+
+    test("one-argument Rspack and three-argument legacy CSS factories retain searchable class aliases", () => {
+        const factories = [
+            "({123(m){m.exports={a:\"colorDefault_123\",b:\"focused_456\"}}})[123]",
+            "({124(m,e,r){\"use strict\";m.exports={a:\"colorDefault_123\",b:\"focused_456\"}}})[124]",
+            "({1e5(m,e,r){m.exports={a:\"colorDefault_123\",b:\"focused_456\"}}})[1e5]"
+        ];
+        for (const [index, source] of factories.entries()) {
+            const id = `class-fixture-${index}`;
+            runtime.m[id] = vm.runInNewContext(source);
+            const exports = runtime(id);
+            expect(exports.colorDefault).toBe("colorDefault_123");
+            expect(exports.focused).toBe("focused_456");
+            expect(exports[Symbol.for("BetterDiscord.Polyfilled.class") as any]).toBe(true);
+            expect(Object.keys(exports)).toEqual(["colorDefault", "focused"]);
+            expect(exports.a).toBe("colorDefault_123");
+        }
+    });
+
+    test("a non-CSS factory is not given class aliases merely because it exports underscored strings", () => {
+        runtime.m[125] = vm.runInNewContext("({125(m){let a=\"notAClass_123\";m.exports={a}}})[125]");
+        const exports = runtime(125);
+        expect(exports.a).toBe("notAClass_123");
+        expect(exports.notAClass).toBeUndefined();
+        expect(exports[Symbol.for("BetterDiscord.Polyfilled.class") as any]).toBeUndefined();
     });
 
     test("renderer module discovery uses the same Rspack queue instead of the stale webpack queue", async () => {

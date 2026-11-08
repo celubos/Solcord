@@ -151,7 +151,19 @@ export default class BetterDiscord {
                         ${content}
                         return true;
                     } catch(error) {
-                        console.error(error);
+                        console.error("[Solcord] Renderer initialization failed", error);
+                        if (!document.getElementById("solcord-startup-failure")) {
+                            const notice = document.createElement("aside");
+                            notice.id = "solcord-startup-failure";
+                            notice.setAttribute("role", "alert");
+                            notice.textContent = "Solcord could not finish startup. Discord is still available. Restart Discord to retry, or open Solcord Setup to repair. ";
+                            Object.assign(notice.style, {position: "fixed", right: "16px", bottom: "16px", maxWidth: "420px", padding: "12px", zIndex: "2147483647", background: "var(--background-floating, #1e1f22)", color: "var(--text-normal, #fff)", border: "1px solid var(--background-modifier-accent, #555)", borderRadius: "4px"});
+                            const dismiss = document.createElement("button");
+                            dismiss.textContent = "Dismiss";
+                            dismiss.onclick = () => notice.remove();
+                            notice.append(dismiss);
+                            (document.body || document.documentElement).append(notice);
+                        }
                         return false;
                     }
                 })();
