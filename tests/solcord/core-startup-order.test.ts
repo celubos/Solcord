@@ -36,7 +36,6 @@ mock.module("@ui/settings", () => ({"default": {initialize() {settingsAttempts++
 mock.module("@modules/commandmanager", () => ({"default": {initialize: () => commandsReady}}));
 mock.module("@ui/customcss/mdinstallcss", () => ({"default": {initialize() {if (decorationFails) throw Error("optional-host-chunk");}}}));
 mock.module("@styles/index.css", () => ({"default": "fixture"}));
-mock.module("@styles/fonts/HankenGrotesk-variable.ttf", () => ({"default": "fixture-font"}));
 mock.module("@ui/solcord/panel", () => ({"default": noop}));
 mock.module("lucide-react", () => ({ShieldCheckIcon: noop}));
 mock.module("@modules/patcher", () => ({"default": {after: noop}}));

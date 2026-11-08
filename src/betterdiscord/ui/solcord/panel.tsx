@@ -10,19 +10,18 @@ import SolcordSettings, {SOLCORD_PRESET_ADDONS} from "@modules/solcord/store";
 import PluginDoctor from "@modules/solcord/doctor";
 import type {SolcordLocalTranslationAvailability} from "@modules/solcord/local-translation";
 import type {SolcordVoiceNotePhase} from "@modules/solcord/native-suite";
-import {CoreUpdater, PluginUpdater, ThemeUpdater} from "@modules/updater";
 import type {SolcordModuleId, SolcordSetupDraft} from "@modules/solcord/contracts";
 import type {LinkInspection} from "@modules/solcord/link-lens";
 
 import SetupWizard from "./setup-wizard";
 import MessageTimelinePanel from "./timeline";
+import PrivacyProtectionPanel from "./privacy";
 import {CatalogBrowser, CuratedAddonSet} from "./addon-catalog";
 import {SOLCORD_ADDON_PRESENTATION, SOLCORD_POWER_LAB} from "./catalog";
 import {findSolcordWorkspaces, isSolcordTranslationLanguage, normalizeSolcordMediaShelfUrl, normalizeSolcordTranslationEndpoint, prioritizeSolcordPulse, resolveSolcordPerformancePolicy, SOLCORD_PERFORMANCE_POLICIES, SOLCORD_WORKSPACES, type SolcordAppearancePreferences, type SolcordMediaKind, type SolcordPerformanceProfile, type SolcordProductPreferences, type SolcordWorkspaceId} from "@common/solcord/product";
 import {isSolcordBuiltInAddon, SOLCORD_CLEAN_ROOM_BUILTIN_ADDONS, solcordBuiltInCapability, solcordNativeSuiteFeatureForAddon, type SolcordProviderMigrationPlan} from "@common/solcord/builtin-addons";
 import {SOLCORD_V2_REPLACEMENT_MANIFEST} from "@common/solcord/v2-replacement-manifest";
 import {presentSolcordChannelGlance, type SolcordChannelGlancePresentation} from "@common/solcord/chat-output";
-import {privacyCapabilityStateLabel} from "@common/solcord/privacy";
 import {scrollSolcordSettingsTarget} from "./scroll-owner";
 import SolcordSwitch from "./switch";
 import PreferenceSlider from "./slider";
@@ -257,44 +256,6 @@ function ProfilesAndHistory() {
                 </div>
             </div>
         </div>
-    </Section>;
-}
-
-function PrivacyProtectionPanel() {
-    const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({
-        preferences: SolcordSettings.slice("productPreferences").privacy,
-        capabilities: SolcordRuntime.privacyCapabilities(),
-        receipts: SolcordRuntime.privacyDecisionReceipts(),
-        receiptStorage: SolcordRuntime.privacyReceiptStorage()
-    }));
-    const [status, setStatus] = useState("");
-    const applyProfile = async (profile: "strict" | "standard") => {
-        if (profile === state.preferences.profile && !state.preferences.migrationPending) return;
-        if (profile === "strict" && !window.confirm("Apply Strict Privacy? Solcord will capture a rollback snapshot, block verified optional reporting and activity discovery, make update checks manual, and disable enabled community addons whose exact reviewed bytes do not declare local-only behavior. Core chat, calls, media, moderation, safety, sign-in, and Discord security updates remain available.")) return;
-        try {
-            await SolcordRuntime.setPrivacyProfile(profile);
-            setStatus(profile === "strict" ? "Strict Privacy applied with a rollback snapshot." : "Standard privacy applied with a rollback snapshot.");
-        }
-        catch (error) {setStatus(error instanceof Error ? error.message : "The privacy change failed closed. Open Recovery to verify the rollback snapshot.");}
-    };
-    const checkUpdates = async () => {
-        setStatus("Checking reviewed addon and theme sources…");
-        try {
-            await Promise.all([CoreUpdater.checkForUpdate(false), PluginUpdater.checkAll(false), ThemeUpdater.checkAll(false)]);
-            setStatus("Manual update check finished. Solcord core remains pinned until an owner-controlled integrity feed is available.");
-        }
-        catch {setStatus("The manual update check did not complete. Existing files were not changed.");}
-    };
-    return <Section title="Privacy protection" summary="Optional data collection is controlled without intercepting Discord's essential traffic.">
-        <div className="solcord-privacy-command">
-            <div><p className="solcord-eyebrow">Current profile</p><strong>{state.preferences.profile === "strict" ? "Strict Privacy" : state.preferences.profile === "standard" ? "Standard" : "Custom"}</strong><p>{state.preferences.profile === "strict" ? "Verified optional reporting is blocked; unsupported categories stay visible; updates are manual." : "Some optional Discord reporting may remain available."}</p></div>
-            {state.preferences.migrationPending && <span className="solcord-status solcord-status-starting">Needs review</span>}
-        </div>
-        <div className="solcord-actions"><ActionButton tone="accent" disabled={state.preferences.profile === "strict" && !state.preferences.migrationPending} onClick={() => applyProfile("strict")}>{state.preferences.profile === "strict" && !state.preferences.migrationPending ? "Strict Privacy on" : "Use Strict Privacy"}</ActionButton><ActionButton disabled={state.preferences.profile === "standard" && !state.preferences.migrationPending} onClick={() => applyProfile("standard")}>{state.preferences.profile === "standard" && !state.preferences.migrationPending ? "Standard on" : "Use Standard"}</ActionButton><ActionButton onClick={() => checkUpdates()}>Check for updates</ActionButton></div>
-        <div className="solcord-privacy-capabilities" role="list" aria-label="Privacy capability status">{state.capabilities.map(capability => <div key={capability.dataClass} role="listitem"><span><strong>{capability.dataClass.replaceAll("-", " ")}</strong><small>{capability.summary}</small></span><span className={`solcord-privacy-state solcord-privacy-state-${capability.state.toLowerCase()}`}>{privacyCapabilityStateLabel(capability.state)}</span></div>)}</div>
-        <p className="solcord-key-hint">Discord account privacy settings are separate. Solcord reports unsupported or drifting protection honestly and never claims zero tracking without an exact-build network audit.</p>
-        {status && <p role="status" className="solcord-import-status">{status}</p>}
-        <details className="solcord-secondary-tools"><summary>Technical details</summary>{state.receiptStorage === "session-only" && <p role="status">Diagnostics are session-only because local storage is unavailable. Privacy protection is still active.</p>}<p>{state.receipts.length} content-free local decision receipt(s). Receipts contain only category, decision, coarse time, and result—never URLs, payloads, account IDs, messages, attachments, or file paths.</p></details>
     </Section>;
 }
 
@@ -1306,12 +1267,12 @@ function SessionPulse({openWorkspace, openSetup}: {openWorkspace(workspace: Solc
         ...(state.activity?.status === "attention" ? [{id: "activity", priority: 85, tone: "attention" as const, label: "Activity Bridge needs review", detail: "The bounded compatibility ledger reported attention.", action: "Inspect Activity Bridge"}] : []),
         ...(drift?.status === "failed" || drift?.status === "quarantined" ? [{id: "drift", priority: 80, tone: "attention" as const, label: "Discord adapter drift", detail: drift.detail, action: "Open diagnostics"}] : []),
         ...(state.document.onboarding.status === "pending" ? [{id: "setup", priority: 75, tone: "attention" as const, label: "Finish setup", detail: "Your saved setup is ready to continue. Nothing has changed yet.", action: "Continue"}] : []),
-        ...(state.dueReminders ? [{id: "return-later", priority: 65, tone: "attention" as const, label: "Return Later is due", detail: `${state.dueReminders} local reminder(s) are ready.`, action: "Open People"}] : []),
+        ...(state.dueReminders ? [{id: "return-later", priority: 65, tone: "attention" as const, label: "Return Later is due", detail: `${state.dueReminders} local reminder(s) are ready.`, action: "Review reminders"}] : []),
         ...(state.relationshipChanges ? [{id: "friend-watch", priority: 60, tone: "ok" as const, label: "Relationship history updated", detail: `${state.relationshipChanges} local change(s)`, action: "Open People"}] : [])
     ]);
     const signals = attentionSignals.length ? attentionSignals : [{id: "healthy", priority: 1, tone: "ok" as const, label: "All clear", detail: "No Solcord action needs attention."}];
     return <Section title="Right now">
-        <div className="solcord-pulse-list">{signals.map(signal => <article key={signal.id} className={`solcord-pulse solcord-pulse-${signal.tone}`}><div><strong>{signal.label}</strong><p>{signal.detail}</p></div>{signal.action && <ActionButton onClick={() => signal.id === "setup" ? openSetup() : openWorkspace(signal.id === "activity" ? "voice" : signal.id === "return-later" || signal.id === "friend-watch" ? "friends" : "recovery")}>{signal.action}</ActionButton>}</article>)}</div>
+        <div className="solcord-pulse-list">{signals.map(signal => <article key={signal.id} className={`solcord-pulse solcord-pulse-${signal.tone}`}><div><strong>{signal.label}</strong><p>{signal.detail}</p></div>{signal.action && <ActionButton onClick={() => signal.id === "setup" ? openSetup() : openWorkspace(signal.id === "activity" ? "voice" : signal.id === "return-later" ? "chat" : signal.id === "friend-watch" ? "friends" : "recovery")}>{signal.action}</ActionButton>}</article>)}</div>
     </Section>;
 }
 

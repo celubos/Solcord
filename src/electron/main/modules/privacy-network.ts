@@ -69,7 +69,7 @@ function loadPersistedPrivacy(): SolcordPrivacyPreferences {
     catch {return defaultStrictPrivacyPreferences();}
 }
 
-export function synchronizeNativePrivacy(value: unknown): void {
+export function synchronizeNativePrivacy(value: unknown): Pick<SolcordPrivacyPreferences, "telemetry" | "crashReporting"> {
     const requested = normalizePrivacyPreferences(value);
     const durable = loadPersistedPrivacy();
     // An addon-accessible IPC call cannot grant new outbound permissions. Only
@@ -77,6 +77,7 @@ export function synchronizeNativePrivacy(value: unknown): void {
     preferences = {...durable,
         telemetry: requested.telemetry === "block" ? "block" : durable.telemetry,
         crashReporting: requested.crashReporting === "block-optional" ? "block-optional" : durable.crashReporting};
+    return {telemetry: preferences.telemetry, crashReporting: preferences.crashReporting};
 }
 
 export function installNativePrivacyGuard(session: Session | undefined): void {

@@ -23,7 +23,7 @@ export default function VersionInfo() {
 
     const discordInfo = useMemo(() => {
         const info = getDiscordInfo(false) as string[];
-        return info.map((i: string) => <Text color={Text.Colors.MUTED} size={Text.Sizes.SIZE_12}>{i}</Text>);
+        return info.map((i: string) => <Text key={i} color={Text.Colors.MUTED} size={Text.Sizes.SIZE_12}>{i}</Text>);
     }, []);
 
     const onClick = useCallback(() => {
@@ -60,8 +60,10 @@ export default function VersionInfo() {
         if (clicks >= CLICKS_REQUIRED) return "brand";
     }, [clicks]);
 
-    return <DiscordModules.Tooltip color={color} position="top" text={tooltip}>
-        {(props: any) => <div {...props} className="bd-version-info" onClick={onClick} onMouseLeave={e => {props.onMouseLeave(e); onMouseLeave();}}>
+    return <>
+        <button type="button" className="solcord-settings-entry" onClick={() => settings.openPanel("solcord")}>Open Solcord Suite</button>
+        <DiscordModules.Tooltip color={color} position="top" text={tooltip}>
+        {(props: any) => <div {...props} className="bd-version-info" onClick={onClick} onMouseLeave={e => {props.onMouseLeave?.(e); onMouseLeave();}}>
             {discordInfo}
             <Text color={Text.Colors.MUTED} size={Text.Sizes.SIZE_12}>
                 Solcord {getCoreInfo()}
@@ -73,5 +75,6 @@ export default function VersionInfo() {
                 {t("Panels.themes")} {themeCount.total} ({themeCount.enabled} {t("Addons.isEnabled")})
             </Text>
         </div>}
-    </DiscordModules.Tooltip>;
+        </DiscordModules.Tooltip>
+    </>;
 }

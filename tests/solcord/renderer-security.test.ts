@@ -424,10 +424,10 @@ describe("Solcord renderer security contracts", () => {
         expect(stop).toContain("resources: scope.counts()");
         expect(stop).toContain("retained ownership will be retried");
 
-        const privacyStart = runtime.indexOf("#synchronizePrivacyPolicy(): void");
+        const privacyStart = runtime.indexOf("#synchronizePrivacyPolicy(): Promise<void>");
         const privacy = runtime.slice(privacyStart, runtime.indexOf("\n    #stopFakeDeafen(", privacyStart));
         expect(privacy).toContain("Solcord retained ownership and will not install a second policy");
-        expect(privacy.indexOf("return;", privacy.indexOf("catch (error)"))).toBeGreaterThan(-1);
+        expect(privacy.indexOf("return nativePolicy;", privacy.indexOf("catch (error)"))).toBeLessThan(privacy.indexOf("this.#privacyScope = new SolcordDisposalScope()"));
 
         const fakeStopStart = runtime.indexOf("#stopFakeDeafen(invalidatePending");
         const fakeStop = runtime.slice(fakeStopStart, runtime.indexOf("\n    async #startFeature(", fakeStopStart));
@@ -443,15 +443,6 @@ describe("Solcord renderer security contracts", () => {
         const helper = source("src/betterdiscord/modules/solcord/native-suite.ts");
         expect(helper).toContain("cleanup remains owned for retry");
         expect(helper).toContain("scope.own(() => store.removeChangeListener(listener), \"listener\")");
-    });
-
-    test("rewrites the packaged Solcord font to a bundled data URL before stylesheet injection", () => {
-        const core = source("src/betterdiscord/modules/core.ts");
-        const declarations = source("src/betterdiscord/types/declaration/assets.d.ts");
-        expect(core).toContain("import SolcordHankenFont from \"@styles/fonts/HankenGrotesk-variable.ttf\"");
-        expect(core).toContain("Styles.toString().replace(\"./fonts/HankenGrotesk-variable.ttf\", SolcordHankenFont)");
-        expect(core.indexOf("Styles.toString().replace")).toBeLessThan(core.indexOf("DOMManager.injectStyle(\"bd-stylesheet\", bundledStyles)"));
-        expect(declarations).toContain("declare module \"*.ttf\"");
     });
 
     test("reconciles prepared setup files before features and acknowledges only after durable settings", () => {

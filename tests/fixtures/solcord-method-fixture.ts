@@ -60,6 +60,19 @@ export function mainStartupMethodFixture(name: string, bindings: Record<string, 
     return evaluate(`(${asynchronous}function(${method.parameters.map(parameter => parameter.getText(parsed)).join(",")}) ${method.body.getText(parsed)})`, "", bindings);
 }
 
+export function settingsMethodFixture(name: string, bindings: Record<string, unknown>): FixtureMethod {
+    const parsed = source("src/betterdiscord/ui/settings.tsx", ts.ScriptKind.TSX);
+    const declaration = parsed.statements.filter(ts.isVariableStatement).flatMap(statement => [...statement.declarationList.declarations]).find(node => node.name.getText(parsed) === "SettingsRenderer");
+    const initializer = declaration?.initializer;
+    const owner = initializer && ts.isNewExpression(initializer) && ts.isClassExpression(initializer.expression) ? initializer.expression : undefined;
+    const method = owner?.members.find(node => ts.isMethodDeclaration(node) && node.name.getText(parsed) === name) as ts.MethodDeclaration | undefined;
+    if (!method?.body) throw new Error(`Production settings method is missing: ${name}`);
+    const js = ts.transpileModule(`const implementation = function(${method.parameters.map(parameter => parameter.getText(parsed)).join(",")}) ${method.body.getText(parsed)};`, {
+        compilerOptions: {target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React, jsxFactory: "React.createElement", jsxFragmentFactory: "React.Fragment"}, fileName: "settings-method.tsx"
+    }).outputText;
+    return new Script(`(function(${Object.keys(bindings).join(",")}) {${js}\nreturn implementation;})`).runInThisContext()(...Object.values(bindings));
+}
+
 export function nativeIpcHandlerFixture(name: string, bindings: Record<string, unknown>): FixtureMethod {
     const parsed = source("src/electron/main/modules/ipc.ts");
     const declarations = parsed.statements.filter(ts.isVariableStatement);
@@ -67,6 +80,30 @@ export function nativeIpcHandlerFixture(name: string, bindings: Record<string, u
     if (!handler) throw new Error(`Production IPC handler is missing: ${name}`);
     const dependencies = declarations.filter(statement => statement.declarationList.declarations.some(declaration => declaration.name.getText(parsed) === "SAFE_WEB_PREFERENCES")).map(statement => statement.getText(parsed)).join("\n");
     return evaluate(handler.getText(parsed), dependencies, bindings);
+}
+
+export function registeredNativeIpcHandlerFixture(event: string, bindings: Record<string, unknown>): FixtureMethod {
+    const parsed = source("src/electron/main/modules/ipc.ts");
+    let handler: ts.Expression | undefined;
+    const visit = (node: ts.Node) => {
+        if (ts.isCallExpression(node) && node.expression.getText(parsed) === "ipc.handle" && node.arguments[0]?.getText(parsed) === `IPCEvents.${event}`) handler = node.arguments[1];
+        ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    if (!handler) throw new Error(`Production IPC registration is missing: ${event}`);
+    return evaluate(handler.getText(parsed), "", bindings);
+}
+
+export function rendererIpcMethodFixture(name: string, bindings: Record<string, unknown>): FixtureMethod {
+    const parsed = source("src/betterdiscord/modules/ipc.ts");
+    let method: ts.MethodDeclaration | undefined;
+    const visit = (node: ts.Node) => {
+        if (ts.isClassExpression(node) && node.name?.text === "IPCRenderer") method = node.members.find(member => ts.isMethodDeclaration(member) && member.name.getText(parsed) === name) as ts.MethodDeclaration | undefined;
+        ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    if (!method?.body) throw new Error(`Production renderer IPC method is missing: ${name}`);
+    return evaluate(`(function(${method.parameters.map(parameter => parameter.getText(parsed)).join(",")}) ${method.body.getText(parsed)})`, "", bindings);
 }
 
 export function modalMethodFixture(name: string, bindings: Record<string, unknown>): FixtureMethod {

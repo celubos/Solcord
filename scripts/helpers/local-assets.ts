@@ -5,6 +5,7 @@ import path from "node:path";
 
 export function solcordLocalAssets(root: string): Array<{source: string; target: string;}> {
     const assets = [{source: path.join(root, "assets/catalog/solcord-browsing.generated.json"), target: "catalog/index.json"},
+        {source: path.join(root, "src/betterdiscord/styles/fonts/HankenGrotesk-variable.ttf"), target: "fonts/HankenGrotesk-variable.ttf"},
         {source: path.join(root, "node_modules/monaco-editor/LICENSE"), target: "editor/monaco/LICENSE"}];
     const sourceRoot = path.join(root, "node_modules/monaco-editor/min/vs");
     const walk = (directory: string) => {

@@ -467,7 +467,7 @@ export default class IPCMain {
             });
             ipc.handle(IPCEvents.PRIVACY_POLICY_UPDATE, (event, policy) => {
                 requireTrustedSolcordSender(event);
-                synchronizeNativePrivacy(policy);
+                return synchronizeNativePrivacy(policy);
             });
             ipc.handle(IPCEvents.EDITOR_SETTINGS_UPDATE, updateSettings);
             ipc.handle(IPCEvents.GET_ALLOW_PRELOAD_OVERRIDE, getAllowPreloadOverride);

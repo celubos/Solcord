@@ -14,7 +14,9 @@ test("the native guard starts strict before any renderer and updates without col
     installNativePrivacyGuard(session as any); installNativePrivacyGuard(session as any); expect(calls).toBe(1);
     let canceled = false;
     handler({url: "https://discord.com/api/v9/science"}, (result: {cancel: boolean;}) => {canceled = result.cancel;}); expect(canceled).toBe(true);
-    synchronizeNativePrivacy(applyPrivacyProfile(defaultStrictPrivacyPreferences(), "standard", 42));
+    const acknowledgement = synchronizeNativePrivacy(applyPrivacyProfile(defaultStrictPrivacyPreferences(), "standard", 42));
+    expect(acknowledgement).toEqual({telemetry: "block", crashReporting: "block-optional"});
+    expect(Object.keys(acknowledgement).sort()).toEqual(["crashReporting", "telemetry"]);
     handler({url: "https://discord.com/api/v9/science"}, (result: {cancel: boolean;}) => {canceled = result.cancel;}); expect(canceled).toBe(true);
     synchronizeNativePrivacy(defaultStrictPrivacyPreferences());
 });

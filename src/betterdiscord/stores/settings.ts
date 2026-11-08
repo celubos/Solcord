@@ -51,6 +51,15 @@ class SettingsManager extends Store {
     state: State = {};
     collections: SettingsCollection[] = [];
     panels: SettingsPanel[] = [];
+    private panelOpener?: (id: string) => boolean;
+
+    setPanelOpener(opener: (id: string) => boolean) {
+        this.panelOpener = opener;
+    }
+
+    openPanel(id: string): boolean {
+        return this.panelOpener?.(id) ?? false;
+    }
 
     initialize() {
         this.registerCollection("settings", "Settings", SettingsConfig);

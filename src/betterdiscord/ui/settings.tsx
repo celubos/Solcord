@@ -28,11 +28,13 @@ import ContextMenuPatcher from "@api/contextmenu";
 import type {GroupOnChange} from "./settings/group";
 import {normalizeSettingsSearchTerms, resolveAddonDisplayNames} from "./settings/addon-names";
 import Logger from "@common/logger";
+import ModalRoot from "./modals/root";
+import ErrorBoundary from "./errorboundary";
 import type {Webpack} from "@typed/discord";
 
 const ContextMenu = new ContextMenuPatcher();
 
-const getUserSettings = () => getByKeys<any>(["openUserSettings", "USER_SETTINGS_MODAL_KEY"], {firstId: 840065, cacheId: "core-settings-usersettings"});
+const getUserSettings = () => getByKeys<any>(["openUserSettings"], {firstId: 840065, cacheId: "core-settings-usersettings"});
 
 const SettingsRenderer = new class SettingsRenderer {
     private initialized = false;
@@ -44,6 +46,7 @@ const SettingsRenderer = new class SettingsRenderer {
     private retryQueued = false;
     private disposed = false;
     private activeController?: AbortController;
+    private controlCenterModal?: string | number;
     get isAvailable() {return this.initialized;}
     private readonly onPageHide = () => {
         this.disposed = true;
@@ -78,6 +81,9 @@ const SettingsRenderer = new class SettingsRenderer {
 
     initialize(): Promise<boolean> {
         if (this.disposed) return Promise.resolve(false);
+        // The product-owned entry must remain available even when Discord's
+        // private settings layout has not loaded or changed shape.
+        Settings.setPanelOpener(id => this.openSettingsPage(id));
         if (this.initialized) return Promise.resolve(true);
         if (this.initializing) return this.initializing;
         this.watchLateNavigation();
@@ -459,11 +465,44 @@ const SettingsRenderer = new class SettingsRenderer {
         this.versionPatched = typeof cancel === "function";
     }
 
-    public openSettingsPage(key: string) {
+    public openSettingsPage(key: string): boolean {
+        if (key === "solcord") return this.openControlCenter();
         const UserSettings = getUserSettings();
-        UserSettings?.openUserSettings?.(`betterdiscord_${key === "customcss" ? "customcss_tab" : key}_panel`, {
+        if (typeof UserSettings?.openUserSettings !== "function") return false;
+        UserSettings.openUserSettings(`betterdiscord_${key === "customcss" ? "customcss_tab" : key}_panel`, {
             section: key
         });
+        return true;
+    }
+
+    private openControlCenter(): boolean {
+        const Panel = Settings.panels.find(panel => panel.id === "solcord")?.element;
+        if (!Panel) return false;
+        if (this.controlCenterModal !== undefined) return true;
+        const retired = () => {this.controlCenterModal = undefined;};
+        try {
+            this.controlCenterModal = Modals.openModal(rawProps => {
+                const props = (rawProps ?? {}) as {onClose?(): void; transitionState?: number;};
+                const close = () => {retired(); props.onClose?.();};
+                return <ModalRoot className="solcord-control-center-dialog" transitionState={props.transitionState}>
+                    <div className="solcord-control-center-dialog-header">
+                        <h2>Solcord Suite</h2>
+                        <button type="button" onClick={close} aria-label="Close Solcord settings">Close</button>
+                    </div>
+                    <div className="solcord-control-center-dialog-content">
+                        <ErrorBoundary id="SolcordControlCenter" name="Solcord settings" fallback={<p role="alert">Solcord could not render this page. Close and reopen settings to retry.</p>}>
+                            <Panel />
+                        </ErrorBoundary>
+                    </div>
+                </ModalRoot>;
+            }, {modalKey: "solcord-control-center", onCloseCallback: retired});
+            return true;
+        }
+        catch {
+            retired();
+            toasts.error("Solcord settings could not open. Please retry after Discord finishes loading.", {forceShow: true});
+            return false;
+        }
     }
 
     private get DISCORD_USER_SETTINGS_MODAL_KEY(): string {

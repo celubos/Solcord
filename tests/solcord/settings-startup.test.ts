@@ -11,6 +11,7 @@ function fixture() {
     const timers = new Map<number,() => void>(); let timerId = 0;
     const patches: string[] = []; const warnings: unknown[][] = [];
     const settingsCalls: unknown[][] = []; const closes: string[] = [];
+    const openers: Array<(id: string) => boolean> = [];
     const lateListeners = new Set<(...args: any[]) => unknown>();
     const documentEvents = new EventTarget();
     const logger = {warn: (...args: unknown[]) => warnings.push(args)};
@@ -18,6 +19,7 @@ function fixture() {
     const react = {createContext: (value: unknown) => ({value}), createElement: (type: unknown, props: unknown) => ({type, props})};
     const deps: Record<string, unknown> = {
         "react": react,
+        "@stores/settings": {setPanelOpener(opener: (id: string) => boolean) {openers.push(opener);}},
         "@api/contextmenu": class ContextMenu {},
         "@common/logger": logger,
         "@modules/discordmodules": {get Layout() {return state.layout;}},
@@ -80,6 +82,7 @@ warnings,
 timers,
 settingsCalls,
 closes,
+openers,
 lateListeners,
         expire: () => {for (const callback of [...timers.values()]) callback();},
         publish: (exports: object) => {for (const callback of [...lateListeners]) callback(exports, {exports, id: "late-settings-fixture"});},
@@ -90,6 +93,7 @@ lateListeners,
 describe("bounded settings registration and delayed module arrival", () => {
     test("missing root discovery expires, resolves false, and releases initialization ownership for retry", async () => {
         const f = fixture(); const first = f.renderer.initialize();
+        expect(f.openers).toHaveLength(1); expect(typeof f.openers[0]).toBe("function");
         expect(f.renderer.initialize()).toBe(first);
         f.expire(); expect(await first).toBe(false); expect(f.timers.size).toBe(0);
         f.available(); expect(await f.renderer.initialize()).toBe(true);
@@ -122,8 +126,8 @@ describe("bounded settings registration and delayed module arrival", () => {
     test("settings open and close resolve a module that was absent at import time", () => {
         const f = fixture();
         f.state.userSettings = {USER_SETTINGS_MODAL_KEY: "native-modal", openUserSettings: (...args: unknown[]) => f.settingsCalls.push(args)};
-        f.renderer.openSettingsPage("solcord"); f.renderer.closeUserSettingsModal();
-        expect(f.settingsCalls).toEqual([["betterdiscord_solcord_panel", {section: "solcord"}]]);
+        f.renderer.openSettingsPage("customcss"); f.renderer.closeUserSettingsModal();
+        expect(f.settingsCalls).toEqual([["betterdiscord_customcss_tab_panel", {section: "customcss"}]]);
         expect(f.closes).toEqual(["native-modal"]);
     });
 

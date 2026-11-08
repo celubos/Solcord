@@ -9,7 +9,7 @@ export interface SolcordProductIdentity {
 export const SOLCORD_PRODUCT_IDENTITY = Object.freeze({
     product: "Solcord",
     numericVersion: "2.0.1",
-    candidateLabel: "v2.0.1-rc.3"
+    candidateLabel: "v2.0.1-rc.4"
 } satisfies SolcordProductIdentity);
 
 export function assertSolcordPackageVersion(version: string): void {

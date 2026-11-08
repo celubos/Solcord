@@ -8,6 +8,7 @@ export function resolveLocalAsset(url: string, root: string): string | null {
     const request = new URL(url);
     if (request.protocol !== "solcord:" || request.username || request.password || request.port || request.search) return null;
     if (request.hostname === "catalog" && request.pathname === "/index.json") return path.join(root, "catalog", "index.json");
+    if (request.hostname === "fonts" && request.pathname === "/HankenGrotesk-variable.ttf") return path.join(root, "fonts", "HankenGrotesk-variable.ttf");
     if (request.hostname !== "editor" || !request.pathname.startsWith("/monaco/vs/")) return null;
     const segments = request.pathname.slice(1).split("/").map(segment => decodeURIComponent(segment));
     if (segments.some(segment => !segment || segment === "." || segment === ".." || /[\\/:\0]/.test(segment))) return null;

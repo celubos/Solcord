@@ -47,7 +47,7 @@ import {describeSolcordStreamShieldResolution, normalizeSolcordStreamShieldSetti
 import {SOLCORD_V2_REPLACEMENT_MANIFEST, solcordV2ArchiveReceiptMatchesPreview, solcordV2QuarantineIdsForArchivedFiles} from "@common/solcord/v2-replacement-manifest";
 import {resolveSolcordPerformancePolicy} from "@common/solcord/product";
 import {planSolcordPreferenceEffects} from "@common/solcord/preference-effects";
-import {applyPrivacyProfile, boundPrivacyReceipts, createPrivacyDecisionReceipt} from "@common/solcord/privacy";
+import {applyPrivacyProfile, boundPrivacyReceipts, createPrivacyDecisionReceipt, type SolcordPrivacyPreferences} from "@common/solcord/privacy";
 import {resolvePrivacyMethodTarget, SolcordPrivacyPolicyAdapter, type PrivacyMethodSpec} from "./privacy-policy";
 import {setSolcordAutomaticUpdatesAllowed} from "./privacy-runtime-state";
 import {strictCommunityAddonActivationDecision} from "./addon-outbound-policy";
@@ -66,6 +66,11 @@ export interface AddonIntegrityStatus {
     phase: "pending" | "startup" | "pre-setup" | "post-setup" | "pre-rollback" | "toggle" | "retry" | "failed";
     summary: AddonIntegritySummary;
     records: AddonIntegrityRecord[];
+}
+
+export interface NativePrivacyPolicyStatus {
+    state: "unverified" | "pending" | "applied" | "failed";
+    profile?: PrivacyProfile;
 }
 
 interface SolcordPrivateStorageStatus {
@@ -397,6 +402,8 @@ class SolcordRuntimeStore extends Store {
     #privacyReceipts: PrivacyDecisionReceipt[] = [];
     #privacyReceiptStorage: "unverified" | "persistent" | "session-only" = "unverified";
     #privacySequence = 0;
+    #privacyNativeGeneration = 0;
+    #privacyNativeStatus: NativePrivacyPolicyStatus = {state: "unverified"};
     #strictCommunityPolicyBusy = false;
     #firstSetupIntentId?: string;
 
@@ -471,11 +478,13 @@ class SolcordRuntimeStore extends Store {
         if (this.#startPromise) return this.#startPromise;
         const task = (async () => {
             await this.initialize();
-            const privacyReady = await this.#startupPhases!.run("privacy-outbound", () => {
+            const privacyReady = await this.#startupPhases!.run("privacy-outbound", async () => {
                 // Required privacy policy installs before optional addon traffic.
-                // The lookups are structural and bounded; failures remain visible
-                // as degraded capability records rather than blocking Discord.
-                this.#synchronizePrivacyPolicy();
+                // Native acknowledgement gates activation; optional renderer
+                // adapter misses remain separate capability records.
+                await this.#synchronizePrivacyPolicy();
+                const profile = SolcordSettings.snapshot().productPreferences.privacy.profile;
+                if (this.#privacyNativeStatus.state !== "applied" || this.#privacyNativeStatus.profile !== profile) throw new Error("NativePrivacyPolicyUnconfirmed");
                 return true;
             });
             this.#started = privacyReady === true;
@@ -1023,6 +1032,10 @@ class SolcordRuntimeStore extends Store {
         return this.#privacyReceiptStorage;
     }
 
+    privacyNativePolicyStatus(): NativePrivacyPolicyStatus {
+        return {...this.#privacyNativeStatus};
+    }
+
     canActivateCommunityAddon(addon: {filename: string; fileContent?: string; sourceSha256?: string;}): boolean {
         if (SolcordSettings.snapshot().productPreferences.privacy.profile !== "strict") return true;
         return strictCommunityAddonActivationDecision({
@@ -1131,7 +1144,10 @@ class SolcordRuntimeStore extends Store {
 
     async setPrivacyProfile(profile: PrivacyProfile): Promise<string | undefined> {
         const current = SolcordSettings.snapshot().productPreferences;
-        if (current.privacy.profile === profile && !current.privacy.migrationPending) return;
+        if (current.privacy.profile === profile && !current.privacy.migrationPending) {
+            await this.#synchronizePrivacyPolicy();
+            return;
+        }
         const snapshot = SolcordSettings.capture(`Before applying ${profile} privacy`, {
             plugins: this.#enabledAddonFiles(PluginManager),
             themes: this.#enabledAddonFiles(ThemeManager)
@@ -1169,14 +1185,14 @@ class SolcordRuntimeStore extends Store {
                 }
             }
             this.#strictCommunityPolicyBusy = false;
-            this.#synchronizePrivacyPolicy();
+            await this.#synchronizePrivacyPolicy();
             this.emitChange();
             return snapshot.id;
         }
         catch (error) {
             const failures = this.#restorePrivacyRollback(disabledCommunity, snapshot.id);
             this.#strictCommunityPolicyBusy = false;
-            this.#synchronizePrivacyPolicy();
+            await this.#synchronizePrivacyPolicy();
             if (failures.length) throw this.#privacyRollbackError(snapshot.id, failures);
             throw error;
         }
@@ -3490,11 +3506,30 @@ class SolcordRuntimeStore extends Store {
         }
     }
 
-    #synchronizePrivacyPolicy(): void {
-        const preferences = SolcordSettings.snapshot().productPreferences.privacy;
-        void Promise.resolve().then(() => IPC.synchronizePrivacyPolicy(preferences)).catch(error => {
-            Logger.warn("Solcord", `Native optional-network policy synchronization failed (${errorName(error)}); the previous native policy remains in effect.`);
+    #synchronizeNativePrivacyPolicy(preferences: SolcordPrivacyPreferences): Promise<void> {
+        const generation = ++this.#privacyNativeGeneration;
+        const notify = () => {
+            try {this.emitChange();}
+            catch (error) {Logger.warn("Solcord", `Privacy status observer failed (${errorName(error)}); native policy synchronization continues.`);}
+        };
+        this.#privacyNativeStatus = {state: "pending", profile: preferences.profile};
+        notify();
+        return boundedSolcordStartupOperation(Promise.resolve().then(() => IPC.synchronizePrivacyPolicy(preferences))).then(acknowledgement => {
+            if (generation !== this.#privacyNativeGeneration) return;
+            if (acknowledgement?.telemetry !== preferences.telemetry || acknowledgement?.crashReporting !== preferences.crashReporting) throw new Error("NativePrivacyPolicyMismatch");
+            this.#privacyNativeStatus = {state: "applied", profile: preferences.profile};
+            notify();
+        }).catch(error => {
+            Logger.warn("Solcord", `Native optional-network policy could not be confirmed (${errorName(error)}); review the effective protection status.`);
+            if (generation !== this.#privacyNativeGeneration) return;
+            this.#privacyNativeStatus = {state: "failed", profile: preferences.profile};
+            notify();
         });
+    }
+
+    #synchronizePrivacyPolicy(): Promise<void> {
+        const preferences = SolcordSettings.snapshot().productPreferences.privacy;
+        const nativePolicy = this.#synchronizeNativePrivacyPolicy(preferences);
         setSolcordAutomaticUpdatesAllowed(preferences.updates === "automatic");
         if (SolcordSettings.snapshot().productPreferences.privacy.externalProviders !== "approved-only") this.#nativeSuite?.cancelExternalTranslations();
         try {this.#privacyScope.dispose();}
@@ -3505,7 +3540,7 @@ class SolcordRuntimeStore extends Store {
                 ? record
                 : {...record, state: "Degraded", summary: detail});
             this.emitChange();
-            return;
+            return nativePolicy;
         }
         this.#privacyScope = new SolcordDisposalScope();
 
@@ -3653,6 +3688,7 @@ class SolcordRuntimeStore extends Store {
         this.#recordPrivacyDecision(createPrivacyDecisionReceipt(0, Date.now(), "solcord-updates", preferences.updates === "manual" ? "block" : "allow", "applied"));
         this.#recordPrivacyDecision(createPrivacyDecisionReceipt(0, Date.now(), "community-addons", communityAttentionCount ? "hold" : "allow", communityAttentionCount ? "declaration-required" : "not-applicable"));
         this.#recordPrivacyDecision(createPrivacyDecisionReceipt(0, Date.now(), "external-providers", externalConfigured ? "hold" : "block", externalConfigured ? "declaration-required" : "not-applicable"));
+        return nativePolicy;
     }
 
     #stopFakeDeafen(invalidatePending = true): void {
