@@ -10,6 +10,7 @@ import Settings, {normalizeSolcordDocument} from "../../src/betterdiscord/module
 import {applyPrivacyProfile, defaultStrictPrivacyPreferences} from "../../src/common/solcord/privacy";
 import {SolcordDisposalScope} from "../../src/betterdiscord/modules/solcord/disposal";
 import {resolvePrivacyMethodTarget, SolcordPrivacyPolicyAdapter} from "../../src/betterdiscord/modules/solcord/privacy-policy";
+import {discordAnalyticsMethods} from "../../src/betterdiscord/modules/solcord/do-not-track";
 import {setSolcordAutomaticUpdatesAllowed, solcordAutomaticUpdatesAllowed} from "../../src/betterdiscord/modules/solcord/privacy-runtime-state";
 import {boundedSolcordStartupOperation} from "../../src/betterdiscord/modules/solcord/startup-phases";
 import {runtimeMethodFixture} from "../fixtures/solcord-method-fixture";
@@ -80,8 +81,10 @@ Logger: logger,
 SolcordPrivacyPolicyAdapter,
 resolvePrivacyMethodTarget,
     getByKeys: () => undefined,
+    getModule: () => undefined,
 getStore: () => undefined,
 resolveDiscordAnalyticsTrack: () => undefined,
+    discordAnalyticsMethods,
     DiscordModules: {},
 Patcher: {},
 PluginManager: manager,

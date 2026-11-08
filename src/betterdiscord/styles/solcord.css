@@ -38,15 +38,28 @@
     --sc-danger: var(--solcord-coral);
 }
 
-.solcord-panel { position: relative; isolation: isolate; box-sizing: border-box; container: solcord-panel / inline-size; width: min(100%, 1180px); min-width: 0; max-width: 100%; padding: 0 clamp(20px, 2.8vw, 34px) 52px; color: var(--header-primary, var(--text-normal)); background: var(--sc-surface-0); font-family: var(--sc-font-body); font-kerning: normal; font-synthesis: none; line-height: 1.45; text-rendering: optimizelegibility; --sc-text: var(--header-primary, var(--text-normal)); --sc-muted: var(--text-muted, var(--sc-app-muted, #949BA4)); --sc-border: color-mix(in srgb, var(--header-primary, var(--text-normal)) 18%, transparent); --sc-border-strong: color-mix(in srgb, var(--header-primary, var(--text-normal)) 34%, transparent); }
+/* Resolve host aliases at the owned surface, where Discord's theme tokens live.
+ * Modern clients no longer guarantee the legacy text and background names. */
+.solcord-panel,
+.solcord-control-center-dialog {
+    --sc-surface-0: var(--background-base-low, var(--background-primary, canvas));
+    --sc-surface-1: var(--background-surface-high, var(--background-secondary, var(--sc-surface-0)));
+    --sc-surface-2: var(--background-surface-higher, var(--background-tertiary, var(--sc-surface-1)));
+    --sc-text: var(--text-strong, var(--text-default, var(--header-primary, var(--text-normal, canvastext))));
+    --sc-muted: var(--text-muted, var(--text-secondary, var(--sc-text)));
+    --sc-border: color-mix(in srgb, var(--sc-text) 18%, transparent);
+    --sc-border-strong: color-mix(in srgb, var(--sc-text) 34%, transparent);
+}
+
+.solcord-panel { position: relative; isolation: isolate; box-sizing: border-box; container: solcord-panel / inline-size; width: min(100%, 1180px); min-width: 0; max-width: 100%; padding: 0 clamp(20px, 2.8vw, 34px) 52px; color: var(--sc-text); background: var(--sc-surface-0); font-family: var(--sc-font-body); font-kerning: normal; font-synthesis: none; line-height: 1.45; text-rendering: optimizelegibility; }
 
 .solcord-settings-entry { width: 100%; min-height: 36px; margin: 10px 0; padding: 8px 10px; color: var(--interactive-text-default, var(--text-normal)); background: var(--background-modifier-hover); border: 1px solid var(--border-subtle, #555555); border-radius: 4px; font: inherit; text-align: left; cursor: pointer; }
 .solcord-settings-entry:hover { background: var(--background-modifier-active); }
 .solcord-settings-entry:focus-visible { outline: 2px solid var(--sc-focus, #4ECDC4); outline-offset: 2px; }
-.solcord-control-center-dialog { width: min(1120px, calc(100vw - 48px)); height: min(860px, calc(100vh - 80px)); max-height: calc(100vh - 80px); overflow: hidden; background: var(--background-base-low, var(--background-primary)); }
+.solcord-control-center-dialog { width: min(1120px, calc(100vw - 48px)); height: min(860px, calc(100vh - 80px)); max-height: calc(100vh - 80px); overflow: hidden; color: var(--sc-text); background: var(--sc-surface-0); }
 .solcord-control-center-dialog-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--border-subtle, #555555); }
-.solcord-control-center-dialog-header h2 { margin: 0; font: 600 16px var(--font-primary, sans-serif); color: var(--header-primary, var(--text-normal)); }
-.solcord-control-center-dialog-header button { min-height: 32px; padding: 6px 12px; color: var(--text-normal); background: var(--background-modifier-hover); border: 1px solid var(--border-subtle, #555555); border-radius: 4px; cursor: pointer; }
+.solcord-control-center-dialog-header h2 { margin: 0; font: 600 16px var(--font-primary, sans-serif); color: var(--sc-text); }
+.solcord-control-center-dialog-header button { min-height: 32px; padding: 6px 12px; color: var(--sc-text); background: var(--interactive-background-hover, var(--background-modifier-hover, transparent)); border: 1px solid var(--border-subtle, #555555); border-radius: 4px; cursor: pointer; }
 .solcord-control-center-dialog-header button:focus-visible { outline: 2px solid var(--sc-focus, #4ECDC4); outline-offset: 2px; }
 .solcord-control-center-dialog-content { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
 .solcord-panel.solcord-density-compact { --sc-space-3: 9px; --sc-space-4: 12px; --sc-space-5: 18px; }
@@ -275,7 +288,7 @@ html:not([data-solcord-mode="follow-discord"])[data-solcord-mode] #app-mount :is
     letter-spacing: -0.025em;
 }
 
-html:not([data-solcord-mode="follow-discord"])[data-solcord-mode] .solcord-panel {
+html:not([data-solcord-mode="follow-discord"])[data-solcord-mode] :is(.solcord-panel, .solcord-control-center-dialog) {
     --sc-surface-0: var(--sc-app-surface-0);
     --sc-surface-1: var(--sc-app-surface-1);
     --sc-surface-2: var(--sc-app-surface-2);

@@ -12,7 +12,7 @@ import ThemeManager from "@modules/thememanager";
 import SettingsRenderer from "@ui/settings";
 import Modals from "@ui/modals";
 import DiscordModules from "@modules/discordmodules";
-import {Filters, getByKeys, getLazy, getLazyByKeys, getLazyBySource, getStore, getWithKey} from "@webpack";
+import {Filters, getByKeys, getLazy, getLazyByKeys, getLazyBySource, getModule, getStore, getWithKey} from "@webpack";
 
 import type {PrivacyCapabilityRecord, PrivacyDecisionReceipt, PrivacyProfile, SolcordCuratedAddonState, SolcordMaturity, SolcordModuleHealth, SolcordModuleId, SolcordPowerExperimentId} from "./contracts";
 import {SolcordDisposalScope} from "./disposal";
@@ -30,7 +30,7 @@ import {canonicalizeSolcordProviderMigrationPlan, captureExactAddonStates, commu
 import {resolveSolcordSetupPlan} from "@common/solcord/setup-catalog";
 import {InvisibleTypingAdapter} from "./invisible-typing";
 import {DoubleClickReplyFeature, type DoubleClickReplyAdapter, type DoubleClickReplyContext, type DoubleClickReplyTarget} from "./double-click-reply";
-import {DoNotTrackAdapter, resolveDiscordAnalyticsTrack, validateDiscordAnalyticsTrack} from "./do-not-track";
+import {DoNotTrackAdapter, discordAnalyticsMethods, resolveDiscordAnalyticsTrack, type AnalyticsMethodTarget} from "./do-not-track";
 import {applySolcordFakeDeafenConsentTransition, SolcordFakeDeafenButton, SolcordFakeDeafenController, type SolcordFakeDeafenStatus, type SolcordGatewaySocket} from "./fake-deafen";
 import {normalizeDiscordRelationships, planSolcordFriendWatchNotices, reconcileSolcordRelationships, SolcordFriendWatchAccountBarrier, SolcordFriendWatchJournal, type SolcordFriendWatchNoticeState, type SolcordOwnerRelationshipAction, type SolcordRelationshipEvent, type SolcordRelationshipSnapshot} from "@common/solcord/friend-watch";
 import {inspectSolcordDomain, SolcordDomainMemory, type SolcordDomainDecision, type SolcordDomainMemoryRecord, type SolcordDomainRisk} from "@common/solcord/domain-memory";
@@ -2672,15 +2672,11 @@ class SolcordRuntimeStore extends Store {
             results.DoNotTrack = communityResult("DoNotTrack");
         }
         else {
-            const analyticsContainer = getByKeys<Record<string, unknown>>(["AnalyticEventConfigs"]);
+            const analyticsContainer = getModule<Record<string, unknown>>(candidate => Boolean(resolveDiscordAnalyticsTrack(candidate)), {firstId: 129230, cacheId: "solcord-analytics-container", searchDefault: false});
             const adapter = new DoNotTrackAdapter({
                 scope,
                 patcher: Patcher,
-                methods: [{
-                    key: "track",
-                    lookup: () => resolveDiscordAnalyticsTrack(analyticsContainer),
-                    validate: target => validateDiscordAnalyticsTrack(analyticsContainer, target)
-                }],
+                methods: discordAnalyticsMethods(analyticsContainer),
                 getSettings: () => ({enabled: true})
             });
             if (adapter.start()) {
@@ -2688,7 +2684,7 @@ class SolcordRuntimeStore extends Store {
                 PluginDoctor.recordSuccessfulStart(solcordBuiltInDoctorId("DoNotTrack"));
             }
             else {
-                const reason = "Discord analytics lookup failed structural validation; Do Not Track stayed off.";
+                const reason = "Full analytics coverage is unavailable because an emitter is missing or cannot be safely patched. Existing Privacy protection remains in effect.";
                 results.DoNotTrack = {enabled: false, provider: "off", reason};
                 PluginDoctor.recordCapabilityMiss(solcordBuiltInDoctorId("DoNotTrack"));
             }
@@ -3544,8 +3540,7 @@ class SolcordRuntimeStore extends Store {
         }
         this.#privacyScope = new SolcordDisposalScope();
 
-        const analyticsContainer = getByKeys<Record<string, unknown>>(["AnalyticEventConfigs"]);
-        const analyticsTarget = resolveDiscordAnalyticsTrack(analyticsContainer);
+        const analyticsContainer = getModule<Record<string, unknown>>(candidate => Boolean(resolveDiscordAnalyticsTrack(candidate)), {firstId: 129230, cacheId: "solcord-analytics-container", searchDefault: false});
         const crashModule = getByKeys<Record<string, unknown>>(["captureException", "captureMessage"]);
         const nativeProcessUtils = (globalThis as typeof globalThis & {DiscordNative?: {processUtils?: Record<string, unknown>;};}).DiscordNative?.processUtils;
         const runningGameStore = getStore("RunningGameStore") as unknown as Record<string, unknown> | undefined;
@@ -3631,14 +3626,14 @@ class SolcordRuntimeStore extends Store {
             preferences: () => SolcordSettings.snapshot().productPreferences.privacy,
             receipt: receipt => this.#recordPrivacyDecision(receipt),
             specs: [
-                {
-                    id: "discord-analytics-track",
-                    dataClass: "telemetry",
-                    key: "track",
-                    lookup: () => analyticsTarget?.module,
-                    validate: candidate => candidate.module === analyticsTarget?.module && candidate.key === "track" && validateDiscordAnalyticsTrack(analyticsContainer, candidate),
-                    blockedValue: () => undefined
-                },
+                ...discordAnalyticsMethods(analyticsContainer).map(method => ({
+                    id: `discord-analytics-${method.key}`,
+                    dataClass: "telemetry" as const,
+                    key: method.key,
+                    lookup: () => (method.lookup() as AnalyticsMethodTarget | undefined)?.module,
+                    validate: method.validate,
+                    blockedValue: method.blockedValue ?? (() => undefined)
+                })),
                 {
                     id: "optional-crash-exception",
                     dataClass: "crash-reporting",

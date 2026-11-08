@@ -4,7 +4,9 @@ import {describe, expect, test} from "bun:test";
 
 import {
     DoNotTrackAdapter,
+    discordAnalyticsMethods,
     resolveDiscordAnalyticsTrack,
+    type AnalyticsMethodTarget,
     type AnalyticsMethodSpec,
     type AnalyticsPatchCallback,
     type DoNotTrackPatchAdapter,
@@ -12,6 +14,8 @@ import {
     validateDiscordAnalyticsTrack
 } from "../../src/betterdiscord/modules/solcord/do-not-track";
 import {SolcordDisposalScope} from "../../src/betterdiscord/modules/solcord/disposal";
+import {SolcordPrivacyPolicyAdapter} from "../../src/betterdiscord/modules/solcord/privacy-policy";
+import {applyPrivacyProfile, defaultStrictPrivacyPreferences} from "../../src/common/solcord/privacy";
 
 
 type AnalyticsModule = Record<string, unknown> & {
@@ -88,6 +92,52 @@ function createHarness(initial: DoNotTrackSettings = {enabled: true}) {
     };
 }
 
+function currentAnalyticsContainer(analytics: Record<string, unknown>, metadata = typeof analytics.trackWithMetadata === "function" ? analytics.trackWithMetadata : () => "metadata") {
+    Object.assign(analytics, {expandEventProperties() {}, setSystemAccessibilityFeatures() {}});
+    const container = {
+        "lG": {
+            app_opened: {throttlePeriod: 300_000, throttleKeys: () => []},
+            app_background: {throttlePeriod: 120_000, throttleKeys: () => []}
+        },
+        addExtraAnalyticsDecorator() {},
+        "default": analytics
+    };
+    Object.defineProperty(container, "M$", {enumerable: true, get: () => metadata});
+    return container;
+}
+
+function convergenceHarness() {
+    const harness = createHarness();
+    const emitted: unknown[] = [];
+    const pending: Array<Promise<void>> = [];
+    let sequence = 0;
+    const handlers = {
+        handleConnectionOpen() {},
+handleConnectionClosed() {},
+handleFingerprint() {},
+handleSetAnalyticsToken() {},
+        handleTrack(action: {event: string; properties: unknown; resolve(): void;}) {
+            emitted.push({event: action.event, properties: action.properties, client_track_timestamp: Date.now(), client_heartbeat_session_id: "synthetic", event_sequence_number: ++sequence});
+            action.resolve();
+            return false;
+        }
+    };
+    const dispatch = (event: string, properties: unknown) => {
+        const promise = new Promise<void>(resolve => {handlers.handleTrack({event, properties, resolve});});
+        pending.push(promise);
+        return promise;
+    };
+    const analytics = {
+        trackMaker() {return dispatch;},
+analyticsTrackingStoreMaker() {},
+AnalyticsActionHandlers: handlers,
+        track(event: string, properties: unknown) {return dispatch(event, properties);}
+    };
+    const metadata = (event: string, properties: unknown) => {void dispatch(event, properties);};
+    const container = currentAnalyticsContainer(analytics, metadata);
+    return {harness, emitted, pending, handlers, analytics, container, metadata};
+}
+
 describe("Solcord Do Not Track adapter", () => {
     test("resolves only the anchored Discord analytics export and exact track method", () => {
         const analytics = {track() {return "sent";}};
@@ -99,6 +149,148 @@ describe("Solcord Do Not Track adapter", () => {
         expect(resolveDiscordAnalyticsTrack({"default": analytics})).toBeUndefined();
         expect(resolveDiscordAnalyticsTrack({"AnalyticEventConfigs": {}, "default": {send() {}}})).toBeUndefined();
         expect(target && validateDiscordAnalyticsTrack({...container, "default": {track() {}}}, target)).toBeFalse();
+    });
+
+    test("resolves the current coexisting mangled config table and exact default track export", () => {
+        const analytics = {track() {return "synthetic";}};
+        const container = currentAnalyticsContainer(analytics);
+        const resolved = resolveDiscordAnalyticsTrack(container);
+        expect(resolved).toEqual({module: analytics, key: "track"});
+        expect(resolved && validateDiscordAnalyticsTrack(container, resolved)).toBeTrue();
+        expect(resolved && validateDiscordAnalyticsTrack({...container, "default": {...analytics}}, resolved)).toBeFalse();
+    });
+
+    test("rejects unrelated track methods, decorative anchors, malformed tables and drifting coexports", () => {
+        const container = currentAnalyticsContainer({track() {}});
+        for (const candidate of [
+            {track() {}},
+            {"default": container.default},
+            {"default": container.default, addExtraAnalyticsDecorator() {}},
+            {...container, lG: {unrelated: {throttlePeriod: 300_000, throttleKeys() {}}}},
+            {...container, lG: {...container.lG, app_opened: {throttlePeriod: 1, throttleKeys() {}}}},
+            {...container, lG: {...container.lG, app_background: {throttlePeriod: 120_000, throttleKeys: []}}},
+            {...container, addExtraAnalyticsDecorator: undefined},
+            {...container, "default": {...container.default, expandEventProperties: undefined}},
+            {...container, "default": {...container.default, setSystemAccessibilityFeatures: undefined}},
+            {...container, "default": {...container.default, track: "track"}},
+            new Proxy({}, {get() {throw Error("Lazy export unavailable");}})
+        ]) expect(resolveDiscordAnalyticsTrack(candidate)).toBeUndefined();
+    });
+
+    test("the production privacy adapter reports partial coverage when the initialized common queue is unavailable", async () => {
+        const harness = createHarness();
+        const container = currentAnalyticsContainer(harness.module);
+        let preferences = defaultStrictPrivacyPreferences();
+        const adapter = new SolcordPrivacyPolicyAdapter({
+            scope: harness.scope,
+            patcher: harness.patcher,
+            preferences: () => preferences,
+            receipt() {},
+            specs: discordAnalyticsMethods(container).map(method => ({
+                id: `discord-analytics-${method.key}`,
+dataClass: "telemetry" as const,
+key: method.key,
+                lookup: () => (method.lookup() as AnalyticsMethodTarget | undefined)?.module,
+                validate: method.validate,
+                blockedValue: method.blockedValue ?? (() => undefined)
+            }))
+        });
+        expect(adapter.start()).toContainEqual({dataClass: "telemetry", state: "Degraded", summary: "1 of 2 validated surfaces blocked; the remainder drifted."});
+        expect(Object.getOwnPropertyDescriptor(container, "M$")).toEqual(expect.objectContaining({configurable: false, set: undefined}));
+        const opaque = new Proxy({}, {get() {throw Error("Payload must remain opaque");}});
+        await expect(harness.module.track("SYNTHETIC", opaque)).resolves.toBeUndefined();
+        expect(harness.calls.track).toHaveLength(0);
+        expect(harness.calls.patches).toEqual(["track"]);
+        preferences = applyPrivacyProfile(preferences, "standard", 42);
+        const receiver = {track: harness.module.track};
+        expect(receiver.track("CONTROL", opaque)).toBe("track:CONTROL");
+        expect(harness.calls.track[0]).toEqual([receiver, "CONTROL", opaque]);
+        expect(harness.module.sendMessage).toBe(harness.originals.sendMessage);
+        expect(harness.module.reportCrash).toBe(harness.originals.reportCrash);
+        harness.scope.dispose();
+        expect(harness.module.track).toBe(harness.originals.track);
+        expect(harness.calls.unpatches).toEqual(["track"]);
+        expect(harness.scope.counts()).toEqual({});
+    });
+
+    test("standalone Do Not Track never reports full readiness after only one current emitter is patchable", () => {
+        const harness = createHarness();
+        const container = currentAnalyticsContainer(harness.module);
+        const adapter = new DoNotTrackAdapter({scope: harness.scope, patcher: harness.patcher, methods: discordAnalyticsMethods(container), getSettings: () => ({enabled: true})});
+        expect(adapter.start()).toBeFalse();
+        expect(harness.calls.patches).toEqual([]);
+        expect(harness.module.track).toBe(harness.originals.track);
+    });
+
+    test("standalone Do Not Track acknowledges both emitter paths without changing the immutable metadata export", async () => {
+        const {harness, analytics, container, handlers, pending, emitted, metadata} = convergenceHarness();
+        const originalTrack = analytics.track;
+        const originalHandle = handlers.handleTrack;
+        let enabled = true;
+        const adapter = new DoNotTrackAdapter({scope: harness.scope, patcher: harness.patcher, methods: discordAnalyticsMethods(container), getSettings: () => ({enabled})});
+        expect(adapter.start()).toBeTrue();
+        await expect(analytics.track("SYNTHETIC", {})).resolves.toBeUndefined();
+        expect((container as unknown as {M$(event: string, properties: unknown): unknown;}).M$("SYNTHETIC", {})).toBeUndefined();
+        await Promise.all(pending);
+        expect(emitted).toHaveLength(0);
+        expect(harness.calls.patches).toEqual(["track", "handleTrack"]);
+        expect((container as Record<string, unknown>).M$).toBe(metadata);
+        enabled = false;
+        await analytics.track("CONTROL", {});
+        metadata("CONTROL", {}); await Promise.all(pending);
+        expect(emitted).toHaveLength(2);
+        adapter.stop();
+        expect(analytics.track).toBe(originalTrack); expect(handlers.handleTrack).toBe(originalHandle);
+        expect(harness.scope.counts()).toEqual({});
+    });
+
+    test("the production privacy policy settles both paths in Strict, forwards Standard and restores on teardown", async () => {
+        const {harness, analytics, container, handlers, pending, emitted, metadata} = convergenceHarness();
+        const originalTrack = analytics.track, originalHandle = handlers.handleTrack;
+        let preferences = defaultStrictPrivacyPreferences();
+        const adapter = new SolcordPrivacyPolicyAdapter({scope: harness.scope,
+patcher: harness.patcher,
+preferences: () => preferences,
+receipt() {},
+specs: discordAnalyticsMethods(container).map(method => ({
+            id: `discord-analytics-${method.key}`,
+dataClass: "telemetry" as const,
+key: method.key,
+            lookup: () => (method.lookup() as AnalyticsMethodTarget | undefined)?.module,
+            validate: method.validate,
+blockedValue: method.blockedValue ?? (() => undefined)
+        }))});
+        expect(adapter.start()).toContainEqual({dataClass: "telemetry", state: "Protected", summary: "2 validated optional emission surfaces blocked."});
+        const opaque = new Proxy({}, {get() {throw Error("Do not inspect synthetic event properties");}});
+        await analytics.track("SYNTHETIC", opaque).then(value => {expect(value).toBeUndefined();});
+        metadata("SYNTHETIC", opaque); await Promise.all(pending);
+        expect(emitted).toHaveLength(0);
+        let completed = 0;
+        const action = new Proxy({}, {get(_target, key) {if (key === "resolve") return () => completed++; throw Error("Only completion may be read");}});
+        expect(handlers.handleTrack(action as Parameters<typeof handlers.handleTrack>[0])).toBeFalse();
+        expect(completed).toBe(1);
+        expect(harness.calls.patches).toEqual(["track", "handleTrack"]);
+        preferences = applyPrivacyProfile(preferences, "standard", 42);
+        await analytics.track("CONTROL", opaque); metadata("CONTROL", opaque); await Promise.all(pending);
+        expect(emitted).toHaveLength(2);
+        harness.scope.dispose();
+        expect(analytics.track).toBe(originalTrack); expect(handlers.handleTrack).toBe(originalHandle);
+        await analytics.track("RESTORED", {}); expect(emitted).toHaveLength(3);
+        expect(harness.scope.counts()).toEqual({});
+    });
+
+    test("the dedicated queue requires current library identity, initialization markers and a writable descriptor", () => {
+        for (const change of [
+            (state: ReturnType<typeof convergenceHarness>) => {state.analytics.trackMaker = undefined as never;},
+            (state: ReturnType<typeof convergenceHarness>) => {state.analytics.analyticsTrackingStoreMaker = undefined as never;},
+            (state: ReturnType<typeof convergenceHarness>) => {state.handlers.handleTrack = (() => false) as never;},
+            (state: ReturnType<typeof convergenceHarness>) => {Object.defineProperty(state.handlers, "handleTrack", {writable: false});}
+        ]) {
+            const state = convergenceHarness(); change(state);
+            const methods = discordAnalyticsMethods(state.container);
+            expect(methods.map(method => method.key)).toEqual(["track", "handleTrack"]);
+            expect(methods[1].lookup()).toBeUndefined();
+        }
     });
 
     test("suppresses every independently validated outgoing analytics method", () => {
