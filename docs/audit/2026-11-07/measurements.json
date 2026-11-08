@@ -1,0 +1,344 @@
+{
+  "base": "9b3004ff8c25c9879803a6c07fa8b28d04731438",
+  "tracked_files": 625,
+  "local_platform": "Linux x64",
+  "bun": "1.4.0",
+  "verify": {
+    "exit": 0,
+    "test_batches": [
+      {
+        "files": 1,
+        "pass": 6,
+        "skip": 0,
+        "fail": 0,
+        "assertions": 35
+      },
+      {
+        "files": 103,
+        "pass": 1041,
+        "skip": 40,
+        "fail": 0,
+        "assertions": 7300
+      }
+    ],
+    "docs": {
+      "files": 45,
+      "links": 106,
+      "broken": 0
+    },
+    "circular_groups_reported": 11
+  },
+  "production_build": {
+    "solcord.js": 1839523,
+    "main.js": 277028,
+    "preload.js": 12972,
+    "earlyRenderer.js": 5678,
+    "editor/preload.js": 1700,
+    "editor/script.js": 5065,
+    "editor/index.html": 13452
+  },
+  "largest_renderer_inputs": [
+    {
+      "input": "src/common/solcord/addon-catalog.generated.ts",
+      "bytes": 448061
+    },
+    {
+      "input": "src/betterdiscord/styles/fonts/HankenGrotesk-variable.ttf",
+      "bytes": 177223
+    },
+    {
+      "input": "src/betterdiscord/modules/solcord/runtime.ts",
+      "bytes": 121898
+    },
+    {
+      "input": "src/betterdiscord/ui/solcord/panel.tsx",
+      "bytes": 117418
+    },
+    {
+      "input": "src/betterdiscord/styles/solcord.css",
+      "bytes": 83638
+    },
+    {
+      "input": "src/betterdiscord/modules/solcord/native-suite.ts",
+      "bytes": 66281
+    },
+    {
+      "input": "src/betterdiscord/ui/solcord/setup-wizard.tsx",
+      "bytes": 29303
+    },
+    {
+      "input": "src/betterdiscord/modules/solcord/store.ts",
+      "bytes": 28756
+    },
+    {
+      "input": "node_modules/buffer/index.js",
+      "bytes": 25298
+    },
+    {
+      "input": "src/common/solcord/v2-feature-models.ts",
+      "bytes": 17880
+    },
+    {
+      "input": "assets/locales/en-us.json",
+      "bytes": 11462
+    },
+    {
+      "input": "src/betterdiscord/modules/solcord/baseline-suite.ts",
+      "bytes": 11315
+    },
+    {
+      "input": "src/betterdiscord/styles/buttons.css",
+      "bytes": 11207
+    },
+    {
+      "input": "assets/locales/el.json",
+      "bytes": 11187
+    },
+    {
+      "input": "src/betterdiscord/modules/addonstore.ts",
+      "bytes": 9786
+    }
+  ],
+  "asar_bytes_local": 2159045,
+  "published_sizes": {
+    "SolcordInstaller.exe": 163937829,
+    "solcord.asar": 2159378
+  },
+  "soak": {
+    "evidenceKind": "non-live synthetic backend lifecycle soak",
+    "elapsedMs": 60021,
+    "cycles": 2250,
+    "adapterExecutions": 0,
+    "maximumOwnedResources": 26,
+    "baselineHeapUsedBytes": 7450711,
+    "finalHeapGrowthBytes": 3657316,
+    "peakRssBytes": 103739392,
+    "pass": true
+  },
+  "browser": {
+    "engine": "Chromium 153.0.8010.0, headless Linux; Playwright evaluated the measurements emitted by the repository fixtures",
+    "initial": [
+      {
+        "scenario": "ambient-shell-on",
+        "pass": true,
+        "overflow": null
+      },
+      {
+        "scenario": "ambient-shell-off",
+        "pass": true,
+        "overflow": null
+      },
+      {
+        "scenario": "ambient-shell-reduced",
+        "pass": true,
+        "overflow": null
+      },
+      {
+        "scenario": "ambient-shell-drift",
+        "pass": true,
+        "overflow": null
+      },
+      {
+        "scenario": "ambient-shell-light",
+        "pass": true,
+        "overflow": null
+      },
+      {
+        "scenario": "overview-dark-1366x768",
+        "pass": true
+      },
+      {
+        "scenario": "diagnostic-overview-dark-320-container",
+        "pass": true
+      },
+      {
+        "scenario": "setup-dark-1280x720",
+        "pass": true
+      },
+      {
+        "scenario": "privacy-light-1920x1080",
+        "pass": true
+      },
+      {
+        "scenario": "voice-oled-1280x720",
+        "pass": true
+      },
+      {
+        "scenario": "voice-light-narrow-320-container",
+        "pass": true
+      },
+      {
+        "scenario": "recovery-dark-1280x720",
+        "pass": true
+      },
+      {
+        "scenario": "appearance-light-long-320-container",
+        "pass": true
+      },
+      {
+        "scenario": "extensions-dark-640x720",
+        "pass": true
+      },
+      {
+        "scenario": "setup-dark-680x520-compact",
+        "pass": true
+      },
+      {
+        "scenario": "privacy-light-compact-short-320x568",
+        "pass": true
+      },
+      {
+        "scenario": "performance-dark-1024x768",
+        "pass": true
+      },
+      {
+        "scenario": "performance-light-1850x1240",
+        "pass": true
+      },
+      {
+        "scenario": "performance-light-long-320-container",
+        "pass": true
+      },
+      {
+        "scenario": "chat-dark-1366x768",
+        "pass": true
+      },
+      {
+        "scenario": "friends-dark-1024x768",
+        "pass": true
+      },
+      {
+        "scenario": "overview-dark-effective-125",
+        "pass": true
+      },
+      {
+        "scenario": "privacy-light-effective-150",
+        "pass": true
+      },
+      {
+        "scenario": "recovery-dark-effective-200",
+        "pass": true
+      },
+      {
+        "scenario": "theme-solcord-default",
+        "pass": true
+      },
+      {
+        "scenario": "theme-obsidian-thread",
+        "pass": true
+      },
+      {
+        "scenario": "theme-carbon-ember",
+        "pass": true
+      },
+      {
+        "scenario": "theme-midnight-glass",
+        "pass": true
+      },
+      {
+        "scenario": "theme-paper-signal",
+        "pass": true
+      },
+      {
+        "scenario": "theme-threadline",
+        "pass": true
+      },
+      {
+        "scenario": "theme-signal-block",
+        "pass": true
+      },
+      {
+        "scenario": "theme-relay-classic",
+        "pass": true
+      },
+      {
+        "scenario": "theme-workshop",
+        "pass": false,
+        "overflow": [
+          "BUTTON"
+        ]
+      },
+      {
+        "scenario": "theme-quiet-read",
+        "pass": true
+      },
+      {
+        "scenario": "theme-night-transit",
+        "pass": true
+      }
+    ],
+    "workshop_repeat": {
+      "n": 3,
+      "initial_content_px": 135,
+      "initial_button_px": 124,
+      "settled_overflows": 0
+    }
+  },
+  "other_checks": {
+    "full_css_first_stage": {
+      "errors": 197,
+      "warnings": 27
+    },
+    "api_generation": "failed: jsdoc script not found",
+    "hosted_linux_and_windows": "https://github.com/slaveofsolace/Solcord/actions/runs/40235787608",
+    "second_hosted_linux": "https://github.com/slaveofsolace/Solcord/actions/runs/40235787620"
+  },
+  "focused_probes": {
+    "embed_lookup": {
+      "fixture": "actual resolver, Chromium 153, equal-level verified sibling embeds",
+      "timings": "median of nine uninstrumented runs per size, Linux host",
+      "observations": [
+        {
+          "siblings": 50,
+          "found": 50,
+          "calls": 2450,
+          "medianMilliseconds": 0.19999999552965164
+        },
+        {
+          "siblings": 200,
+          "found": 200,
+          "calls": 39800,
+          "medianMilliseconds": 1.3999999985098839
+        },
+        {
+          "siblings": 500,
+          "found": 500,
+          "calls": 249500,
+          "medianMilliseconds": 7.5
+        },
+        {
+          "siblings": 1000,
+          "found": 1000,
+          "calls": 999000,
+          "medianMilliseconds": 29.799999997019768
+        }
+      ]
+    },
+    "voice_attachment_reuse": {
+      "fixture": "shipping SolcordNativeSuiteController mounted with Happy DOM and a fixture capture capability",
+      "before": "first.webm",
+      "audio_after": "second.webm",
+      "download_after": "first.webm",
+      "suggested_download_name": "voice-message.ogg"
+    },
+    "editor_preload": {
+      "fixture": "transpiled src/editor/preload.ts with synthetic HTTPS location, stub Electron APIs and real fs in a fresh temporary directory",
+      "bridge_exposed": true,
+      "marker_outside_plugins_created": true,
+      "live_electron_navigation_executed": false
+    },
+    "timeline_seed": {
+      "fixture": "actual renderer journal and native storage class with test safeStorage unavailable",
+      "submitted": 101,
+      "renderer_records": 101,
+      "storage_records": 0,
+      "rejected_with": "Timeline append contains an invalid event batch."
+    },
+    "voice_recording_lifetime": {
+      "fixture": "actual native suite, mock recorder and deferred decoder, no real recording",
+      "tracks_released_before_decode_finished": 0,
+      "cancelled_preview_resolved": true,
+      "replacement_recording_preview_error": "No user-started recording is active."
+    }
+  }
+}

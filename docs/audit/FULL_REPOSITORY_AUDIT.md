@@ -10,11 +10,11 @@ This inventory is a text scan, not a semantic review or live Discord test. Curre
 
 | Measure | Count |
 | --- | ---: |
-| Persistent tracked files | 624 |
-| Text files scanned | 609 |
+| Persistent tracked files | 632 |
+| Text files scanned | 617 |
 | Binary files classified | 15 |
-| Text lines scanned | 131,212 |
-| Custom Solcord lines | 36,247 |
+| Text lines scanned | 132,661 |
+| Custom Solcord lines | 37,696 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -24,13 +24,13 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | Signal | Whole tree | Custom Solcord surfaces |
 | --- | ---: | ---: |
 | TODO / FIXME / HACK | 30 | 0 |
-| Timer calls | 53 | 8 |
+| Timer calls | 54 | 9 |
 | Mutation observers | 22 | 6 |
 | DOM queries | 290 | 179 |
 | Webpack discovery calls | 78 | 0 |
 | Patch calls | 30 | 3 |
-| Synchronous filesystem calls | 808 | 734 |
-| Console calls | 83 | 57 |
+| Synchronous filesystem calls | 811 | 737 |
+| Console calls | 85 | 59 |
 | Empty catch blocks | 3 | 1 |
 
 ## Largest maintainable files
@@ -72,16 +72,16 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 8 | `src/electron/main/modules/solcord-setup.ts` | 908 | 52.4 KiB |
 | 9 | `src/electron/main/modules/solcord-timeline.ts` | 831 | 36.6 KiB |
 | 10 | `src/common/solcord/v2-feature-models.ts` | 661 | 36.1 KiB |
-| 11 | `tests/solcord/settings.test.ts` | 589 | 31.2 KiB |
-| 12 | `tests/solcord/renderer-security.test.ts` | 551 | 41.0 KiB |
-| 13 | `docs/archive/V2_ENGINEERING_HANDOFF.md` | 503 | 21.5 KiB |
-| 14 | `scripts/soak-solcord-backend.ts` | 489 | 22.4 KiB |
-| 15 | `src/common/solcord/product.ts` | 485 | 24.6 KiB |
-| 16 | `src/electron/main/modules/solcord-friend-watch.ts` | 469 | 23.2 KiB |
-| 17 | `tests/solcord/release-evidence-assembler.test.ts` | 434 | 23.8 KiB |
-| 18 | `scripts/helpers/build-provenance.ts` | 424 | 17.8 KiB |
-| 19 | `tests/solcord/settings-panel.test.ts` | 419 | 29.2 KiB |
-| 20 | `src/betterdiscord/ui/solcord/setup-wizard.tsx` | 411 | 36.6 KiB |
+| 11 | `docs/audit/2026-11-07/file-coverage.csv` | 627 | 73.8 KiB |
+| 12 | `tests/solcord/settings.test.ts` | 589 | 31.2 KiB |
+| 13 | `tests/solcord/renderer-security.test.ts` | 551 | 41.0 KiB |
+| 14 | `docs/archive/V2_ENGINEERING_HANDOFF.md` | 503 | 21.5 KiB |
+| 15 | `scripts/soak-solcord-backend.ts` | 489 | 22.4 KiB |
+| 16 | `src/common/solcord/product.ts` | 485 | 24.6 KiB |
+| 17 | `src/electron/main/modules/solcord-friend-watch.ts` | 469 | 23.2 KiB |
+| 18 | `tests/solcord/release-evidence-assembler.test.ts` | 434 | 23.8 KiB |
+| 19 | `scripts/helpers/build-provenance.ts` | 424 | 17.8 KiB |
+| 20 | `tests/solcord/settings-panel.test.ts` | 419 | 29.2 KiB |
 
 ## Earlier repository corrections
 
