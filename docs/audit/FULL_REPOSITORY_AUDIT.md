@@ -10,11 +10,11 @@ This inventory is a text scan, not a semantic review or live Discord test. Curre
 
 | Measure | Count |
 | --- | ---: |
-| Persistent tracked files | 632 |
-| Text files scanned | 617 |
+| Persistent tracked files | 633 |
+| Text files scanned | 618 |
 | Binary files classified | 15 |
-| Text lines scanned | 132,661 |
-| Custom Solcord lines | 37,696 |
+| Text lines scanned | 132,907 |
+| Custom Solcord lines | 37,942 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals

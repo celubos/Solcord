@@ -354,7 +354,7 @@ src/betterdiscord/ui/errorboundary.tsx,ea1a4b7f2ed7a2ec8a885efeb4c610c8b3c20bb3,
 src/betterdiscord/ui/floating/container.tsx,c700c2ac9575b5d7fc2c519e06780957ecfe61ef,515,esbuild production input,solcord.js 179,
 src/betterdiscord/ui/floating/window.tsx,ac009a20cd8d7f6d6e96facd95568bc4e132b7a3,9121,esbuild production input,solcord.js 4266,
 src/betterdiscord/ui/floatingwindows.tsx,f4f9c20e179f641561eba04a9aa012d7f579ce0b,1562,esbuild production input,solcord.js 629,
-src/betterdiscord/ui/hooks.ts,aa6dcd4e793f49d14ea589f77790d899f7ed66b0,3138,esbuild production input,solcord.js 986,F12
+src/betterdiscord/ui/hooks.ts,aa6dcd4e793f49d14ea589f77790d899f7ed66b0,3138,esbuild production input,solcord.js 986,F12 R07
 src/betterdiscord/ui/logo.tsx,84a71cbf8395f45b5941fc7a157ee9f3a7f6f1d1,1449,esbuild production input,solcord.js 418,
 src/betterdiscord/ui/misc/addoneditor.tsx,81eb6e5b0816ae0970bda0032aecb086d5c3e6d9,2044,esbuild production input,solcord.js 861,
 src/betterdiscord/ui/misc/paginator.tsx,a776f2797a88f77ec2a8f50a2da632c3a14dae1d,3195,esbuild production input,solcord.js 1097,
@@ -416,7 +416,7 @@ src/betterdiscord/ui/solcord/use-action.ts,83db460ea55fa9839da53d04621532ef086f6
 src/betterdiscord/ui/spinner.tsx,63a581e0ad229883414179a9a214b1bf0094785b,3647,esbuild production input,solcord.js 1625,
 src/betterdiscord/ui/toasts.tsx,f16e5cfd1b702bd40e434bfb5d5a758fcd7e47c7,2195,esbuild production input,solcord.js 804,
 src/betterdiscord/ui/toasts/ToastIcon.tsx,790769edfeebf1a0b4b9c3a19ac77c49378fe8fb,591,esbuild production input,solcord.js 277,
-src/betterdiscord/ui/tooltip.ts,64b764a78276e3a42317d99e31e8cf07373f9735,7820,esbuild production input,solcord.js 3691,
+src/betterdiscord/ui/tooltip.ts,64b764a78276e3a42317d99e31e8cf07373f9735,7820,esbuild production input,solcord.js 3691,R06 R08
 src/betterdiscord/ui/updater.tsx,382f2f992c8ea640a63e7af946e7e792064bf416,7694,esbuild production input,solcord.js 3286,
 src/betterdiscord/utils/debug.ts,e8eab5d106c5b2a13fa237d9abb989c4f2883b55,3692,esbuild production input,solcord.js 1757,
 src/betterdiscord/utils/icon.ts,1e160905d1cc659ffde6e9e94c9f1bda4d49b118,1593,esbuild production input,solcord.js 178,

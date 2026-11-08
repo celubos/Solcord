@@ -2,7 +2,7 @@
 
 **Audited source** [celubos/Solcord at 9b3004f](https://github.com/celubos/Solcord/tree/9b3004ff8c25c9879803a6c07fa8b28d04731438), the main-branch revision targeted by [v2.0.0](https://github.com/celubos/Solcord/releases/tag/v2.0.0). Audited November 7, 2026, US Central. All code anchors in this handoff refer to that revision. The handoff includes review material, diagnostic probes and the repository's regenerated document inventory.
 
-This pass records **51 prioritized findings**. The file ledger and bundle attribution refer to the original 625-file tree. GitHub changed the repository owner name during the audit; the repository ID (1343091147), owner account ID and audited main-branch commit were rechecked at the current address.
+This pass records **54 prioritized findings**. The file ledger and bundle attribution refer to the original 625-file tree. GitHub changed the repository owner name during the audit; the repository ID (1343091147), owner account ID and audited main-branch commit were rechecked at the current address.
 
 ## Fix order
 
@@ -22,6 +22,7 @@ This pass records **51 prioritized findings**. The file ledger and bundle attrib
 
 | File | Use |
 |---|---|
+| [Prioritized finding register](findings.md) | All findings grouped by severity, with direct links to fixes and regression checks |
 | [Installer and Electron](installer.md) | WinForms, launch, backups and rollback, main/preload and native trust boundaries |
 | [Renderer and compatibility APIs](renderer.md) | Startup, webpack, addon lifecycle, UI and editor |
 | [Solcord feature runtime](features.md) | Feature state, account-bound actions, persistence and DOM subscriptions |

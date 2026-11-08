@@ -280,8 +280,8 @@
       "warnings": 27
     },
     "api_generation": "failed: jsdoc script not found",
-    "hosted_linux_and_windows": "https://github.com/slaveofsolace/Solcord/actions/runs/40235787608",
-    "second_hosted_linux": "https://github.com/slaveofsolace/Solcord/actions/runs/40235787620"
+    "hosted_linux_and_windows": "https://github.com/celubos/Solcord/actions/runs/40235787608",
+    "second_hosted_linux": "https://github.com/celubos/Solcord/actions/runs/40235787620"
   },
   "focused_probes": {
     "embed_lookup": {
