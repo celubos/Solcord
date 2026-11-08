@@ -355,8 +355,19 @@
         const detail = error instanceof Error ? `${error.name}: ${error.message}\n${error.stack || ""}` : String(error);
         document.body.dataset.fixtureError = btoa(unescape(encodeURIComponent(detail)));
     };
-    try { inspect(); }
-    catch (error) { publishFixtureError(error); }
+    // Font metrics and the first layout frame are separate from the stable
+    // acceptance snapshot. Never publish a transient pre-font result as final.
+    (async () => {
+        try {
+            await document.fonts.ready;
+            // --dump-dom can suppress animation callbacks. A task after font
+            // readiness plus a forced layout uses the same settled metrics.
+            await new Promise(resolve => setTimeout(resolve, 0));
+            document.body.getBoundingClientRect();
+            inspect();
+        }
+        catch (error) {publishFixtureError(error);}
+    })();
 </script>
 </body>
 </html>

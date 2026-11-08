@@ -1,6 +1,6 @@
 # Brand migration ledger
 
-Human-facing product branding is **Solcord**. The GitHub repository slug remains `slaveofsolace/Solcord` because renaming it was not authorized. `Soltex` is not used.
+Human-facing product branding is **Solcord**. The current repository is `celubos/Solcord` following the owner's GitHub account rename. The repository ID (`1343091147`) and owner account ID (`115127753`) are unchanged; active support and release links use the current owner while historical attribution remains intact. `Soltex` is not used.
 
 ## REPLACE
 
@@ -9,7 +9,7 @@ Human-facing product branding is **Solcord**. The GitHub repository slug remains
 | README logo, title, description, badges, install story, safety posture | Replaced with Solcord material and local original assets. |
 | Settings section header, sidebar title, About panel, loading title, editor title | Replaced with Solcord. |
 | Changelog title/footer, updater core label, diagnostic heading, console greeting | Replaced with Solcord. |
-| Command descriptions and owner support links | Replaced with Solcord wording and `slaveofsolace/Solcord`. |
+| Command descriptions and owner support links | Replaced with Solcord wording and `celubos/Solcord`. |
 | Console/debug logger prefix | Replaced with `[Solcord]`; no external contract depends on the rendered prefix. |
 | Package name, description, repository/homepage/bugs metadata | Replaced with owner-controlled Solcord metadata. |
 | Production bundle | Renamed to `solcord.asar`; installed under a compatibility filename only at the injector boundary. |

@@ -12,14 +12,14 @@ Allow about one minute on a typical PC **after download**. Windows prompts, Disc
 - Save unfinished drafts and leave voice/video calls before continuing.
 
 > [!WARNING]
-> This build is unsigned. Windows may show an unknown-publisher warning. Download only from `slaveofsolace/Solcord`, compare the hash below, and do not disable Windows security to install it.
+> This build is unsigned. Windows may show an unknown-publisher warning. Download only from `celubos/Solcord`, compare the hash below, and do not disable Windows security to install it.
 
 ## 1. Download
 
 Download both files into the same folder:
 
-- [SolcordInstaller.exe](https://github.com/slaveofsolace/Solcord/releases/download/v2.0.0/SolcordInstaller.exe)
-- [SHA256SUMS.txt](https://github.com/slaveofsolace/Solcord/releases/download/v2.0.0/SHA256SUMS.txt)
+- [SolcordInstaller.exe](https://github.com/celubos/Solcord/releases/download/v2.0.0/SolcordInstaller.exe)
+- [SHA256SUMS.txt](https://github.com/celubos/Solcord/releases/download/v2.0.0/SHA256SUMS.txt)
 
 ### Check the download
 
@@ -29,7 +29,7 @@ Open PowerShell in your download folder and run:
 Get-FileHash .\SolcordInstaller.exe -Algorithm SHA256
 ```
 
-Compare the result with the `installer/SolcordInstaller.exe` line in **SHA256SUMS.txt**. The extra `installer/` folder in that line is normal; it refers to the same executable. Do not run a file whose hash differs.
+Compare the result with the `SolcordInstaller.exe` line in **SHA256SUMS.txt** from the same release. Older review bundles may prefix that filename with `installer/`; the published v2.0.0 checksum uses the plain name. Do not run a file whose hash differs.
 
 ## 2. Save anything in progress
 

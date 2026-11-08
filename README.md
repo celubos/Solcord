@@ -4,13 +4,13 @@
 
 A BetterDiscord fork for Windows, with a built-in Control Center, local privacy tools, full-shell themes, and reversible installation.
 
-**[Download for Windows](https://github.com/slaveofsolace/Solcord/releases/tag/v2.0.0)** · [Installation](docs/QUICK_START.md) · [User guide](docs/USER_GUIDE.md) · [Get help](SUPPORT.md)
+**[Download for Windows](https://github.com/celubos/Solcord/releases/tag/v2.0.0)** · [Installation](docs/QUICK_START.md) · [User guide](docs/USER_GUIDE.md) · [Get help](SUPPORT.md)
 
 ## Install
 
 You need **Windows x64** and the official **Discord desktop app**. You do not need Git, Bun, .NET, plugin libraries, or a separate BetterDiscord installation.
 
-1. Download **SolcordInstaller.exe** and **SHA256SUMS.txt** from the [same release](https://github.com/slaveofsolace/Solcord/releases/tag/v2.0.0). [Check the download](docs/QUICK_START.md#check-the-download).
+1. Download **SolcordInstaller.exe** and **SHA256SUMS.txt** from the [same release](https://github.com/celubos/Solcord/releases/tag/v2.0.0). [Check the download](docs/QUICK_START.md#check-the-download).
 2. Save your drafts and leave any calls. The installer closes verified Discord processes before changing its shared core.
 3. Open the installer. Under **Version**, select your Discord installation, then choose **Install Solcord** or **Update Solcord**.
 4. Choose **Open Solcord**. On a fresh installation, First Setup opens when Discord is ready. You can complete it now or choose **Finish later**.
@@ -63,7 +63,7 @@ Start with the [documentation index](docs/README.md). Installation, daily use, d
 Contributors need Git and **Bun 1.4.0**. Building the Windows installer also requires the **.NET 8 SDK**.
 
 ```sh
-git clone --branch main https://github.com/slaveofsolace/Solcord.git
+git clone --branch main https://github.com/celubos/Solcord.git
 cd Solcord
 bun install --frozen-lockfile
 bun run verify
@@ -74,6 +74,6 @@ Production packaging requires a clean checkout. For changes in progress, use `bu
 
 ## License and credit
 
-Solcord is maintained by [@slaveofsolace](https://github.com/slaveofsolace) and forked from [BetterDiscord](https://github.com/BetterDiscord/BetterDiscord). Upstream history, contributors, Apache-2.0 licensing, public `BdApi`, addon paths, and compatibility identifiers are preserved.
+Solcord is maintained by [@celubos](https://github.com/celubos) and forked from [BetterDiscord](https://github.com/BetterDiscord/BetterDiscord). Upstream history, contributors, Apache-2.0 licensing, public `BdApi`, addon paths, and compatibility identifiers are preserved.
 
 This is an independent project, not an official Discord or BetterDiscord release. See [LICENSE](LICENSE), [NOTICE](NOTICE), and the [third-party provenance registry](docs/PROVENANCE_REGISTRY.md).

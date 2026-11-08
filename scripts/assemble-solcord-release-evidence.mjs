@@ -210,14 +210,17 @@ function assertSnapshotSourcesUnchanged(records) {
     }
 }
 
-function crc32File(file) {
+function crc32File(file, start = 0, length = fs.statSync(file).size) {
     let crc = 0xffffffff;
     const descriptor = fs.openSync(file, "r");
     const buffer = Buffer.allocUnsafe(1024 * 1024);
     try {
-        while (true) {
-            const read = fs.readSync(descriptor, buffer, 0, buffer.length, null);
-            if (read === 0) break;
+        let position = start;
+        const end = start + length;
+        while (position < end) {
+            const read = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, end - position), position);
+            if (read === 0) throw new Error("The deterministic ZIP input was truncated.");
+            position += read;
             for (let index = 0; index < read; index++) crc = (crc >>> 8) ^ crcTable[(crc ^ buffer[index]) & 0xff];
         }
     }
@@ -230,13 +233,16 @@ function writeAll(descriptor, bytes) {
     while (offset < bytes.length) offset += fs.writeSync(descriptor, bytes, offset, bytes.length - offset);
 }
 
-function copyToDescriptor(source, destination) {
+function copyToDescriptor(source, destination, start = 0, length = fs.statSync(source).size) {
     const input = fs.openSync(source, "r");
     const buffer = Buffer.allocUnsafe(1024 * 1024);
     try {
-        while (true) {
-            const read = fs.readSync(input, buffer, 0, buffer.length, null);
-            if (read === 0) break;
+        let position = start;
+        const end = start + length;
+        while (position < end) {
+            const read = fs.readSync(input, buffer, 0, Math.min(buffer.length, end - position), position);
+            if (read === 0) throw new Error("The deterministic ZIP input was truncated.");
+            position += read;
             writeAll(destination, buffer.subarray(0, read));
         }
     }
@@ -257,8 +263,11 @@ function createStoredZip(entries, destination) {
         names.add(entry.name);
         const file = requireRegularFile(entry.file, 0xffffffff, "The deterministic ZIP input is missing or unsafe.", true);
         if (file.size > 0xffffffff) throw new Error("The deterministic ZIP does not support ZIP64 inputs.");
+        const sourceOffset = entry.sourceOffset ?? 0;
+        const size = entry.sourceBytes ?? file.size;
+        if (!Number.isSafeInteger(sourceOffset) || !Number.isSafeInteger(size) || sourceOffset < 0 || size < 0 || sourceOffset + size > file.size) throw new Error("The deterministic ZIP input range is invalid.");
         const mode = entry.mode === 0o100755 ? 0o100755 : 0o100644;
-        return {name: entry.name, file: entry.file, size: file.size, crc32: crc32File(entry.file), mode, offset: 0};
+        return {name: entry.name, file: entry.file, size, sourceOffset, crc32: crc32File(entry.file, sourceOffset, size), mode, offset: 0};
     });
 
     const output = fs.openSync(destination, "wx");
@@ -282,7 +291,7 @@ function createStoredZip(entries, destination) {
             header.writeUInt16LE(0, 28);
             writeAll(output, header);
             writeAll(output, name);
-            copyToDescriptor(entry.file, output);
+            copyToDescriptor(entry.file, output, entry.sourceOffset, entry.size);
             position += header.length + name.length + entry.size;
         }
 
@@ -626,20 +635,35 @@ function listSourceBlobs(repo, sourceCommit) {
     }).sort((left, right) => compareUtf8(left.sourcePath, right.sourcePath));
 }
 
-function createDeterministicSourceArchive(repo, sourceCommit, prefix, destination) {
+export function createDeterministicSourceArchive(repo, sourceCommit, prefix, destination) {
     requireSafeZipName(`${prefix}placeholder`);
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "solcord-source-input-"));
     fs.chmodSync(workspace, 0o700);
     try {
-        const entries = listSourceBlobs(repo, sourceCommit).map((source, index) => {
-            const file = path.join(workspace, `${index.toString().padStart(8, "0")}.blob`);
-            const descriptor = fs.openSync(file, "wx", 0o600);
-            let result;
-            try {result = spawnSync("git", ["cat-file", "blob", source.oid], {cwd: repo, stdio: ["ignore", descriptor, "pipe"], windowsHide: true});}
-            finally {fs.closeSync(descriptor);}
-            if (result.status !== 0 || fs.statSync(file).size !== source.bytes) throw new Error("Git could not materialize an exact source blob.");
-            return {name: `${prefix}${source.sourcePath}`, file, mode: source.mode};
-        });
+        const sources = listSourceBlobs(repo, sourceCommit);
+        const file = path.join(workspace, "git-blobs.batch");
+        let descriptor = fs.openSync(file, "wx", 0o600);
+        let result;
+        try {result = spawnSync("git", ["cat-file", "--batch"], {cwd: repo, input: `${sources.map(source => source.oid).join("\n")}\n`, stdio: ["pipe", descriptor, "pipe"], windowsHide: true});}
+        finally {fs.closeSync(descriptor);}
+        if (result.status !== 0) throw new Error("Git could not materialize the exact source blob batch.");
+        descriptor = fs.openSync(file, "r");
+        let position = 0;
+        let entries;
+        try {
+            entries = sources.map(source => {
+                const expected = Buffer.from(`${source.oid} blob ${source.bytes}\n`, "ascii");
+                const header = Buffer.alloc(expected.length);
+                if (fs.readSync(descriptor, header, 0, header.length, position) !== header.length || !header.equals(expected)) throw new Error("Git returned an unexpected source blob identity or size.");
+                const sourceOffset = position + header.length;
+                const trailer = Buffer.alloc(1);
+                if (fs.readSync(descriptor, trailer, 0, 1, sourceOffset + source.bytes) !== 1 || trailer[0] !== 10) throw new Error("Git returned a truncated source blob.");
+                position = sourceOffset + source.bytes + 1;
+                return {name: `${prefix}${source.sourcePath}`, file, mode: source.mode, sourceOffset, sourceBytes: source.bytes};
+            });
+            if (position !== fs.fstatSync(descriptor).size) throw new Error("Git returned unexpected data after the exact source blob batch.");
+        }
+        finally {fs.closeSync(descriptor);}
         createStoredZip(entries, destination);
     }
     finally {removeOwnedDirectory(workspace, os.tmpdir(), "solcord-source-input-");}

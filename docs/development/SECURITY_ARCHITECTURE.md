@@ -176,4 +176,4 @@ No live message, upload, notification action, recording, stream, OAuth flow, voi
 
 ## Reporting
 
-Use a private report if an issue may expose credentials, private content, or a filesystem path. Otherwise file an issue at `https://github.com/slaveofsolace/Solcord/issues` with Solcord version, Discord channel/version, reproduction steps, and a sanitized diagnostics export. Never attach raw Discord logs without reviewing them first.
+Use a private report if an issue may expose credentials, private content, or a filesystem path. Otherwise file an issue at `https://github.com/celubos/Solcord/issues` with Solcord version, Discord channel/version, reproduction steps, and a sanitized diagnostics export. Never attach raw Discord logs without reviewing them first.

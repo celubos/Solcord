@@ -95,7 +95,14 @@ function richEmbedEvidence(candidate: HTMLElement): boolean {
 /** Return the outermost structurally verified rich-embed roots on loaded messages. */
 export function resolveSolcordEmbedTargets(root: ParentNode): HTMLElement[] {
     const verified = [...root.querySelectorAll<HTMLElement>("article, [class*=\"embed\"]")].filter(richEmbedEvidence);
-    return verified.filter(candidate => !verified.some(other => other !== candidate && other.contains(candidate)));
+    const candidates = new Set(verified);
+    return verified.filter(candidate => {
+        for (let parent = candidate.parentElement; parent; parent = parent.parentElement) {
+            if (candidates.has(parent)) return false;
+            if (parent.matches(MESSAGE_CONTAINER_SELECTOR)) break;
+        }
+        return true;
+    });
 }
 
 function createBoundedAnimationScheduler(scope: SolcordDisposalScope, callback: () => void): () => void {
@@ -312,9 +319,10 @@ export class SolcordBaselineSuite {
                 controls.delete(candidate);
             }
         };
-        const scan = () => {
+        const dirtyMessages = new Set<HTMLElement>();
+        const scan = (roots: ParentNode[] = [document]) => {
             releaseDetachedControls();
-            const candidates = resolveSolcordEmbedTargets(document);
+            const candidates = roots.flatMap(resolveSolcordEmbedTargets);
             for (const candidate of candidates) {
                 if (controls.has(candidate) || candidate.querySelector(":scope > .solcord-embed-control")) continue;
                 candidate.classList.add("solcord-embed-host");
@@ -336,21 +344,40 @@ export class SolcordBaselineSuite {
                 controls.set(candidate, {button, listener: toggle});
                 candidate.prepend(button);
             }
-            if (candidates.length) {
+            if (controls.size) {
                 this.#setRuntimeIssue("embed-controls");
             }
-            else {
+            else if (roots.includes(document)) {
                 const possible = [...document.querySelectorAll<HTMLElement>(MESSAGE_CONTAINER_SELECTOR)].some(message => message.querySelector("article, [class*=\"embed\"]"));
                 this.#setRuntimeIssue("embed-controls", possible
                     ? "Embed Controls: loaded embed-like markup could not be structurally verified, so Solcord injected nothing."
                     : "Embed Controls: no loaded rich embed is present on this route; the adapter is waiting without changing messages.");
             }
         };
-        const schedule = createBoundedAnimationScheduler(scope, scan);
+        const schedule = createBoundedAnimationScheduler(scope, () => {
+            const roots = [...dirtyMessages];
+            dirtyMessages.clear();
+            scan(roots);
+        });
         scan();
         this.#statusReconcilers.add(scan);
         scope.own(() => this.#statusReconcilers.delete(scan));
-        const observer = new MutationObserver(schedule);
+        const observer = new MutationObserver(mutations => {
+            let removedControl = false;
+            for (const mutation of mutations) {
+                const message = mutation.target instanceof Element ? mutation.target.closest<HTMLElement>(MESSAGE_CONTAINER_SELECTOR) : null;
+                if (message) dirtyMessages.add(message);
+                for (const node of mutation.addedNodes) {
+                    if (!(node instanceof HTMLElement)) continue;
+                    if (node.matches(MESSAGE_CONTAINER_SELECTOR)) dirtyMessages.add(node);
+                    for (const addedMessage of node.querySelectorAll<HTMLElement>(MESSAGE_CONTAINER_SELECTOR)) dirtyMessages.add(addedMessage);
+                }
+                for (const node of mutation.removedNodes) {
+                    if (node instanceof Element && (node.classList.contains("solcord-embed-host") || node.querySelector(".solcord-embed-host"))) removedControl = true;
+                }
+            }
+            if (dirtyMessages.size || removedControl) schedule();
+        });
         scope.observe(observer, document.body, {childList: true, subtree: true});
         scope.own(() => {
             for (const [candidate, {button, listener}] of controls) {

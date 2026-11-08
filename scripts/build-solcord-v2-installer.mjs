@@ -9,6 +9,7 @@ import {fileURLToPath} from "node:url";
 import * as asar from "@electron/asar";
 import {SOLCORD_PRODUCT_IDENTITY} from "../src/common/solcord/product-identity.ts";
 import {publishGeneratedDirectory} from "./helpers/publish-directory.mjs";
+import {hashFile} from "./helpers/streaming-hash.mjs";
 
 const [artifactInput, outputInput, sourceCommit] = process.argv.slice(2);
 if (!artifactInput || !outputInput || !/^[0-9a-f]{40}$/.test(sourceCommit ?? "")) {
@@ -25,7 +26,6 @@ if (artifact !== path.join(repo, "dist", "solcord.asar")) throw new Error("The i
 if (fs.existsSync(output)) throw new Error("The installer output directory must not already exist.");
 if (!outputName || outputParent === output || relativeOutput === "" || (!relativeOutput.startsWith(`..${path.sep}`) && relativeOutput !== ".." && !path.isAbsolute(relativeOutput))) throw new Error("Installer artifacts must be generated outside the source checkout.");
 
-const hashFile = file => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 const gitText = args => {
     const result = spawnSync("git", args, {cwd: repo, encoding: "utf8", windowsHide: true});
     if (result.status !== 0) throw new Error("The installer builder could not verify Git provenance.");
@@ -98,8 +98,8 @@ try {
         artifactFile: "solcord.asar",
         buildManifestSha256: sourceBuildManifestHash,
         schemaVersion: 7,
-        supportedDiscord: "Stable/PTB/Canary; exact installed target shown at runtime",
-        releaseNotes: "Solcord 2.0 Signal, an unsigned stable release with hash-bound resources embedded in the branded executable. Install, Update, Repair, Roll Back, Uninstall, Verify, and Launch are separate explicit actions."
+        supportedDiscord: "Stable/PTB/Canary; one managed channel at a time; exact target shown at runtime",
+        releaseNotes: `Solcord ${postBuild.build.candidateLabel}, an unsigned ${postBuild.build.candidateLabel === `v${postBuild.build.version}` ? "stable release" : "prerelease validation candidate"}. Install, Update, Repair, Roll Back, Uninstall, Verify, and Launch are separate explicit actions.`
     };
     const stagedInstallerManifest = path.join(inputRoot, "solcord-installer-manifest.json");
     fs.writeFileSync(stagedInstallerManifest, `${JSON.stringify(manifest, null, 2)}\n`, {encoding: "utf8", flag: "wx"});
@@ -186,13 +186,14 @@ try {
     ];
     for (const [source, name] of publishedFiles) fs.copyFileSync(source, path.join(staging, name), fs.constants.COPYFILE_EXCL);
     const checksumNames = ["SolcordInstaller.exe", ...publishedFiles.map(([, name]) => name)];
-    const checksumText = checksumNames.map(name => `${hashFile(path.join(staging, name))}  ${name}`).join("\n");
+    const checkedHashes = new Map(checksumNames.map(name => [name, hashFile(path.join(staging, name))]));
+    const checksumText = checksumNames.map(name => `${checkedHashes.get(name)}  ${name}`).join("\n");
     fs.writeFileSync(path.join(staging, "SHA256SUMS.txt"), `${checksumText}\n`, {encoding: "utf8", flag: "wx"});
     const receiptName = "solcord-installer-build-receipt.json";
     const receiptFiles = [...checksumNames, "SHA256SUMS.txt"].sort().map(name => ({
         name,
         bytes: fs.statSync(path.join(staging, name)).size,
-        sha256: hashFile(path.join(staging, name))
+        sha256: checkedHashes.get(name) ?? hashFile(path.join(staging, name))
     }));
     const receipt = {
         schemaVersion: 1,

@@ -299,7 +299,10 @@ export default class BetterDiscord {
     static disableMediaKeys() {
         if (!BetterDiscord.getSetting("general", "mediaKeys")) return;
         const originalDisable = electron.app.commandLine.getSwitchValue("disable-features") || "";
-        electron.app.commandLine.appendSwitch("disable-features", `${originalDisable ? "," : ""}HardwareMediaKeyHandling,MediaSessionService`);
+        const features = new Set(originalDisable.split(",").map(feature => feature.trim()).filter(Boolean));
+        features.add("HardwareMediaKeyHandling");
+        features.add("MediaSessionService");
+        electron.app.commandLine.appendSwitch("disable-features", [...features].join(","));
     }
 }
 

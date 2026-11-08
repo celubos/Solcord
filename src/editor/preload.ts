@@ -1,27 +1,5 @@
-import electron, {ipcRenderer} from "electron";
-import fs from "fs";
-import path from "path";
+import {contextBridge, ipcRenderer} from "electron";
 import * as IPCEvents from "@common/constants/ipcevents";
-import type {AddonType} from "@typed/addon";
-
-// Build info file only exists for non-linux (for current injection)
-let dataPath = "";
-if (process.platform === "win32" || process.platform === "darwin") dataPath = path.join(electron.ipcRenderer.sendSync(IPCEvents.GET_PATH, "userData"), "..");
-else dataPath = process.env.XDG_CONFIG_HOME ? process.env.XDG_CONFIG_HOME : path.join(process.env.HOME!, ".config"); // This will help with snap packages eventually
-dataPath = path.join(dataPath, "BetterDiscord") + "/";
-
-const query = new URLSearchParams(location.search);
-
-const type = query.get("type")! as "custom-css" | AddonType;
-const filename = query.get("filename")!;
-
-let filepath;
-if (type === "custom-css") {
-    filepath = path.join(dataPath, "data", process.env.DISCORD_RELEASE_CHANNEL!, "custom.css");
-}
-else {
-    filepath = path.join(dataPath, `${type}s`, filename);
-}
 
 export interface Settings {
     liveUpdate: boolean;
@@ -30,38 +8,40 @@ export interface Settings {
     alwaysOnTop: boolean;
 }
 
-const editor = {
-    type,
-    filename,
-    filepath,
-    read() {
-        return fs.readFileSync(filepath, "utf-8");
-    },
-    open() {
-        electron.shell.openPath(filepath).then(() => window.close());
-    },
-    write(contents: string) {
-        fs.writeFileSync(filepath, contents, "utf-8");
-    },
-    shouldShowWarning(showWarning: boolean) {
-        electron.ipcRenderer.invoke(IPCEvents.EDITOR_SHOULD_SHOW_WARNING, showWarning);
-    },
-    readText() {
-        return electron.clipboard.readText();
-    },
-    settings: {
-        get: () => ipcRenderer.sendSync(IPCEvents.EDITOR_SETTINGS_GET) as Settings,
-        subscribe(listener: (settings: Settings) => void) {
-            electron.ipcRenderer.on(IPCEvents.EDITOR_SETTINGS_UPDATE, (_, settings) => {
-                listener(settings);
-            });
-        },
-        set(settings: Partial<Settings>) {
-            electron.ipcRenderer.invoke(IPCEvents.EDITOR_SETTINGS_UPDATE, settings);
+function call<T = void>(command: string, payload?: unknown): T {
+    const response = ipcRenderer.sendSync(IPCEvents.EDITOR_SESSION, command, payload);
+    if (!response || response.ok !== true) throw new Error("The editor session is unavailable.");
+    return response.value as T;
+}
+
+function createEditor(metadata: {type: "custom-css" | "theme" | "plugin"; filename: string;}) {
+    return {
+        ...metadata,
+        read: () => call<string>("read"),
+        write: (contents: string) => call("write", contents),
+        open: () => {call("open"); window.close();},
+        shouldShowWarning: (value: boolean) => call("warning", value),
+        readText: () => call<string>("clipboard"),
+        settings: {
+            get: () => call<Settings>("settings-get"),
+            set: (settings: Partial<Settings>) => call("settings-set", settings),
+            subscribe(listener: (settings: Settings) => void) {
+                const callback = (_: unknown, settings: Settings) => listener(settings);
+                ipcRenderer.on(IPCEvents.EDITOR_SETTINGS_UPDATE, callback);
+                return () => ipcRenderer.off(IPCEvents.EDITOR_SETTINGS_UPDATE, callback);
+            }
         }
+    };
+}
+
+// No URL/query-supplied path is authoritative. Only the exact packaged document
+// and main-process-bound file session can obtain this bridge.
+try {
+    if (location.protocol === "file:" && window.top === window) {
+        const metadata = call<Parameters<typeof createEditor>[0]>("metadata");
+        contextBridge.exposeInMainWorld("Editor", createEditor(metadata));
     }
-};
+}
+catch {/* Untrusted documents receive no editor capability. */}
 
-electron.contextBridge.exposeInMainWorld("Editor", editor);
-
-export type EditorNative = typeof editor;
+export type EditorNative = ReturnType<typeof createEditor>;

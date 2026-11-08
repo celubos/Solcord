@@ -7,10 +7,12 @@ import asar from "@electron/asar";
 
 import doSanityChecks from "./helpers/validate";
 import buildPackage from "./helpers/package";
+import {assertEmittedFiles} from "./helpers/emitted-files";
 import {finishSolcordAsar} from "./helpers/finish-asar";
 import {assertSolcordBuildStillCurrent, assertSolcordPackagingAllowed, captureSolcordBuildProvenance, createSolcordPostBuildManifest, readSolcordBuildProvenance, writeSolcordPostBuildManifest} from "./helpers/build-provenance";
 import pkg from "../package.json";
 import {assertSolcordPackageVersion, SOLCORD_PRODUCT_IDENTITY} from "../src/common/solcord/product-identity";
+import {solcordLocalAssets} from "./helpers/local-assets";
 
 
 const dist = path.resolve(__dirname, "..", "dist");
@@ -30,7 +32,8 @@ const files = [
     "dist/editor/preload.js",
     "dist/editor/script.js",
     "dist/editor/index.html",
-    "dist/build-provenance.json"
+    "dist/build-provenance.json",
+    ...solcordLocalAssets(path.resolve(__dirname, "..")).map(asset => `dist/${asset.target}`)
 ];
 
 const makeHash = () => {
@@ -70,6 +73,7 @@ const currentProvenance = captureSolcordBuildProvenance(path.resolve(__dirname, 
     buildTimestamp: builtProvenance.buildTimestamp
 });
 assertSolcordBuildStillCurrent(builtProvenance, currentProvenance);
+assertEmittedFiles(dist, files.map(file => file.slice(5)));
 doSanityChecks(dist);
 buildPackage(dist);
 // cleanOldAsar();

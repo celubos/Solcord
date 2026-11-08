@@ -1,6 +1,6 @@
 export interface Require {
     <T = any>(id: PropertyKey): T;
-    d(target: object, exports: Record<string, () => any>): void;
+    d(target: object, exports?: Record<string, () => any>, values?: Record<string, unknown>): void;
     c: Record<PropertyKey, Module>;
     m: Record<PropertyKey, RawModule>;
     e(id: PropertyKey): Promise<unknown>;

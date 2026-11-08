@@ -26,6 +26,6 @@ export default {
         // Use a timeout because this doesn't work if you do it within the context of a slash command
         if (DiscordModules.promptToUpload) return setTimeout(() => DiscordModules.promptToUpload?.([file], channel, 0), 1);
 
-        return {content: "Unable to attach your debug info. Report the issue at [Solcord on GitHub](https://github.com/slaveofsolace/Solcord/issues)."};
+        return {content: "Unable to attach your debug info. Report the issue at [Solcord on GitHub](https://github.com/celubos/Solcord/issues)."};
     }
 } satisfies Command;

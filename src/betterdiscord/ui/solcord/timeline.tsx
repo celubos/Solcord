@@ -29,11 +29,15 @@ function storageLabel(enabled: boolean, retention: SolcordTimelinePolicy["retent
 export default function MessageTimelinePanel() {
     const [statusMessage, setStatusMessage] = useState("");
     const state = useStateFromStores([SolcordRuntime, SolcordSettings], () => ({
-        policy: SolcordSettings.snapshot().timelinePolicy,
+        policy: SolcordSettings.slice("timelinePolicy"),
         status: SolcordRuntime.timelineStatus(),
-        entries: SolcordRuntime.timelineEntries(),
+        entries: SolcordRuntime.timelineView(),
         currentChannel: SolcordRuntime.timelineCurrentChannel()
-    }));
+    }), undefined, (left, right) => left.policy === right.policy && left.entries === right.entries
+        && left.status.records === right.status.records && left.status.deleted === right.status.deleted
+        && left.status.edited === right.status.edited && left.status.ghostPings === right.status.ghostPings
+        && left.status.textBytes === right.status.textBytes && left.status.persistent === right.status.persistent
+        && left.currentChannel.eligible === right.currentChannel.eligible && left.currentChannel.included === right.currentChannel.included);
     const update = useSolcordWrite((value: Partial<SolcordTimelinePolicy>) => SolcordRuntime.setTimelinePolicy(value), () => setStatusMessage("The setting was not saved. Try again, or open Recovery."));
     const clear = async () => {
         if (!window.confirm("Clear the active account’s Solcord Message Timeline? This removes the encrypted local segments and the current renderer journal. It cannot be undone.")) return;

@@ -1,7 +1,5 @@
-import path from "path";
-import fs from "fs";
-
 import request from "@polyfill/request";
+import Remote from "@polyfill/remote";
 
 import Logger from "@common/logger";
 import Toasts from "@stores/toasts";
@@ -240,16 +238,17 @@ export class Addon {
         const install = (shouldEnable: boolean) => new Promise<void>((resolve) => {
             request(Web.redirects.github(this.id.toString()), {
                 headers: {
-                    "X-Store-Download": this.name,
                     "Cache-Control": "no-cache",
                     "Pragma": "no-cache"
                 }
                 // TODO: fix types when translating the request polyfill
-            }, (err: Error, req: {aborted: boolean, statusMessage: string;}, text: string) => {
+            }, async (err: Error, req: {aborted: boolean, statusMessage: string;}, text: string) => {
                 try {
                     if (err || req.aborted || req.statusMessage !== "OK") {
                         throw err || req;
                     }
+
+                    await Remote.filesystem.writeAddonFile(this.type, this.filename, text);
 
                     if (shouldEnable) {
                         // Shouldn't need a try..catch but better safe than sorry
@@ -263,8 +262,6 @@ export class Addon {
 
                         this.manager.saveState();
                     }
-
-                    fs.writeFileSync(path.join(this.manager.addonFolder, this.filename), text);
 
                     Toasts.show(t("Addons.successfullyDownload", {name: this.name}), {
                         type: "success"
@@ -421,13 +418,19 @@ const addonStore = new class AddonStore extends Store {
     // Caching stuff
     private _cache: {addons: Record<string, BdWebAddon>; known: string[]; version: string;} = {addons: {}, known: [], version: ""};
     private _useCache() {
+        this.addons.length = 0;
+        const nextCache: Record<string, Addon> = {};
         for (const key in this._cache.addons) {
             if (Object.prototype.hasOwnProperty.call(this._cache.addons, key)) {
-                this.addons.push(
-                    Addon.from(this._cache.addons[key])
-                );
+                const record = this._cache.addons[key];
+                if (nextCache[record.id]) continue;
+                const addon = Addon.from(record);
+                nextCache[addon.id] = addon;
+                this.addons.push(addon);
             }
         }
+        Addon.cache = nextCache;
+        this._singleAddonCache = {};
     }
 
     private _writeCache(cache = this._cache) {
@@ -496,15 +499,6 @@ const addonStore = new class AddonStore extends Store {
                 if (addon.id.toString() === decoded || addon.name.toLowerCase() === decoded || addon.filename.toLowerCase() === decoded) return addon;
             }
         }
-    }
-
-    /**
-     * Determines whether an addon is official
-     * Disabled currently
-     */
-    public isOfficial(/* filename */) {
-        return false;
-        // return filename.toLowerCase() in this._cache.addons;
     }
 
     public isUnknown(filename: string) {
@@ -635,15 +629,21 @@ const addonStore = new class AddonStore extends Store {
                 };
 
                 this.addons.length = 0;
+                const nextCache: Record<string, Addon> = {};
 
                 for (const addon of json) {
-                    this.addons.push(Addon.from(addon));
+                    if (nextCache[addon.id]) continue;
+                    const entry = Addon.from(addon);
+                    this.addons.push(entry);
+                    nextCache[entry.id] = entry;
 
                     data.addons[addon.file_name.toLowerCase()] = addon;
                     if (isFirstRun) {
                         data.known.push(addon.file_name);
                     }
                 }
+                Addon.cache = nextCache;
+                this._singleAddonCache = {};
 
                 this._writeCache(data);
 

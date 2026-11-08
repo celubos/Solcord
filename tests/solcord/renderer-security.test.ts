@@ -1,6 +1,7 @@
 import {describe, expect, test} from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import {completeTimelineRead, createTimelineRuntimeFixture, type TimelineFixtureRead} from "../fixtures/solcord-timeline-runtime";
 
 
 const ROOT = path.resolve(import.meta.dir, "../..");
@@ -10,7 +11,7 @@ describe("Solcord renderer security contracts", () => {
     test("uses measured startup phases instead of a broad renderer hold", () => {
         const core = source("src/betterdiscord/modules/core.ts");
 
-        expect(core).toContain("await SolcordRuntime.initialize();");
+        expect(core).toContain("SolcordRuntime.initialize()");
         expect(core).toContain("SolcordRuntime.attachControlCenter(() => {");
         expect(core).toContain("Settings.registerPanel(\"solcord\"");
         expect(core).toContain("const privacyPolicyReady = await SolcordRuntime.start();");
@@ -40,7 +41,7 @@ describe("Solcord renderer security contracts", () => {
     test("claims private storage before addon inventory and audits the complete inventory before activation", () => {
         const core = source("src/betterdiscord/modules/core.ts");
         const runtime = source("src/betterdiscord/modules/solcord/runtime.ts");
-        const runtimeInitialize = core.indexOf("await SolcordRuntime.initialize()");
+        const runtimeInitialize = core.indexOf("SolcordRuntime.initialize()");
         const runtimeStart = core.indexOf("await SolcordRuntime.start()");
         const pluginInitialize = core.indexOf("PluginManager.initialize()");
         const pluginHold = core.indexOf("PluginManager.holdAddonActivation()");
@@ -156,22 +157,34 @@ describe("Solcord renderer security contracts", () => {
         }
     });
 
-    test("switches Timeline identity synchronously and discards events until the account is ready", () => {
-        const runtime = source("src/betterdiscord/modules/solcord/runtime.ts");
-        expect(runtime).toContain("userStore.addChangeListener(onAccountChange)");
-        expect(runtime).toContain("timelineEventAccountMatches(accountId, current, accountReady)");
-        expect(runtime).toContain("if (current !== accountId) void activateAccount()");
-        expect(runtime).toContain("if (this.#boundTimelineAccountId !== current) throw new Error(\"TimelineAccountChangedBeforeAppend\")");
-        expect(runtime).toContain("void this.#releaseTimelineAccount()");
-        const activation = runtime.slice(runtime.indexOf("const activateAccount = async"), runtime.indexOf("const eventId =", runtime.indexOf("const activateAccount = async")));
-        const clear = activation.indexOf("this.#timeline.clear()");
-        const reset = activation.indexOf("this.#timelinePersistent = false", clear);
-        const notify = activation.indexOf("this.#setHealth", reset);
-        const firstAwait = activation.indexOf("await ");
-        expect(clear).toBeGreaterThanOrEqual(0);
-        expect(clear).toBeLessThan(reset);
-        expect(reset).toBeLessThan(notify);
-        expect(notify).toBeLessThan(firstAwait);
+    test("switches Timeline identity synchronously and buffers only the new account while storage loads", async () => {
+        let finishSecondRead!: (value: TimelineFixtureRead) => void;
+        let notifySecondRead!: () => void;
+        const enteredSecondRead = new Promise<void>(resolve => {notifySecondRead = resolve;});
+        const first = {eventId: "first-account", kind: "create" as const, observedAt: Date.now(), messageId: "10", channelId: "200", authorId: "300", authorIsBot: false, content: "first account only"};
+        const second = {...first, eventId: "second-account", messageId: "20", content: "second account"};
+        const fixture = createTimelineRuntimeFixture({read: accountId => accountId === "100"
+            ? Promise.resolve(completeTimelineRead([first])) : new Promise(resolve => {finishSecondRead = resolve; notifySecondRead();})});
+        try {
+            await fixture.start();
+            expect(fixture.journal.has("10")).toBeTrue();
+            fixture.changeAccount("101");
+            // No awaited storage operation can expose rows from the old identity.
+            expect(fixture.journal.status().records).toBe(0);
+            expect(fixture.state.timelinePersistent).toBeFalse();
+            fixture.dispatch("MESSAGE_DELETE", {id: "20", channelId: "200"});
+            fixture.dispatch("MESSAGE_CREATE", {message: {id: "21", channel_id: "200", author: {id: "301", bot: false}, content: "observed while loading"}});
+            expect(fixture.journal.status().records).toBe(0);
+            await enteredSecondRead;
+            finishSecondRead(completeTimelineRead([second]));
+            await fixture.settle();
+            expect(fixture.journal.has("10")).toBeFalse();
+            expect(fixture.journal.snapshot().find(record => record.messageId === "20")?.deletedAt).toBeDefined();
+            expect(fixture.journal.has("21")).toBeTrue();
+            expect(fixture.appended.every(batch => batch.accountId === "101")).toBeTrue();
+            expect(fixture.appended.flatMap(batch => batch.events).some(event => event.messageId === "21")).toBeTrue();
+        }
+        finally {fixture.dispose();}
     });
 
     test("revalidates manual Timeline reads and clears before binding, before IPC, and before renderer effects", () => {
@@ -226,12 +239,26 @@ describe("Solcord renderer security contracts", () => {
         expect(startFriend).not.toContain("fetch(");
     });
 
-    test("surfaces partial Timeline reads and incomplete retention instead of claiming success", () => {
-        const runtime = source("src/betterdiscord/modules/solcord/runtime.ts");
-        expect(runtime).toContain("storageReadComplete = opened.loaded.status === \"complete\"");
-        expect(runtime).toContain("The persistent read is partial");
-        expect(runtime).toContain("if (result.retentionApplied === true) return");
-        expect(runtime).toContain("Retention cleanup is incomplete; ambiguous encrypted residue remains and requires review.");
+    test("surfaces partial Timeline reads and incomplete retention instead of claiming success", async () => {
+        const partial = createTimelineRuntimeFixture({read: async () => ({...completeTimelineRead(), complete: false, truncated: true, omittedSegments: 2, unreadableSegments: 1, retentionApplied: false})});
+        try {
+            await partial.start();
+            expect(partial.health.at(-1)).toMatchObject({maturity: "preview"});
+            expect(partial.health.at(-1)?.detail).toContain("2 omitted, 1 unreadable");
+            expect(partial.health.at(-1)?.detail).toContain("retention incomplete");
+        }
+        finally {partial.dispose();}
+        const retention = createTimelineRuntimeFixture({appendRetentionApplied: false});
+        try {
+            await retention.start();
+            retention.dispatch("MESSAGE_CREATE", {message: {id: "21", channel_id: "200", author: {id: "301", bot: false}, content: "local fixture"}});
+            await retention.settle();
+            await retention.state.flushTimelinePersistence?.();
+            expect(retention.journal.has("21")).toBeTrue();
+            expect(retention.health.at(-1)).toMatchObject({maturity: "preview"});
+            expect(retention.health.at(-1)?.detail).toContain("Retention cleanup is incomplete");
+        }
+        finally {retention.dispose();}
     });
 
     test("blocks native process discovery and cached running-game publication independently", () => {

@@ -9,6 +9,7 @@ import {runInNewContext} from "vm";
 import asar from "@electron/asar";
 import {afterEach, beforeEach, describe, expect, test} from "bun:test";
 import {finishSolcordAsar} from "../../scripts/helpers/finish-asar";
+import {solcordLocalAssets} from "../../scripts/helpers/local-assets";
 
 import {
     createDisposableAcceptanceManifest,
@@ -60,6 +61,7 @@ function executeShim(environment: Record<string, string>, dirname: string): {
     let buildInfo: Record<string, unknown> | null = null;
     let userData: string | null = null;
     const app = {
+        on(_event: string, _listener: (...args: unknown[]) => void) {},
         setPath(name: string, value: string) {
             if (name === "userData") userData = value;
         },
@@ -69,6 +71,7 @@ function executeShim(environment: Record<string, string>, dirname: string): {
         if (request === "node:fs") return fs;
         if (request === "node:path") return path;
         if (request === "node:module") return moduleApi;
+        if (request === "node:child_process") return {};
         if (request === "electron") return {app};
         if (path.basename(request) === "build_info.json") {
             buildInfo = JSON.parse(fs.readFileSync(request, "utf8")) as Record<string, unknown>;
@@ -239,6 +242,32 @@ afterEach(() => {
 });
 
 windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
+    test("accepts the exact pinned offline editor/catalog assets and rejects rehashed asset drift", async () => {
+        for (const asset of solcordLocalAssets(path.resolve(import.meta.dir, "../.."))) {
+            const destination = path.join(fixture.solcordSource, asset.target);
+            fs.mkdirSync(path.dirname(destination), {recursive: true});
+            fs.copyFileSync(asset.source, destination);
+        }
+        await packageSolcord(fixture);
+        expect(prepareSolcordDisposableAcceptance({
+            sourceDiscordAppDir: fixture.sourceApp,
+solcordAsar: fixture.solcordAsar,
+destinationRoot: fixture.destination,
+            expectedSolcordSha256: fixture.expectedHash,
+expectedSolcordSourceCommit: fixture.expectedSourceCommit,
+dryRun: true
+        }).dryRun).toBe(true);
+        fs.appendFileSync(path.join(fixture.solcordSource, "editor/monaco/vs/loader.js"), "\n// fixture drift\n");
+        await packageSolcord(fixture);
+        expect(() => prepareSolcordDisposableAcceptance({
+            sourceDiscordAppDir: fixture.sourceApp,
+solcordAsar: fixture.solcordAsar,
+destinationRoot: fixture.destination,
+            expectedSolcordSha256: fixture.expectedHash,
+expectedSolcordSourceCommit: fixture.expectedSourceCommit,
+dryRun: true
+        })).toThrow("pinned source");
+    }, 30_000);
     test("dry-run validates everything while performing zero writes", () => {
         const before = snapshotTree(fixture.sourceApp);
         const result = prepareSolcordDisposableAcceptance({
@@ -354,6 +383,7 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
         expect(runtimeLedger.map(entry => entry.stage)).toEqual([
             "shim-begin",
             "environment-validated",
+            "os-shell-policy-installed",
             "native-module-policy-installed",
             "solcord-require-begin",
             "solcord-require-complete",

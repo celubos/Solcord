@@ -4,6 +4,7 @@ import path from "path";
 import {app, safeStorage} from "electron";
 
 import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
+import {TIMELINE_MAX_EVENT_BYTES, TIMELINE_MAX_APPEND_BYTES, TIMELINE_MAX_APPEND_EVENTS} from "@common/solcord/timeline-limits";
 
 
 interface TimelineEvent {
@@ -39,9 +40,9 @@ interface TimelineEnvelope {
 }
 
 const TEXT_BUDGET_BYTES = 262_144_000;
-const MAX_EVENT_BYTES = 96 * 1024;
-const MAX_APPEND_BYTES = 4 * 1024 * 1024;
-const MAX_APPEND_EVENTS = 100;
+const MAX_EVENT_BYTES = TIMELINE_MAX_EVENT_BYTES;
+const MAX_APPEND_BYTES = TIMELINE_MAX_APPEND_BYTES;
+const MAX_APPEND_EVENTS = TIMELINE_MAX_APPEND_EVENTS;
 const MAX_READ_BYTES = 32 * 1024 * 1024;
 const MAX_READ_EVENTS = 10_000;
 const MAX_SEGMENT_BYTES = 160 * 1024;

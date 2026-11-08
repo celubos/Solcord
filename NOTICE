@@ -18,5 +18,11 @@ Both are licensed under the SIL Open Font License, Version 1.1. Exact source
 revisions, hashes, and license copies are recorded in
 docs/PROVENANCE_REGISTRY.md and docs/licenses/.
 
+Solcord bundles the unmodified Monaco Editor 0.52.2 min/vs runtime from
+Microsoft Corporation under the MIT License. The full copyright and license
+are included in editor/monaco/LICENSE in the packaged ASAR. The repository's
+pinned npm dependency supplies those files; editor loading uses local
+solcord:// assets and does not fetch Monaco from a CDN.
+
 No Vencord, DiscordFreeEmojis, AutoIdleOnAFK, or BetterDiscord catalog plugin
 source or asset is included in Solcord V2. See docs/PROVENANCE_REGISTRY.md.

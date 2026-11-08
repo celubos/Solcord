@@ -3,6 +3,8 @@ import {ipcMain as ipc, BrowserWindow, app, dialog, shell, type IpcMainInvokeEve
 
 import * as IPCEvents from "@common/constants/ipcevents";
 import Editor from "./editor";
+import {writeAddonFile} from "./addon-files";
+import {synchronizeNativePrivacy} from "./privacy-network";
 import BetterDiscord from "./betterdiscord";
 import ActivityCompatibility from "./activity-compatibility";
 import SolcordTimeline from "./solcord-timeline";
@@ -188,7 +190,8 @@ const openDialog = (event: IpcMainInvokeEvent, options: Partial<DialogOptions> =
 const registerPreload = (_: IpcMainEvent, path: string) => {
     app.commandLine.appendSwitch("preload", path);
 };
-const openEditor = (_: IpcMainInvokeEvent, type: "plugin" | "theme", filename: string) => {
+const openEditor = (event: IpcMainInvokeEvent, type: "plugin" | "theme", filename: string) => {
+    requireTrustedSolcordSender(event);
     Editor.open(type, filename);
 };
 
@@ -439,6 +442,14 @@ export default class IPCMain {
             ipc.handle(IPCEvents.OPEN_DIALOG, openDialog);
             ipc.handle(IPCEvents.OPEN_WINDOW, createBrowserWindow);
             ipc.handle(IPCEvents.EDITOR_OPEN, openEditor);
+            ipc.handle(IPCEvents.ADDON_FILE_WRITE, (event, kind, filename, content, expectedSha256) => {
+                requireTrustedSolcordSender(event);
+                return writeAddonFile(resolveSolcordBetterDiscordRoot(app.getPath("userData")), kind, filename, content, expectedSha256);
+            });
+            ipc.handle(IPCEvents.PRIVACY_POLICY_UPDATE, (event, policy) => {
+                requireTrustedSolcordSender(event);
+                synchronizeNativePrivacy(policy);
+            });
             ipc.handle(IPCEvents.EDITOR_SETTINGS_UPDATE, updateSettings);
             ipc.handle(IPCEvents.GET_ALLOW_PRELOAD_OVERRIDE, getAllowPreloadOverride);
             ipc.handle(IPCEvents.SET_ALLOW_PRELOAD_OVERRIDE, setAllowPreloadOverride);

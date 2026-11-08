@@ -138,7 +138,6 @@ export default function AddonCard({addon, enabled, type, disabled, onChange: par
 
         return [
             <div className="bd-name">
-                {/* {AddonStore.isOfficial(addon.filename) && <FlowerStar />} */}
                 {getString(addon.name)}
             </div>,
             <div className="bd-meta">

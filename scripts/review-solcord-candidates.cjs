@@ -26,16 +26,40 @@ function sanitize(value) {
     return String(value || "candidate").replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 160);
 }
 
-async function fetchBounded(url, maximumBytes = MAX_SOURCE_BYTES) {
+async function fetchBounded(url, maximumBytes = MAX_SOURCE_BYTES, {fetchImpl = fetch, timeoutMs = 15_000} = {}) {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:" || parsed.hostname !== "raw.githubusercontent.com") throw new Error("Only immutable raw.githubusercontent.com HTTPS sources are accepted.");
-    const response = await fetch(parsed, {redirect: "error", headers: {"user-agent": "Solcord-Provenance-Review/1.0"}});
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const contentLength = Number(response.headers.get("content-length") || 0);
-    if (contentLength > maximumBytes) throw new RangeError(`Payload exceeds ${maximumBytes} bytes.`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > maximumBytes) throw new RangeError(`Payload exceeds ${maximumBytes} bytes.`);
-    return bytes;
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0 || !Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new RangeError("Invalid download bounds.");
+    const controller = new AbortController();
+    let timer;
+    const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => {controller.abort(); reject(new Error("Source download timed out."));}, timeoutMs);
+    });
+    let reader;
+    let complete = false;
+    try {
+        const response = await Promise.race([fetchImpl(parsed, {redirect: "error", signal: controller.signal, headers: {"user-agent": "Solcord-Provenance-Review/1.0"}}), deadline]);
+        reader = response.body?.getReader();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const contentLength = Number(response.headers.get("content-length") || 0);
+        if (contentLength > maximumBytes) throw new RangeError(`Payload exceeds ${maximumBytes} bytes.`);
+        const chunks = [];
+        let total = 0;
+        while (reader) {
+            const {done, value} = await Promise.race([reader.read(), deadline]);
+            if (done) break;
+            total += value.byteLength;
+            if (total > maximumBytes) throw new RangeError(`Payload exceeds ${maximumBytes} bytes.`);
+            chunks.push(Buffer.from(value));
+        }
+        complete = true;
+        return Buffer.concat(chunks, total);
+    }
+    finally {
+        clearTimeout(timer);
+        if (!complete) {controller.abort(); void reader?.cancel().catch(() => {});}
+        reader?.releaseLock();
+    }
 }
 
 function classifyLicense(text) {
@@ -230,7 +254,9 @@ async function main() {
     process.stdout.write(`${staticPass}/${results.length} candidates passed static review; all remain non-installable until runtime acceptance.\n`);
 }
 
-main().catch((error) => {
+module.exports = {fetchBounded};
+
+if (require.main === module) main().catch((error) => {
     console.error(error instanceof Error ? error.stack : error);
     process.exitCode = 1;
 });

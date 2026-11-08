@@ -2,7 +2,7 @@
 
 ## Repository identity
 
-- Fork: `slaveofsolace/Solcord`
+- Fork: `celubos/Solcord`
 - Upstream: `BetterDiscord/BetterDiscord`
 - Release and contribution branch: `main`
 - Upstream integration branch: `development`; keep it synchronized after a release

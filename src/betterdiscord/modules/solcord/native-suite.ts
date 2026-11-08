@@ -58,7 +58,9 @@ export interface SolcordNativeSuiteAdapter {
     setLocalVolume?(userId: string, percent: number): void;
     loadedChannelMessages?(channelId: string): SolcordGlanceMessage[] | undefined;
     notificationIds?(scope: "guild" | "mentions" | "all"): string[];
-    markNotificationsRead?(scope: "guild" | "mentions" | "all", ids: readonly string[]): void;
+    notificationMessageId?(channelId: string): string | undefined;
+    notificationAccountId?(): string | undefined;
+    markNotificationsRead?(scope: "guild" | "mentions" | "all", ids: readonly string[], reviewedMessages?: Readonly<Record<string, string>>): void;
     voiceHealthSample?(): SolcordVoiceHealthSample | undefined;
     voiceHealthInitialSample?: SolcordVoiceHealthSample;
     voiceHealthCapability?: "ready" | "available" | "unavailable";
@@ -148,6 +150,24 @@ export function solcordDomMutationsNeedSync(records: readonly MutationRecord[]):
     });
 }
 
+/** Search only invalidated subtrees, including a changed root that matches itself. */
+function changedElements<T extends Element>(roots: readonly ParentNode[] | undefined, selector: string): T[] {
+    const result = new Set<T>();
+    const candidates = new Set<ParentNode>(Array.isArray(roots) ? roots : [document]);
+    for (const root of candidates) {
+        let parent = root instanceof Element ? root.parentNode : undefined;
+        let covered = false;
+        while (parent) {
+            if (candidates.has(parent as ParentNode)) {covered = true; break;}
+            parent = parent.parentNode;
+        }
+        if (covered) continue;
+        if (root instanceof Element && root.matches(selector)) result.add(root as T);
+        for (const element of root.querySelectorAll<T>(selector)) result.add(element);
+    }
+    return [...result];
+}
+
 export interface SolcordChangeStoreShape {
     addChangeListener(listener: () => void): void;
     removeChangeListener(listener: () => void): void;
@@ -191,13 +211,23 @@ interface SolcordVoiceAnalysisContext {
 
 export async function analyzeSolcordVoiceNote(
     blob: Blob,
-    contextFactory: (() => SolcordVoiceAnalysisContext) | undefined = typeof AudioContext === "function" ? () => new AudioContext() : undefined
+    contextFactory: (() => SolcordVoiceAnalysisContext) | undefined = typeof AudioContext === "function" ? () => new AudioContext() : undefined,
+    observedDurationMs?: number
 ): Promise<{durationMs?: number; waveform: readonly number[];}> {
     if (!contextFactory || blob.size < 1 || blob.size > SOLCORD_VOICE_NOTE_MAX_BYTES) return {waveform: Object.freeze([])};
+    // Never expand a long user recording into hundreds of MiB of PCM merely
+    // to draw its optional preview. Playback and explicit handoff retain Blob.
+    if (blob.size > 4 * 1024 * 1024 || (observedDurationMs !== undefined && observedDurationMs > 60_000)) {
+        return {waveform: Object.freeze([]), ...(observedDurationMs !== undefined ? {durationMs: Math.min(SOLCORD_VOICE_NOTE_MAX_DURATION_MS, Math.max(200, Math.round(observedDurationMs)))} : {})};
+    }
     let context: SolcordVoiceAnalysisContext | undefined;
     try {
         context = contextFactory();
-        const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        const decoded = await Promise.race([
+            context.decodeAudioData(await blob.arrayBuffer()),
+            new Promise<never>((_, reject) => {deadline = setTimeout(() => reject(new Error("Voice-note analysis timed out.")), 2_000);})
+        ]).finally(() => {if (deadline !== undefined) clearTimeout(deadline);});
         const durationMs = Math.round(decoded.duration * 1_000);
         if (!Number.isFinite(durationMs) || durationMs < 1 || decoded.numberOfChannels < 1 || decoded.numberOfChannels > 32) return {waveform: Object.freeze([])};
         const channels = Array.from({length: decoded.numberOfChannels}, (_, index) => decoded.getChannelData(index));
@@ -208,8 +238,11 @@ export async function analyzeSolcordVoiceNote(
             const start = Math.floor(bucket * length / bucketCount);
             const end = Math.max(start + 1, Math.floor((bucket + 1) * length / bucketCount));
             let peak = 0;
+            // Bound renderer work independently of recording length. Short inputs
+            // retain exact peaks; longer buckets use evenly distributed samples.
+            const stride = Math.max(1, Math.ceil((end - start) / 128));
             for (const channel of channels) {
-                for (let index = start; index < end; index++) peak = Math.max(peak, Math.abs(channel[index] ?? 0));
+                for (let index = start; index < end; index += stride) peak = Math.max(peak, Math.abs(channel[index] ?? 0));
             }
             return Number.isFinite(peak) ? Math.min(1, peak) : 0;
         });
@@ -218,7 +251,15 @@ export async function analyzeSolcordVoiceNote(
         return {durationMs, waveform: Object.freeze(waveform)};
     }
     catch {return {waveform: Object.freeze([])};}
-    finally {if (context) await context.close().catch(() => {});}
+    finally {
+        if (context) {
+            let deadline: ReturnType<typeof setTimeout> | undefined;
+            await Promise.race([
+                Promise.resolve().then(() => context!.close()).catch(() => {}),
+                new Promise<void>(resolve => {deadline = setTimeout(resolve, 500);})
+            ]).finally(() => {if (deadline !== undefined) clearTimeout(deadline);});
+        }
+    }
 }
 
 export function normalizeSolcordVoiceDownloadUrl(value: unknown): string | undefined {
@@ -280,6 +321,7 @@ interface RecordingState {
     chunks: Blob[];
     sizeBytes: number;
     startedAt: number;
+    startedAtMonotonic: number;
     limitTimer?: ReturnType<typeof globalThis.setTimeout>;
     abortError?: Error;
     resourcesReleased?: boolean;
@@ -419,6 +461,8 @@ export class SolcordNativeSuiteController {
     #people?: SolcordPeopleSpacesController;
     #glance?: SolcordChannelGlanceController;
     #notifications?: SolcordNotificationReviewController;
+    #reviewedNotificationMessages: Readonly<Record<string, string>> = Object.freeze({});
+    #reviewedNotificationAccount?: string;
     #motion?: SolcordMotionStudioController;
     #motionScope?: SolcordDisposalScope;
     #motionSignature?: string;
@@ -441,7 +485,9 @@ export class SolcordNativeSuiteController {
     #glanceTooltip?: HTMLElement;
     #peopleSyncQueued = false;
     #statusNotificationQueued = false;
-    readonly #domSyncCallbacks = new Set<() => void>();
+    #statusView?: readonly SolcordNativeSuiteStatus[];
+    readonly #domSyncCallbacks = new Map<(roots?: readonly ParentNode[]) => void, string>();
+    readonly #pendingDomSync = new Map<(roots?: readonly ParentNode[]) => void, Set<ParentNode>>();
     #domSyncObserver?: MutationObserver;
     #domSyncFrame = 0;
     #releaseDomSyncObserver?: () => void;
@@ -477,6 +523,13 @@ export class SolcordNativeSuiteController {
 
     statuses(): SolcordNativeSuiteStatus[] {
         return [...this.#status.values()].map(status => structuredClone(status));
+    }
+
+    statusView(): readonly SolcordNativeSuiteStatus[] {
+        return this.#statusView ??= Object.freeze(this.statuses().map(status => {
+            Object.freeze(status.enabledProviders);
+            return Object.freeze(status);
+        }));
     }
 
     configureMotion(preferences: SolcordNativeSuiteAdapter["motionPreferences"], policy: SolcordNativeMotionPolicy, addons: Readonly<Record<"BetterAnimations" | "DiscordEffects", boolean>>): void {
@@ -570,13 +623,23 @@ export class SolcordNativeSuiteController {
 
     previewNotifications(scope: "guild" | "mentions" | "all") {
         if (!this.#notifications || !this.#adapter.notificationIds) throw new Error("Notification Review is unavailable.");
-        return this.#notifications.preview(scope, this.#adapter.notificationIds(scope));
+        const ids = this.#adapter.notificationIds(scope);
+        this.#reviewedNotificationAccount = this.#adapter.notificationAccountId?.();
+        if (this.#adapter.notificationAccountId && !this.#reviewedNotificationAccount) throw new Error("Notification Review needs a current account.");
+        this.#reviewedNotificationMessages = Object.freeze(Object.fromEntries(ids.flatMap(id => {
+            const messageId = this.#adapter.notificationMessageId?.(id);
+            return typeof messageId === "string" && /^\d{1,32}$/.test(messageId) ? [[id, messageId]] : [];
+        })));
+        return this.#notifications.preview(scope, ids);
     }
 
     applyReviewedNotifications(previewId: string): void {
         if (!this.#notifications || !this.#adapter.markNotificationsRead) throw new Error("Notification Review is unavailable.");
+        if (this.#adapter.notificationAccountId && this.#adapter.notificationAccountId() !== this.#reviewedNotificationAccount) throw new Error("The account changed after notification review.");
         const intent = this.#notifications.confirm(previewId);
-        this.#adapter.markNotificationsRead(intent.payload.scope, intent.payload.notificationIds);
+        const reviewedMessages = this.#reviewedNotificationMessages;
+        this.#reviewedNotificationMessages = Object.freeze({});
+        this.#adapter.markNotificationsRead(intent.payload.scope, intent.payload.notificationIds, reviewedMessages);
     }
 
     previewTranslation(provider: SolcordTranslationProvider, endpoint: string | undefined, source: string, target: string, text: string) {
@@ -764,11 +827,11 @@ export class SolcordNativeSuiteController {
         this.#emitVoiceNotePhase();
         try {
             this.#voiceNote.beginFromUserGesture(true);
-            stream = await navigator.mediaDevices.getUserMedia({audio: true});
+            stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: {ideal: 1, max: 2}}});
             if (this.#disposed || generation !== this.#voicePromptGeneration) throw new Error("Voice-note permission request was canceled.");
             const mime = MediaRecorder.isTypeSupported("audio/ogg;codecs=opus") ? "audio/ogg;codecs=opus" : "audio/webm;codecs=opus";
             const recorder = new MediaRecorder(stream, {mimeType: mime});
-            recording = {id: `voice-note-${Date.now().toString(36)}`, recorder, stream, chunks: [], sizeBytes: 0, startedAt: Date.now()};
+            recording = {id: `voice-note-${Date.now().toString(36)}-${generation}`, recorder, stream, chunks: [], sizeBytes: 0, startedAt: Date.now(), startedAtMonotonic: performance.now()};
             recorder.addEventListener("dataavailable", event => {
                 if (!event.data.size || recording!.abortError) return;
                 const sizeBytes = recording!.sizeBytes + event.data.size;
@@ -835,6 +898,7 @@ export class SolcordNativeSuiteController {
                 if (settled) return;
                 settled = true;
                 cleanup();
+                this.#releaseVoiceNoteResources(recording);
                 if (recording.abortError) {
                     reject(recording.abortError);
                     return;
@@ -846,8 +910,9 @@ export class SolcordNativeSuiteController {
                     recording.blob = blob;
                     recording.chunks.splice(0);
                     recording.url = URL.createObjectURL(blob);
-                    const analysis = await analyzeSolcordVoiceNote(blob);
-                    const durationMs = Math.max(200, Math.min(SOLCORD_VOICE_NOTE_MAX_DURATION_MS, analysis.durationMs ?? Date.now() - recording.startedAt));
+                    const analysis = await analyzeSolcordVoiceNote(blob, undefined, performance.now() - recording.startedAtMonotonic);
+                    if (this.#disposed || this.#recording !== recording || recording.abortError) throw recording.abortError ?? new Error("Voice-note preview was canceled.");
+                    const durationMs = Math.max(200, Math.min(SOLCORD_VOICE_NOTE_MAX_DURATION_MS, Math.round(analysis.durationMs ?? performance.now() - recording.startedAtMonotonic)));
                     const preview = this.#voiceNote!.attachPreview({recordingId: recording.id, durationMs, sizeBytes: blob.size, mime, waveform: analysis.waveform});
                     const providers = this.#enabled.get("voice-note-studio") ?? [];
                     const nativeHandoffReady = typeof this.#adapter.prepareVoiceNoteUpload === "function";
@@ -953,6 +1018,7 @@ export class SolcordNativeSuiteController {
             catch {/* the owning Solcord scope still disposes every external resource */}
         }
         this.#status.clear();
+        this.#statusView = undefined;
         this.#providerReadiness.clear();
         this.#providerAvailability.clear();
         this.#voiceStateListeners.clear();
@@ -984,9 +1050,11 @@ export class SolcordNativeSuiteController {
         if (recording.abortError) return;
         recording.abortError = error;
         this.#clearVoiceNoteTimer(recording);
-        this.#voicePreviewPending = false;
-        if (this.#recording === recording) this.#recording = undefined;
-        this.#voiceNote?.cancel();
+        if (this.#recording === recording) {
+            this.#voicePreviewPending = false;
+            this.#recording = undefined;
+            this.#voiceNote?.cancel();
+        }
         try {if (recording.recorder.state !== "inactive") recording.recorder.stop();}
         catch {/* tracks and retained buffers are still released below */}
         this.#releaseVoiceNoteResources(recording);
@@ -1031,10 +1099,10 @@ export class SolcordNativeSuiteController {
             if (counter.dataset.warning !== warningValue) counter.dataset.warning = warningValue;
             if (counter.dataset.overLimit !== overLimitValue) counter.dataset.overLimit = overLimitValue;
         };
-        const sync = () => {
+        const sync = (roots?: readonly ParentNode[]) => {
             if (this.#disposed || this.#scope.disposed) return;
             if (providers.includes("CharCounter")) {
-                const editors = document.querySelectorAll<HTMLElement>("[role='textbox'][contenteditable='true']");
+                const editors = changedElements<HTMLElement>(roots, "[role='textbox'][contenteditable='true']");
                 for (const editor of editors) {
                     if (!editor.closest("[class*='channelTextArea']")) continue;
                     const host = editor.closest<HTMLElement>("[class*='channelTextArea']");
@@ -1050,7 +1118,7 @@ export class SolcordNativeSuiteController {
                     const length = composerCharacterCount(editor);
                     updateCounter(counter, `${length.toLocaleString("en-US")} / 2,000`, length >= 2_000 * (counterWarningPercent / 100), length > 2_000);
                 }
-                for (const field of document.querySelectorAll<HTMLTextAreaElement>("textarea[maxlength]")) {
+                for (const field of changedElements<HTMLTextAreaElement>(roots, "textarea[maxlength]")) {
                     const maximum = field.maxLength;
                     if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 64_000) continue;
                     let counter = field.nextElementSibling instanceof HTMLElement && field.nextElementSibling.dataset.solcordInputCount === "true"
@@ -1068,8 +1136,8 @@ export class SolcordNativeSuiteController {
                 }
             }
             if (!providers.includes("CompleteTimestamps")) return;
-            for (const element of this.#timestamps.keys()) if (!element.isConnected) this.#restoreTimestamp(element);
-            for (const element of document.querySelectorAll<HTMLElement>("time[datetime]")) {
+            for (const element of changedElements<HTMLElement>(roots, "time[datetime]")) {
+                if (!element.isConnected) {this.#restoreTimestamp(element); continue;}
                 const datetime = element.getAttribute("datetime") ?? "";
                 const previous = this.#timestamps.get(element);
                 if (previous?.datetime === datetime
@@ -1104,8 +1172,13 @@ export class SolcordNativeSuiteController {
         if (providers.includes("CharCounter") || providers.includes("CompleteTimestamps")) {
             // Only native datetime attributes need observation. Input events cover
             // text edits without observing the counter's own text mutations.
-            this.#registerDomSync(sync);
-            if (providers.includes("CharCounter")) this.#scope.listen(document, "input", sync);
+            this.#registerDomSync(sync, "[role='textbox'][contenteditable='true'],textarea[maxlength],time[datetime]");
+            if (providers.includes("CharCounter")) {
+this.#scope.listen(document, "input", event => {
+                const element = event.target instanceof Element ? event.target.closest("[role='textbox'][contenteditable='true'],textarea[maxlength]") : undefined;
+                if (element) sync([element]);
+            });
+}
             this.#scope.own(() => document.querySelectorAll("[data-solcord-composer-count],[data-solcord-input-count]").forEach(element => element.remove()), "element");
             this.#scope.own(() => this.#restoreTimestampTitles(), "element");
             sync();
@@ -1194,7 +1267,7 @@ export class SolcordNativeSuiteController {
             if (unsubscribe) releaseSubscription = this.#scope.own(unsubscribe, "listener");
             if (providers.includes("CallTimeCounter")) this.#scope.interval(() => this.#renderCallBadge(Boolean(this.#call?.summary().connected)), 1_000);
             if (providers.includes("VoiceActivity") && this.#adapter.voiceActivityAvailable) {
-                this.#registerDomSync(() => this.#renderCallPresence(Boolean(this.#call?.summary().connected)));
+                this.#registerDomSync(() => this.#renderCallPresence(Boolean(this.#call?.summary().connected)), "[class*='panels'],[class*='voice'],[class*='call']");
                 this.#scope.own(() => document.querySelectorAll("[data-solcord-voice-presence]").forEach(element => element.remove()), "element");
             }
             sync();
@@ -1387,24 +1460,50 @@ export class SolcordNativeSuiteController {
     }
 
     #installVoiceDownloadLinks(): void {
-        const sync = () => {
-            for (const audio of document.querySelectorAll<HTMLAudioElement>("audio[src]")) {
+        const currentUrl = (container: HTMLElement): string | undefined => {
+            const audio = container.querySelector<HTMLAudioElement>("audio");
+            if (!audio) return;
+            const source = audio.getAttribute("src") ? audio.src : audio.currentSrc || audio.querySelector<HTMLSourceElement>("source[src]")?.src;
+            return normalizeSolcordVoiceDownloadUrl(source);
+        };
+        const update = (container: HTMLElement, anchor: HTMLAnchorElement): boolean => {
+            const url = currentUrl(container);
+            if (!url) {anchor.remove(); return false;}
+            anchor.href = url;
+            const extension = new URL(url).pathname.match(/\.(ogg|webm|mp3|m4a|wav|flac|opus)$/i)?.[1].toLowerCase();
+            if (extension) anchor.download = `voice-message.${extension}`;
+            else anchor.removeAttribute("download");
+            return true;
+        };
+        const sync = (roots?: readonly ParentNode[]) => {
+            for (const anchor of changedElements<HTMLAnchorElement>(roots, "[data-solcord-voice-download]")) {
+                const container = anchor.parentElement;
+                if (!container || !update(container, anchor)) anchor.remove();
+            }
+            for (const audio of changedElements<HTMLAudioElement>(roots, "audio")) {
                 const container = audio.closest<HTMLElement>("[class*='voiceMessage'], [class*='voice_message'], [data-solcord-voice-message]");
-                if (!container || container.querySelector(":scope [data-solcord-voice-download]")) continue;
-                const url = normalizeSolcordVoiceDownloadUrl(audio.currentSrc || audio.src);
+                if (!container || !container.isConnected) continue;
+                const existing = container.querySelector<HTMLAnchorElement>(":scope [data-solcord-voice-download]");
+                if (existing) {update(container, existing); continue;}
+                const url = currentUrl(container);
                 if (!url) continue;
                 const anchor = document.createElement("a");
                 anchor.dataset.solcordVoiceDownload = "true";
                 anchor.className = "solcord-voice-download";
                 anchor.href = url;
-                anchor.download = "voice-message.ogg";
+                update(container, anchor);
                 anchor.textContent = "Download";
                 anchor.setAttribute("aria-label", "Download this loaded voice message");
-                anchor.addEventListener("click", event => event.stopPropagation());
+                anchor.addEventListener("click", event => {
+                    event.stopPropagation();
+                    // A virtualized row can be reused before the observer runs.
+                    // Bind the action to what its current player is showing.
+                    if (!update(container, anchor)) event.preventDefault();
+                });
                 container.append(anchor);
             }
         };
-        this.#registerDomSync(sync);
+        this.#registerDomSync(sync, "audio,source,[data-solcord-voice-download]");
         this.#scope.style("solcord-voice-download", ".solcord-voice-download{display:inline-flex;align-items:center;min-height:24px;margin-inline-start:8px;padding:2px 7px;border-radius:4px;color:var(--interactive-normal);font-size:12px;font-weight:600;text-decoration:none}.solcord-voice-download:hover,.solcord-voice-download:focus-visible{background:var(--background-modifier-hover);color:var(--interactive-hover);text-decoration:none}.solcord-voice-download:focus-visible{outline:2px solid var(--focus-primary);outline-offset:2px}");
         this.#scope.own(() => document.querySelectorAll("[data-solcord-voice-download]").forEach(element => element.remove()), "element");
         sync();
@@ -1456,7 +1555,7 @@ export class SolcordNativeSuiteController {
         const domProviders = providers.some(provider => ["PinDMs", "ServerHider", "EditServers", "ServerDetails"].includes(provider));
         if (domProviders) {
             if (providers.includes("PinDMs")) this.#scope.style("solcord-pinned-dm", "[data-solcord-pinned-dm='true']{position:relative}[data-solcord-pinned-dm='true']::after{content:'Pinned';position:absolute;inset-inline-end:8px;top:4px;padding:1px 5px;border:1px solid color-mix(in srgb,var(--solcord-accent,var(--brand-500)) 55%,transparent);border-radius:3px;color:var(--text-muted);font-size:9px;font-weight:700;letter-spacing:.04em;pointer-events:none}[data-solcord-pinned-dm='true'][data-solcord-pin-icon='false']::after{display:none}[data-solcord-pinned-unread]::before{content:attr(data-solcord-pinned-unread);position:absolute;inset-inline-end:4px;bottom:4px;min-width:15px;padding:1px 4px;border-radius:8px;background:var(--status-danger);color:white;font-size:9px;font-weight:700;text-align:center;pointer-events:none}[data-solcord-pinned-category-first='true']{margin-block-start:26px}[data-solcord-pinned-category-first='true']::before{content:attr(data-solcord-pinned-category-label);position:absolute;inset-inline:8px auto;top:-22px;color:var(--channels-default,var(--text-muted));font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;pointer-events:none}");
-            this.#registerDomSync(() => this.#schedulePeopleDom());
+            this.#registerDomSync(() => this.#schedulePeopleDom(), "[data-list-item-id],[class*='guilds'],[class*='privateChannels']");
             this.#scope.own(() => this.#restorePeopleDom(), "element");
             this.#applyPeopleDom();
         }
@@ -2108,7 +2207,7 @@ export class SolcordNativeSuiteController {
             return;
         }
         if (!this.#releaseFocusObserver) {
-            const release = this.#registerDomSync(() => this.#applyFocusChannels(this.#focusIds));
+            const release = this.#registerDomSync(() => this.#applyFocusChannels(this.#focusIds), "[data-list-item-id*='channels___'],[data-list-item-id*='channel_']");
             this.#releaseFocusObserver = () => {
                 release();
                 this.#releaseFocusObserver = undefined;
@@ -2144,21 +2243,38 @@ export class SolcordNativeSuiteController {
         if (decoration.originalNodes && element.textContent === decoration.renderedText) element.replaceChildren(...decoration.originalNodes);
     }
 
-    #registerDomSync(callback: () => void): () => void {
-        this.#domSyncCallbacks.add(callback);
+    #registerDomSync(callback: (roots?: readonly ParentNode[]) => void, selector: string): () => void {
+        this.#domSyncCallbacks.set(callback, selector);
         if (!this.#domSyncObserver) {
             const schedule = () => {
                 if (this.#domSyncFrame || this.#disposed) return;
                 this.#domSyncFrame = requestAnimationFrame(() => {
                     this.#domSyncFrame = 0;
                     if (this.#disposed) return;
-                    for (const synchronize of [...this.#domSyncCallbacks]) synchronize();
+                    const pending = [...this.#pendingDomSync];
+                    this.#pendingDomSync.clear();
+                    for (const [synchronize, roots] of pending) if (this.#domSyncCallbacks.has(synchronize)) synchronize([...roots]);
                 });
             };
             const observer = this.#domSyncObserver = new MutationObserver(records => {
-                if (solcordDomMutationsNeedSync(records)) schedule();
+                for (const [synchronize, relevantSelector] of this.#domSyncCallbacks) {
+                    for (const record of records) {
+                        if (!solcordDomMutationsNeedSync([record])) continue;
+                        const target = record.target instanceof Element ? record.target : record.target.parentElement;
+                        const roots = this.#pendingDomSync.get(synchronize) ?? new Set<ParentNode>();
+                        const nearest = target?.closest(relevantSelector);
+                        if (nearest) roots.add(nearest);
+                        for (const node of [...record.addedNodes, ...record.removedNodes]) {
+                            if (!(node instanceof Element) || (!node.matches(relevantSelector) && !node.querySelector(relevantSelector))) continue;
+                            roots.add(node);
+                            if (target && record.removedNodes.length && relevantSelector.includes("audio")) roots.add(target);
+                        }
+                        if (roots.size) this.#pendingDomSync.set(synchronize, roots);
+                    }
+                }
+                if (this.#pendingDomSync.size) schedule();
             });
-            observer.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ["datetime"]});
+            observer.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ["datetime", "src", "type"]});
             this.#releaseDomSyncObserver = this.#scope.own(() => {
                 observer.disconnect();
                 if (this.#domSyncFrame) cancelAnimationFrame(this.#domSyncFrame);
@@ -2166,6 +2282,7 @@ export class SolcordNativeSuiteController {
                 this.#domSyncObserver = undefined;
                 this.#releaseDomSyncObserver = undefined;
                 this.#domSyncCallbacks.clear();
+                this.#pendingDomSync.clear();
             }, "observer");
         }
         let released = false;
@@ -2173,6 +2290,7 @@ export class SolcordNativeSuiteController {
             if (released) return;
             released = true;
             this.#domSyncCallbacks.delete(callback);
+            this.#pendingDomSync.delete(callback);
             if (!this.#domSyncCallbacks.size) this.#releaseDomSyncObserver?.();
         };
     }
@@ -2206,6 +2324,7 @@ export class SolcordNativeSuiteController {
             && current.enabledProviders.length === next.enabledProviders.length
             && current.enabledProviders.every((provider, index) => provider === next.enabledProviders[index])) return;
         this.#status.set(id, next);
+        this.#statusView = undefined;
         if (!this.#adapter.onStatusChange || this.#statusNotificationQueued) return;
         this.#statusNotificationQueued = true;
         queueMicrotask(() => {

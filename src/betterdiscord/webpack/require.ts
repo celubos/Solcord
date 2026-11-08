@@ -8,15 +8,16 @@ export let webpackRequire: Webpack.Require;
 
 export const lazyListeners = new Set<Webpack.ModuleFilter>();
 
-let __ORIGINAL_PUSH__ = (window.webpackChunkdiscord_app ??= []).push;
+const chunkQueue = (window.rspackChunkdiscord_app ??= window.webpackChunkdiscord_app ??= []);
+let __ORIGINAL_PUSH__ = chunkQueue.push;
 
-Object.defineProperty(window.webpackChunkdiscord_app, "push", {
+Object.defineProperty(chunkQueue, "push", {
     configurable: true,
     get: () => handlePush,
     set: (newPush) => {
         __ORIGINAL_PUSH__ = newPush;
 
-        Object.defineProperty(window.webpackChunkdiscord_app, "push", {
+        Object.defineProperty(chunkQueue, "push", {
             value: handlePush,
             configurable: true,
             writable: true
@@ -111,10 +112,10 @@ function patchModuleLoading(require: Webpack.Require) {
 function handlePush(chunk: Webpack.ModuleWithoutEffect | Webpack.ModuleWithEffect) {
     const [, modules] = chunk;
     listenToModules(modules);
-    return Reflect.apply(__ORIGINAL_PUSH__, window.webpackChunkdiscord_app, [chunk]);
+    return Reflect.apply(__ORIGINAL_PUSH__, chunkQueue, [chunk]);
 }
 
-window.webpackChunkdiscord_app.push([
+chunkQueue.push([
     [Symbol("BetterDiscord")],
     {},
     (__webpack_require__: any) => {

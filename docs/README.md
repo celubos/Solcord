@@ -27,6 +27,7 @@ New to Solcord? Start with [Installation](QUICK_START.md), then the [User guide]
 - [Security architecture](development/SECURITY_ARCHITECTURE.md)
 - [Installer architecture](development/INSTALLER_ARCHITECTURE.md)
 - [Desktop testing](development/DESKTOP_TESTING.md)
+- [Compatibility contracts and maintenance gates](development/COMPATIBILITY_CONTRACTS.md)
 - [Repository inventory](audit/FULL_REPOSITORY_AUDIT.md)
 
 ## Building a release

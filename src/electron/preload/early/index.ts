@@ -14,14 +14,16 @@ function toStringFunction(stringed: string): string {
     return stringed.replace(match[1], "function");
 }
 
-(window.webpackChunkdiscord_app ??= [])
+(window.rspackChunkdiscord_app ??= window.webpackChunkdiscord_app ??= [])
     .push([[Symbol()], {}, (require: any) => {
         if (!require.b) return;
 
-        require.d = (target: object, exports: any) => {
+        // Rspack can supply direct values separately from getter exports. The
+        // third argument must survive our patchability wrapper (e.g. Logger.A).
+        require.d = (target: object, exports: Record<string, () => unknown> | undefined, values?: Record<string, unknown>) => {
             for (const key in exports) {
-                if (!Reflect.has(exports, key)) continue;
-                if (Reflect.has(target, key)) continue;
+                if (!Object.hasOwn(exports, key)) continue;
+                if (Object.hasOwn(target, key)) continue;
 
                 try {
                     Object.defineProperty(target, key, {
@@ -35,6 +37,10 @@ function toStringFunction(stringed: string): string {
                     // eslint-disable-next-line no-console
                     console.error(error);
                 }
+            }
+            for (const key in values) {
+                if (!Object.hasOwn(values, key) || Object.hasOwn(target, key)) continue;
+                Object.defineProperty(target, key, {value: values[key], writable: true, enumerable: true, configurable: true});
             }
         };
 
@@ -97,6 +103,7 @@ function toStringFunction(stringed: string): string {
             // const usesStemmerMatch = originalStr.match(USES_STEMMER);
 
             function newModule(this: any, module: any, exports: any, webpackRequire: any) {
+                module.id = String(id);
                 try {
                     if (useStemmerMatch) {
                         const stemmerId = useStemmerMatch[1];

@@ -177,11 +177,6 @@ export default function CodeEditor({
             node.appendChild(textarea);
         };
 
-        if (Editor.failedToLoad) {
-            createFallback();
-            return;
-        }
-
         let disposed = false;
         let disposer: (() => void) | undefined;
 
@@ -262,6 +257,7 @@ export default function CodeEditor({
         }
         else {
             Editor.initialize().then(() => {
+                if (disposed) return;
                 if (window.monaco?.editor) createMonaco();
                 else createFallback();
             });

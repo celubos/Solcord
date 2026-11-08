@@ -7,7 +7,7 @@ Start from `main`. Keep fixes focused and preserve BetterDiscord's public APIs, 
 Install Git and the pinned **Bun 1.4.0** runtime. The **.NET 8 SDK** is needed only to build the Windows installer.
 
 ```sh
-git clone --branch main https://github.com/slaveofsolace/Solcord.git
+git clone --branch main https://github.com/celubos/Solcord.git
 cd Solcord
 git switch -c sol/your-change
 bun install --frozen-lockfile
@@ -15,6 +15,8 @@ bun run verify
 ```
 
 Use `bun run build` for a local development build. It does not install anything or restart Discord.
+
+`bun run generate-types` is the supported TypeScript-aware API declaration generator. The obsolete `api` command used an undeclared JavaScript-only documentation tool and has been retired. TypeScript, Happy DOM, and lint tooling are declared directly as development dependencies; frozen installation must not depend on their incidental transitive presence.
 
 ## Repository layout
 
@@ -40,6 +42,7 @@ Check the relevant source before making a change. [Maintaining Solcord](MAINTAIN
 bun run test
 bun run lint
 bun run lint-css:solcord
+bun run lint-css:baseline
 bun run typecheck
 bun run generate-types
 bun run circulars

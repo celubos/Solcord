@@ -17,6 +17,17 @@ function localFactory(overrides: Partial<SolcordLocalTranslatorFactory> = {}): S
 }
 
 describe("Solcord local Translation Desk", () => {
+    test("different scripts require the provider while canonical identical tags remain local", async () => {
+        const translated: string[] = [];
+        const engine = new SolcordLocalTranslationEngine(localFactory({
+            create: async options => ({translate: async text => {translated.push(`${options.sourceLanguage}:${options.targetLanguage}`); return `${text}-converted`;}, destroy: () => {}})
+        }));
+        await expect(engine.translate("zh-Hans", "zh-Hant", "sample")).resolves.toBe("sample-converted");
+        expect(translated).toEqual(["zh-Hans:zh-Hant"]);
+        await expect(engine.translate("en-US", "EN-us", "same")).resolves.toBe("same");
+        expect(translated).toHaveLength(1);
+        engine.dispose();
+    });
     test("structurally resolves the documented local factories and translates without a network fallback", async () => {
         const calls: string[] = [];
         const host = {

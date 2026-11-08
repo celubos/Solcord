@@ -1,4 +1,4 @@
-const amdLoader = window.require as unknown as ((files: ["vs/editor/editor.main"], cb: (monaco: typeof import("monaco-editor")) => void) => void) & {
+const amdLoader = window.require as unknown as ((files: ["vs/editor/editor.main"], cb: (monaco: typeof import("monaco-editor")) => void, error?: (error: Error) => void) => void) & {
     config: any;
 };
 
@@ -12,16 +12,11 @@ document.getElementById("language")!.textContent = window.Editor.type === "plugi
 
 document.getElementById("open-editor")!.addEventListener("click", () => window.Editor.open());
 
-const baseUrl = `https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/${process.env.__MONACO_VERSION__}/min`;
+const baseUrl = "solcord://editor/monaco";
 
 Object.defineProperty(window, "MonacoEnvironment", {
     value: {
-        getWorker: (workerId, label) => new Worker(`data:text/javascript;charset=utf-8,${encodeURIComponent(`
-            self.MonacoEnvironment = {
-                baseUrl: '${baseUrl}'
-            };
-            importScripts('${baseUrl}/vs/base/worker/${workerId}');`
-        )}`, {type: "classic", name: label})
+        getWorker: createLocalMonacoWorker
     } as typeof window.MonacoEnvironment
 });
 
@@ -30,6 +25,16 @@ amdLoader.config({paths: {vs: `${baseUrl}/vs`}});
 const {options, liveUpdate: defaultLiveUpdate, discordTheme, alwaysOnTop} = window.Editor.settings.get();
 
 const loader = document.getElementById("loader")!;
+let loadFinished = false;
+const failLoading = () => {
+    if (loadFinished) return;
+    loadFinished = true;
+    loader.replaceChildren();
+    const message = document.createElement("p");
+    message.textContent = "The local editor could not load. Your file has not changed. Close and reopen this window to retry.";
+    loader.append(message);
+};
+const loadDeadline = setTimeout(failLoading, 10_000);
 
 function setLoaderTheme(theme: string) {
     // var(--background-base-low)
@@ -74,6 +79,9 @@ setLoaderTheme(discordTheme);
 window.Editor.settings.subscribe(({discordTheme: theme}) => setLoaderTheme(theme));
 
 amdLoader(["vs/editor/editor.main"], (monaco) => {
+    if (loadFinished) return;
+    loadFinished = true;
+    clearTimeout(loadDeadline);
     loader.remove();
 
     monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
@@ -213,4 +221,5 @@ amdLoader(["vs/editor/editor.main"], (monaco) => {
         document.body.classList.remove("pinned");
         window.Editor.settings.set({alwaysOnTop: false});
     });
-});
+}, () => {clearTimeout(loadDeadline); failLoading();});
+import {createLocalMonacoWorker} from "../common/monaco-worker";

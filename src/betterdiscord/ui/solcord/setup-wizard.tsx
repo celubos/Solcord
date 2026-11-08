@@ -6,7 +6,7 @@ import ThemeManager from "@modules/thememanager";
 import SolcordRuntime from "@modules/solcord/runtime";
 import SolcordSettings, {SOLCORD_PRESET_ADDONS, SOLCORD_THEMES} from "@modules/solcord/store";
 import type {SolcordSettingsDocument, SolcordSetupDraft, SolcordThemeId} from "@modules/solcord/contracts";
-import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-catalog.generated";
+import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-trust.generated";
 import {communityAddonIsEnabled, isSolcordBuiltInAddon, resolveCommunityAddon} from "@common/solcord/builtin-addons";
 import {recommendedSolcordSetupAddons, resolveSolcordSetupPlan, type SolcordSetupCandidateDecision} from "@common/solcord/setup-catalog";
 import {resolveSolcordPerformancePolicy, SOLCORD_PERFORMANCE_POLICIES, SOLCORD_SETUP_STEPS, type SolcordAppearancePreferences, type SolcordPerformanceProfile, type SolcordSetupPreset} from "@common/solcord/product";
@@ -283,7 +283,7 @@ function ReviewStep({draft}: {draft: SolcordSetupDraft;}) {
     const communityCandidates = SOLCORD_RUNTIME_ADDONS.filter(candidate => executable.has(candidate.name) && plan.decisions.find(decision => decision.name === candidate.name)?.availability === "accepted");
     const dependencies = SOLCORD_RUNTIME_DEPENDENCIES.filter(candidate => plan.dependencyNames.includes(candidate.name));
     const selectedTheme = SOLCORD_THEMES.find(theme => theme.id === draft.selectedTheme)!;
-    const themeBytes = SOLCORD_RUNTIME_THEMES.reduce((sum, theme) => sum + new TextEncoder().encode(theme.content).byteLength, 0);
+    const themeBytes = SOLCORD_RUNTIME_THEMES.reduce((sum, theme) => sum + theme.sizeBytes, 0);
     const diskBytes = communityCandidates.reduce((sum, candidate) => sum + candidate.sizeBytes, 0) + dependencies.reduce((sum, dependency) => sum + dependency.sizeBytes, 0) + themeBytes;
     const conflicts = [...new Set(plan.decisions.filter(decision => decision.willApply).flatMap(decision => [...decision.conflicts]))];
     const changes = SolcordRuntime.previewSetup(draft);

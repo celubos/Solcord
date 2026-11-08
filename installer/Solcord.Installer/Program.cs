@@ -90,6 +90,8 @@ internal static class InstallerSelfTest
             ValidateDiscordUpdateReinstall(embeddedBundleRoot, Path.Combine(root, "discord-update-reinstall"));
             stage = "dpi-layout-matrix";
             InstallerForm.ValidateGeometryMatrix(embeddedBundleRoot);
+            stage = "responsive-single-flight-engine-operation";
+            InstallerForm.ValidateResponsiveOperations(embeddedBundleRoot);
             string local = Path.Combine(root, "local");
             string roaming = Path.Combine(root, "roaming");
             string discord = Path.Combine(local, "Discord", "app-1.2.3");

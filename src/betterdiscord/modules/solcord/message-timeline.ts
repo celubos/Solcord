@@ -43,6 +43,27 @@ export interface TimelineMessageState {
 export type DiscordTimelineDispatchType = "MESSAGE_CREATE" | "MESSAGE_UPDATE" | "MESSAGE_DELETE" | "MESSAGE_DELETE_BULK";
 export type NormalizedDiscordTimelineEvent = Omit<TimelineEvent, "eventId" | "observedAt">;
 
+export function resolveTimelineEventIdentity(
+    event: NormalizedDiscordTimelineEvent,
+    known?: {authorId?: string; authorIsBot?: boolean; authorLabel?: string; channelId: string;}
+): NormalizedDiscordTimelineEvent | undefined {
+    if (known && known.channelId !== event.channelId) return;
+    if (known?.authorId && event.authorId && known.authorId !== event.authorId) return;
+    if (event.kind === "edit" && !known?.authorId && !event.authorId) return;
+    return {...known,
+...event,
+        ...(known?.authorId ? {authorId: known.authorId, authorIsBot: known.authorIsBot, authorLabel: known.authorLabel} : {})};
+}
+
+export function timelineAuthorPolicyAllows(event: NormalizedDiscordTimelineEvent, filters: SolcordTimelinePolicy["filters"], accountId?: string, blocked = false): boolean {
+    if (event.kind === "delete" || event.kind === "bulk-delete") return true;
+    if (filters.alwaysLogGhostPings && event.mentionedCurrentUser) return true;
+    if ((filters.ignoreSelf || filters.ignoreBots || filters.ignoreBlockedUsers) && !event.authorId) return false;
+    if (filters.ignoreSelf && event.authorId === accountId) return false;
+    if (filters.ignoreBots && event.authorIsBot !== false) return false;
+    return !(filters.ignoreBlockedUsers && blocked);
+}
+
 const MAX_CONTENT_CHARS = 64_000;
 const MAX_AUTHOR_CHARS = 160;
 const MAX_ATTACHMENTS = 20;
@@ -195,7 +216,7 @@ export function normalizeDiscordTimelineDispatch(type: DiscordTimelineDispatchTy
         channelId,
         ...(authorId ? {authorId} : {}),
         ...(authorLabel ? {authorLabel: authorLabel.slice(0, MAX_AUTHOR_CHARS)} : {}),
-        ...(typeof author?.bot === "boolean" ? {authorIsBot: author.bot} : {}),
+        ...(authorId && type === "MESSAGE_CREATE" ? {authorIsBot: author?.bot === true} : typeof author?.bot === "boolean" ? {authorIsBot: author.bot} : {}),
         ...(currentUserId && hasMentionList ? {mentionedCurrentUser} : {}),
         ...(typeof message.content === "string" ? {content: safeContent(message.content)} : {}),
         ...(attachments.length ? {attachments} : {})
@@ -293,6 +314,10 @@ export class MessageTimelineJournal {
     #textBytes = 0;
     #estimatedBytes = 0;
     #limits: TimelineJournalLimits;
+    #batching = false;
+    #viewCache?: {key: string; value: readonly TimelineMessageState[];};
+    #recordViews = new WeakMap<TimelineMessageState, TimelineMessageState>();
+    #statusCache?: {records: number; deleted: number; edited: number; ghostPings: number; textBytes: number;};
 
     constructor(limits: Partial<TimelineJournalLimits> = {}) {
         this.#limits = {
@@ -310,7 +335,16 @@ export class MessageTimelineJournal {
             .map((event, index) => ({event: normalizeTimelineEvent(event), index}))
             .filter((entry): entry is {event: TimelineEvent; index: number;} => Boolean(entry.event))
             .sort((left, right) => left.event.observedAt - right.event.observedAt || left.index - right.index);
-        for (const {event} of ordered) this.apply(event, policy, now);
+        this.applyBatch(ordered.map(({event}) => event), policy, now);
+    }
+
+    /** Replay and bulk dispatch prune once, rather than scanning N records N times. */
+    applyBatch(events: readonly TimelineEvent[], policy: SolcordTimelinePolicy, now = Date.now()): TimelineEvent[] {
+        this.#batching = true;
+        let changed: TimelineEvent[];
+        try {changed = events.filter(event => this.apply(event, policy, now));}
+        finally {this.#batching = false; this.prune(policy, now);}
+        return changed;
     }
 
     apply(raw: TimelineEvent, policy: SolcordTimelinePolicy, now = Date.now()): boolean {
@@ -371,11 +405,12 @@ export class MessageTimelineJournal {
 
         if (!changed) return false;
         this.#rememberEvent(event.eventId, event.messageId);
-        this.prune(policy, now);
+        if (!this.#batching) this.prune(policy, now);
         return this.#messages.has(event.messageId);
     }
 
-    prune(policy: SolcordTimelinePolicy, now = Date.now()): void {
+    prune(policy: SolcordTimelinePolicy, now = Date.now()): number {
+        const before = this.#messages.size;
         if (policy.retention !== "session") {
             const cutoff = retentionCutoff(policy, now);
             for (const [id, state] of this.#messages) if (state.updatedAt < cutoff) this.#deleteMessage(id);
@@ -390,22 +425,49 @@ export class MessageTimelineJournal {
             if (!oldest) break;
             this.#deleteMessage(oldest);
         }
+        return before - this.#messages.size;
     }
 
     snapshot(channelId?: string, requestedLimit = this.#limits.snapshotRecords): TimelineMessageState[] {
+        return this.view(channelId, requestedLimit).map(state => structuredClone(state));
+    }
+
+    /** Immutable, revision-stable selector for the UI; snapshot() remains defensive. */
+    view(channelId?: string, requestedLimit = this.#limits.snapshotRecords): readonly TimelineMessageState[] {
         const limit = boundedPositiveInteger(requestedLimit, this.#limits.snapshotRecords);
-        return [...this.#messages.values()]
+        const key = `${channelId ?? ""}:${limit}`;
+        if (this.#viewCache?.key === key) return this.#viewCache.value;
+        const value = Object.freeze([...this.#messages.values()]
             .filter(state => !channelId || state.channelId === channelId)
             .sort((left, right) => right.updatedAt - left.updatedAt)
             .slice(0, limit)
-            .map(state => structuredClone(state));
+            .map(state => {
+                const cached = this.#recordViews.get(state);
+                if (cached) return cached;
+                const copy = structuredClone(state);
+                copy.edits.forEach(Object.freeze);
+                copy.attachments.forEach(Object.freeze);
+                Object.freeze(copy.edits);
+                Object.freeze(copy.attachments);
+                Object.freeze(copy);
+                this.#recordViews.set(state, copy);
+                return copy;
+            }));
+        this.#viewCache = {key, value};
+        return value;
     }
 
     has(messageId: string): boolean {
         return this.#messages.has(messageId);
     }
 
+    identity(messageId: string): Pick<TimelineMessageState, "authorId" | "authorIsBot" | "authorLabel" | "channelId"> | undefined {
+        const state = this.#messages.get(messageId);
+        return state ? {authorId: state.authorId, authorIsBot: state.authorIsBot, authorLabel: state.authorLabel, channelId: state.channelId} : undefined;
+    }
+
     status(): {records: number; deleted: number; edited: number; ghostPings: number; textBytes: number;} {
+        if (this.#statusCache) return this.#statusCache;
         let deleted = 0;
         let edited = 0;
         let ghostPings = 0;
@@ -414,16 +476,18 @@ export class MessageTimelineJournal {
             if (state.edits.length > 0) edited++;
             if (state.ghostPingAt !== undefined) ghostPings++;
         }
-        return {
+        return this.#statusCache = Object.freeze({
             records: this.#messages.size,
             deleted,
             edited,
             ghostPings,
             textBytes: this.#textBytes
-        };
+        });
     }
 
     clear(): void {
+        this.#invalidateViews();
+        this.#recordViews = new WeakMap();
         this.#messages.clear();
         this.#seenEvents.clear();
         this.#eventsByMessage.clear();
@@ -432,12 +496,15 @@ export class MessageTimelineJournal {
     }
 
     #setMessage(state: TimelineMessageState): void {
+        this.#invalidateViews();
         this.#messages.set(state.messageId, state);
         this.#textBytes += stateTextBytes(state);
         this.#estimatedBytes += estimatedStateBytes(state);
     }
 
     #touchMessage(state: TimelineMessageState, previousTextBytes: number, previousEstimatedBytes: number): void {
+        this.#invalidateViews();
+        this.#recordViews.delete(state);
         this.#textBytes += stateTextBytes(state) - previousTextBytes;
         this.#estimatedBytes += estimatedStateBytes(state) - previousEstimatedBytes;
         this.#messages.delete(state.messageId);
@@ -445,6 +512,7 @@ export class MessageTimelineJournal {
     }
 
     #deleteMessage(messageId: string): void {
+        this.#invalidateViews();
         const state = this.#messages.get(messageId);
         if (state) {
             this.#textBytes = Math.max(0, this.#textBytes - stateTextBytes(state));
@@ -455,6 +523,8 @@ export class MessageTimelineJournal {
         if (eventIds) for (const eventId of eventIds) this.#seenEvents.delete(eventId);
         this.#eventsByMessage.delete(messageId);
     }
+
+    #invalidateViews(): void {this.#viewCache = undefined; this.#statusCache = undefined;}
 
     #eventWasSeen(eventId: string): boolean {
         const messageId = this.#seenEvents.get(eventId);

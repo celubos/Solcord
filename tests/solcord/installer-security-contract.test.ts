@@ -100,7 +100,7 @@ describe("Solcord installer security contracts", () => {
 
     test("runs release checks for both main and development pushes and pull requests", () => {
         const compatibilityCi = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
-        for (const workflow of [fullCi, compatibilityCi]) {
+        for (const workflow of [fullCi]) {
             for (const event of ["push", "pull_request"]) {
                 const list = workflow.match(new RegExp(`  ${event}:\\r?\\n    branches: (\\[[^\\r\\n]+\\])`))?.[1];
                 expect(list).toBeDefined();
@@ -109,6 +109,12 @@ describe("Solcord installer security contracts", () => {
                 expect(branches).toContain("development");
             }
         }
+        expect(compatibilityCi).toContain("workflow_dispatch:");
+        expect(compatibilityCi).toContain("uses: ./.github/workflows/solcord-ci.yml");
+        expect(compatibilityCi).not.toContain("bun run test");
+        expect(fullCi).toContain("name: build");
+        expect(fullCi).toContain("needs: verify");
+        expect(fullCi).toContain("run: test \"$SOURCE_RESULT\" = success");
     });
 
     test("verifies embedded bytes before private extraction and cleans only known files", () => {
@@ -280,7 +286,8 @@ describe("Solcord installer security contracts", () => {
         expect(engine).toContain("SolcordLauncher.Remove");
         const rollback = engine.slice(engine.indexOf("internal string RollBack"), engine.indexOf("internal string Uninstall"));
         expect(rollback).toContain("SolcordLauncher.Remove(_roamingAppData)");
-        expect(installerForm).toContain("The Solcord shortcut was removed.");
+        expect(rollback).toContain("state.PreviousLauncherRecorded");
+        expect(installerForm).toContain("The previous installation and its ownership record were restored");
         expect(installerProject).toContain("Solcord.Installer.Resources.solcord.ico");
     });
 

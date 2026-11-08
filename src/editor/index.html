@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' solcord:; style-src 'self' solcord: 'unsafe-inline'; font-src solcord:; worker-src blob: solcord:; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
     <title> - Solcord Editor</title>
 </head>
 
@@ -292,7 +293,7 @@
         <span>Loading Solcord editor…</span>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.1/require.min.js"></script>
+    <script src="solcord://editor/monaco/vs/loader.js"></script>
 
     <script src="./script.js"></script>
 </body>

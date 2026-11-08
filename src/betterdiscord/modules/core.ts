@@ -32,19 +32,45 @@ import Patcher from "./patcher";
 import SolcordRuntime from "./solcord/runtime";
 import SolcordPanel from "@ui/solcord/panel";
 import {ShieldCheckIcon} from "lucide-react";
+import {waitForDiscordConnection} from "./connection";
 
 export default new class Core {
     hasStarted = false;
-
-    trustBetterDiscordProtocol() {
-        Patcher.after("BetterDiscordProtocol", getStore("MaskedLinkStore")!, "isTrustedProtocol", (_, [url]: any, ret) => ret || url.startsWith("betterdiscord://"));
+    startupState: "idle" | "starting" | "ready" | "failed" = "idle";
+    private startupPromise?: Promise<void>;
+    private readonly completedPhases = new Set<string>();
+    private async phase(name: string, action: () => unknown) {
+        if (this.completedPhases.has(name)) return;
+        await action();
+        this.completedPhases.add(name);
     }
 
-    async startup() {
-        if (this.hasStarted) return;
-        this.hasStarted = true;
+    trustBetterDiscordProtocol() {
+        const store = getStore("MaskedLinkStore");
+        if (store && typeof store.isTrustedProtocol === "function") Patcher.after("BetterDiscordProtocol", store, "isTrustedProtocol", (_, [url]: any, ret) => ret || url.startsWith("betterdiscord://"));
+    }
 
-        this.trustBetterDiscordProtocol();
+    startup(): Promise<void> {
+        if (this.hasStarted) return Promise.resolve();
+        if (this.startupPromise) return this.startupPromise;
+        this.startupState = "starting";
+        this.startupPromise = this.runStartup().then(() => {
+            this.hasStarted = true;
+            this.startupState = "ready";
+        }, error => {
+            this.startupState = "failed";
+            Logger.error("Startup", "Solcord startup did not complete; addon activation remains guarded.", error);
+            ToastStore.error("Solcord could not finish startup. Check your connection and restart Discord to retry.", {forceShow: true, timeout: 10_000, group: "solcord-startup-failure"});
+        }).finally(() => {
+            LoadingIcon.hide();
+            this.startupPromise = undefined;
+        });
+        return this.startupPromise;
+    }
+
+    private async runStartup() {
+
+        await this.phase("protocol", () => this.trustBetterDiscordProtocol());
 
         // Load css early
         Logger.log("Startup", "Injecting BD Styles");
@@ -52,12 +78,12 @@ export default new class Core {
         DOMManager.injectStyle("bd-stylesheet", bundledStyles);
 
         Logger.log("Startup", "Initializing LocaleManager");
-        LocaleManager.initialize();
+        await this.phase("locale", () => LocaleManager.initialize());
 
         Logger.log("Startup", "Initializing Settings");
-        Settings.initialize();
-        await SolcordRuntime.initialize();
-        SolcordRuntime.attachControlCenter(() => {
+        await this.phase("settings", () => Settings.initialize());
+        await this.phase("runtime", () => SolcordRuntime.initialize());
+        await this.phase("panel", () => SolcordRuntime.attachControlCenter(() => {
             Settings.registerPanel("solcord", "Solcord Suite", {
                 order: 0,
                 icon: ShieldCheckIcon,
@@ -65,17 +91,17 @@ export default new class Core {
                 translateLabel: false,
                 searchable: () => ["Solcord", "Activity Bridge", "Plugin Doctor", "profiles", "privacy", "recovery", "Do Not Track", "Invisible Typing", "Double Click to Reply"]
             });
-        });
-        SettingsRenderer.initialize();
+        }));
+        await this.phase("settings-renderer", () => SettingsRenderer.initialize());
 
         Logger.log("Startup", "Initializing AddonStore");
-        AddonStore.initialize();
+        await this.phase("addon-store", () => AddonStore.initialize());
 
         Logger.log("Startup", "Initializing CommandManager");
-        CommandManager.initialize();
+        await this.phase("commands", () => CommandManager.initialize());
 
         Logger.log("Startup", "Initializing Internal InstallCSS");
-        InstallCSS.initialize();
+        await this.phase("css", () => InstallCSS.initialize());
 
         Logger.log("Startup", "Waiting for connection...");
         await this.waitForConnection();
@@ -84,17 +110,17 @@ export default new class Core {
         await SolcordRuntime.openPendingFirstSetup();
 
         Logger.log("Startup", "Initializing FloatingWindows");
-        FloatingWindows.initialize();
+        await this.phase("floating-windows", () => FloatingWindows.initialize());
 
         Logger.log("Startup", "Initializing Toasts");
-        Toasts.initialize();
+        await this.phase("toasts", () => Toasts.initialize());
 
         Logger.log("Startup", "Starting Solcord privacy policy");
         const privacyPolicyReady = await SolcordRuntime.start();
 
         Logger.log("Startup", "Initializing Builtins");
         for (const module in Builtins) {
-            Builtins[module as keyof typeof Builtins].initialize();
+            await this.phase(`builtin:${module}`, () => Builtins[module as keyof typeof Builtins].initialize());
         }
 
         PluginManager.holdAddonActivation();
@@ -103,10 +129,10 @@ export default new class Core {
         ThemeManager.setAddonActivationGuard(theme => SolcordRuntime.canActivateCommunityTheme(theme));
 
         Logger.log("Startup", "Loading Plugins");
-        PluginManager.initialize();
+        await this.phase("plugins", () => PluginManager.initialize());
 
         Logger.log("Startup", "Loading Themes");
-        ThemeManager.initialize();
+        await this.phase("themes", () => ThemeManager.initialize());
 
         Logger.log("Startup", "Validating reviewed addons before activation");
         const addonActivationAllowed = privacyPolicyReady && await SolcordRuntime.enforceAddonIntegrityBeforeStart();
@@ -121,7 +147,7 @@ export default new class Core {
         }
 
         Logger.log("Startup", "Initializing Updater");
-        Updater.initialize();
+        await this.phase("updater", () => Updater.initialize());
 
         Logger.log("Startup", "Removing Loading Icon");
         LoadingIcon.hide();
@@ -142,9 +168,6 @@ export default new class Core {
     }
 
     waitForConnection() {
-        return new Promise<void>(done => {
-            if (Stores.UserStore?.getCurrentUser()) return done();
-            DiscordModules.Dispatcher?.subscribe("CONNECTION_OPEN", done);
-        });
+        return waitForDiscordConnection(() => Stores.UserStore?.getCurrentUser(), () => DiscordModules.Dispatcher);
     }
 };

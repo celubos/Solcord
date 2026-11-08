@@ -3,6 +3,7 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import {solcordLocalAssets} from "./helpers/local-assets";
 
 
 const MANIFEST_FILE = "acceptance-manifest.json";
@@ -32,6 +33,12 @@ const EXPECTED_SOLCORD_ASAR_FILES = [
     "solcord.js"
 ] as const;
 const EXPECTED_SOLCORD_ASAR_DIRECTORIES = ["editor"] as const;
+const LOCAL_ASSETS = solcordLocalAssets(path.resolve(__dirname, ".."));
+const LOCAL_ASSET_PATHS = LOCAL_ASSETS.map(asset => asset.target);
+const EXPANDED_DIRECTORIES = new Set<string>(EXPECTED_SOLCORD_ASAR_DIRECTORIES);
+for (const asset of LOCAL_ASSET_PATHS) {
+    for (let directory = path.posix.dirname(asset); directory !== "."; directory = path.posix.dirname(directory)) EXPANDED_DIRECTORIES.add(directory);
+}
 const EXPECTED_PROVENANCE_MODULES = ["earlyRenderer", "editor", "editorHtml", "editorPreload", "main", "preload", "solcord"] as const;
 
 export interface DisposableAcceptanceOptions {
@@ -355,8 +362,11 @@ function validateAsarHeaderTree(header: Record<string, unknown>, dataOffset: num
     };
     visit(header.files, "");
 
-    if (JSON.stringify([...entries.keys()].sort()) !== JSON.stringify([...EXPECTED_SOLCORD_ASAR_FILES].sort())
-        || JSON.stringify([...directories].sort()) !== JSON.stringify([...EXPECTED_SOLCORD_ASAR_DIRECTORIES].sort())) {
+    const paths = JSON.stringify([...entries.keys()].sort());
+    const folders = JSON.stringify([...directories].sort());
+    const legacy = paths === JSON.stringify([...EXPECTED_SOLCORD_ASAR_FILES].sort()) && folders === JSON.stringify([...EXPECTED_SOLCORD_ASAR_DIRECTORIES].sort());
+    const expanded = paths === JSON.stringify([...EXPECTED_SOLCORD_ASAR_FILES, ...LOCAL_ASSET_PATHS].sort()) && folders === JSON.stringify([...EXPANDED_DIRECTORIES].sort());
+    if (!legacy && !expanded) {
         throw new Error("Solcord ASAR does not contain the exact expected runtime entrypoints.");
     }
 
@@ -551,6 +561,14 @@ function readPackedAsarEntry(file: string, envelope: AsarEnvelope, entryPath: st
 function inspectSolcordAsar(file: string, expectedSourceCommit: string): SolcordAsarIdentity {
     try {
         const envelope = readBoundedAsarEnvelope(file);
+        if (envelope.entries.has("catalog/index.json")) {
+            for (const asset of LOCAL_ASSETS) {
+                const entry = envelope.entries.get(asset.target);
+                if (!entry?.integrity || entry.integrity.hash !== hashStableRegularFile(asset.source, "Pinned local Solcord asset").sha256) {
+                    throw new Error(`Solcord local asset does not match its pinned source: ${asset.target}.`);
+                }
+            }
+        }
         const packageMetadata = parseEmbeddedJson(readPackedAsarEntry(file, envelope, "package.json", "Solcord ASAR package.json"), "Solcord ASAR package.json");
         const packageKeysAreCanonical = exactKeys(packageMetadata, ["name", "main"])
             || exactKeys(packageMetadata, ["name", "main", "type"]);
@@ -1027,12 +1045,106 @@ function cleanupOwnedStagingDirectory(identity: OwnedStagingDirectory): void {
     if (isOwnedStagingDirectory(identity)) fs.rmSync(identity.path, {recursive: true, force: true});
 }
 
+/** Block the copied host's known Windows shell integration routes. */
+export function installDisposableShellGuards(
+    electron: {app: Record<string, unknown>; shell?: Record<string, unknown>;},
+    moduleApi: {prototype: {require: (this: unknown, request: string, ...args: unknown[]) => unknown;};},
+    fileSystem: Pick<typeof fs, "lstatSync" | "mkdirSync" | "realpathSync">,
+    paths: Pick<typeof path, "join" | "resolve" | "relative" | "isAbsolute">,
+    acceptanceRoot: string,
+    childProcess?: Record<string, unknown>
+): void {
+    const root = fileSystem.realpathSync(acceptanceRoot);
+    const block = (owner: Record<string, unknown> | undefined, name: string, result?: unknown) => {
+        if (!owner || typeof owner[name] !== "function") return;
+        Object.defineProperty(owner, name, {configurable: false, writable: false, value: () => result});
+    };
+    block(electron.app, "setAsDefaultProtocolClient", false);
+    block(electron.app, "setLoginItemSettings");
+    block(electron.app, "setUserTasks", false);
+    block(electron.app, "setJumpList", "ok");
+    block(electron.app, "addRecentDocument");
+    block(electron.app, "clearRecentDocuments");
+    block(electron.shell, "writeShortcutLink", false);
+    // The shipping host also registers protocols by spawning reg.exe directly;
+    // Electron's setAsDefaultProtocolClient guard cannot intercept that route.
+    for (const name of ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync"]) {
+        const original = childProcess?.[name];
+        if (typeof original !== "function") continue;
+        Object.defineProperty(childProcess, name, {configurable: false,
+writable: false,
+value: function(this: unknown, command: unknown, ...args: unknown[]) {
+            const text = typeof command === "string" ? command : "";
+            const token = /^\s*(?:"([^"]+)"|(\S+))/.exec(text);
+            const executable = (token?.[1] ?? token?.[2] ?? "").split(/[\\/]/).pop()?.toLowerCase() ?? "";
+            const shellMutation = /^(?:reg|update|squirrel)(?:\.exe)?$/.test(executable)
+                || /^(?:cmd|powershell|pwsh|wscript|cscript)(?:\.exe)?$/.test(executable)
+                && /\breg(?:\.exe)?\b|--(?:createShortcut|removeShortcut|squirrel-)|(?:New|Set|Remove)-ItemProperty|\.lnk\b/i.test([text, ...args.filter(value => Array.isArray(value)).flat()].join(" "));
+            if (shellMutation) throw Object.assign(new Error("Windows shell integration is blocked in disposable acceptance."), {code: "EACCES"});
+            return Reflect.apply(original, this, [command, ...args]);
+        }});
+    }
+
+    const localFolder = (raw: unknown) => {
+        if (typeof raw !== "string" || !/^[a-z0-9_-]{1,64}$/i.test(raw)) throw new Error("Unsupported disposable shell folder.");
+        let cursor = root;
+        for (const segment of ["profile", "Shell", raw.toLowerCase()]) {
+            cursor = paths.join(cursor, segment);
+            let stat;
+            try {stat = fileSystem.lstatSync(cursor);}
+            catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+                fileSystem.mkdirSync(cursor);
+                stat = fileSystem.lstatSync(cursor);
+            }
+            const relative = paths.relative(root, fileSystem.realpathSync(cursor));
+            if (!stat.isDirectory() || stat.isSymbolicLink() || relative.startsWith("..") || paths.isAbsolute(relative)) throw new Error("Disposable shell folder lost ownership.");
+        }
+        return cursor;
+    };
+    const updaterPath = paths.join(root, "runtime", "updater.node").toLowerCase();
+    const guardedModules = new WeakMap<object, object>();
+    const originalRequire = moduleApi.prototype.require;
+    moduleApi.prototype.require = function(request, ...args) {
+        const value = Reflect.apply(originalRequire, this, [request, ...args]);
+        if (typeof request !== "string" || !paths.isAbsolute(request) || paths.resolve(request).toLowerCase() !== updaterPath) return value;
+        if (!value || (typeof value !== "object" && typeof value !== "function")) throw new Error("Copied native updater exports are invalid.");
+        const cached = guardedModules.get(value);
+        if (cached) return cached;
+        const NativeUpdater = (value as {Updater?: unknown;}).Updater;
+        if (typeof NativeUpdater !== "function") throw new Error("Copied native updater constructor is unavailable.");
+        const GuardedUpdater = new Proxy(NativeUpdater, {
+            construct(target, argumentsList) {
+                const native = Reflect.construct(target, argumentsList);
+                for (const name of ["create_shortcut", "known_folder"]) {
+                    const descriptor = Object.getOwnPropertyDescriptor(native, name);
+                    if (descriptor && !descriptor.configurable && ("value" in descriptor ? !descriptor.writable : !descriptor.get)) throw new Error("Copied native updater shell operations cannot be guarded.");
+                }
+                return new Proxy(native, {
+                    get(instance, key) {
+                        if (key === "create_shortcut") return () => false;
+                        if (key === "known_folder") return localFolder;
+                        const member = Reflect.get(instance, key, instance);
+                        return typeof member === "function" ? member.bind(instance) : member;
+                    }
+                });
+            }
+        });
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        descriptors.Updater = {value: GuardedUpdater, enumerable: true, configurable: false, writable: false};
+        const guarded = Object.create(Object.getPrototypeOf(value), descriptors);
+        guardedModules.set(value, guarded);
+        return guarded;
+    };
+}
+
 export function renderDisposableAcceptanceShim(): string {
     return `"use strict";
 
 const fs = require("node:fs");
 const path = require("node:path");
-const {app} = require("electron");
+const electron = require("electron");
+const {app} = electron;
 const requestedAcceptanceMode = process.env.SOLCORD_ACCEPTANCE_MODE;
 delete process.env.SOLCORD_ACCEPTANCE_MODE;
 
@@ -1243,14 +1355,42 @@ if (requestedAcceptanceMode !== "1") {
     throw new Error("Solcord acceptance requires the launcher-owned acceptance mode marker.");
 }
 recordRuntimeStage("environment-validated");
-
 process.env.SOLCORD_ACCEPTANCE_MODE = "1";
 app.setPath("userData", userData);
-Object.defineProperty(app, "setAsDefaultProtocolClient", {
-    configurable: true,
-    writable: true,
-    value: () => false
+
+(${installDisposableShellGuards.toString()})(electron, require("node:module"), fs, path, acceptanceRoot, require("node:child_process"));
+recordRuntimeStage("os-shell-policy-installed");
+
+// Disposable-only diagnostics contain no payloads, arguments, account IDs or URLs.
+app.on("web-contents-created", (_event, contents) => {
+    contents.on("console-message", (_consoleEvent, details) => {
+        if (details.level !== "error") return;
+        const source = typeof details.sourceId === "string" ? details.sourceId : "";
+        let sourceKind = "unknown", sourceFile = "";
+        try {
+            const parsed = new URL(source);
+            sourceKind = parsed.protocol === "https:" && /(^|\\.)discord\\.com$/.test(parsed.hostname) ? "discord" : parsed.protocol === "file:" ? "local" : "other";
+            sourceFile = path.basename(parsed.pathname).replace(/[^a-zA-Z0-9_.-]/g, "").slice(0, 120);
+        } catch {}
+        recordRuntimeStage("renderer-error", {sourceKind, sourceFile, line: Number.isSafeInteger(details.lineNumber) ? details.lineNumber : 0});
+    });
+    try {
+        contents.debugger.attach("1.3");
+        contents.debugger.on("message", async (_debugEvent, method, params) => {
+            if (method !== "Runtime.exceptionThrown") return;
+            const info = params.exceptionDetails || {};
+            const frames = (info.stackTrace && info.stackTrace.callFrames || []).slice(0, 8).map(frame => ({
+                scriptId: String(frame.scriptId || "").replace(/[^0-9]/g, "").slice(0, 12),
+                line: Number.isSafeInteger(frame.lineNumber) ? frame.lineNumber : 0,
+                column: Number.isSafeInteger(frame.columnNumber) ? frame.columnNumber : 0,
+                functionName: String(frame.functionName || "").replace(/[^a-zA-Z0-9_.$<> -]/g, "").slice(0, 100)
+            }));
+            recordRuntimeStage("renderer-exception", {errorName: /^[A-Za-z]+Error$/.test(info.exception && info.exception.className) ? info.exception.className : "Error", frames});
+        });
+        void contents.debugger.sendCommand("Runtime.enable").catch(() => {});
+    } catch {}
 });
+
 
 configureCopiedNativeModules(acceptanceRoot, recordRuntimeStage);
 

@@ -8,7 +8,7 @@ For a normal installation, start with the [quick start](../QUICK_START.md). This
 
 Published historical candidates remain immutable. The owner-machine install manifest, not this repository page, identifies whichever exact build is currently installed in the signed-in profile.
 
-The current download is [v2.0.0-rc.39](https://github.com/slaveofsolace/Solcord/releases/tag/v2.0.0-rc.39). Its automated installer evidence covers install, update, Discord-update repair, downgrade refusal, interrupted recovery, rollback, and uninstall in isolated targets; that is not a claim that destructive recovery cases were exercised against the signed-in owner profile.
+The current download is [v2.0.0-rc.39](https://github.com/celubos/Solcord/releases/tag/v2.0.0-rc.39). Its automated installer evidence covers install, update, Discord-update repair, downgrade refusal, interrupted recovery, rollback, and uninstall in isolated targets; that is not a claim that destructive recovery cases were exercised against the signed-in owner profile.
 
 The local install receipt identifies the exact source commit, core hash, Discord version, and backup. Those owner-machine paths are intentionally not embedded here. New source changes require new build and runtime evidence. Audience Guard uses account-bound encrypted storage only when Electron's secure storage is available, and reports session-only storage otherwise. It does not provide per-person control over Discord's media delivery.
 

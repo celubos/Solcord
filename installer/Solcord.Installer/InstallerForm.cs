@@ -44,11 +44,13 @@ internal sealed class InstallerForm : Form
     private readonly Panel _primaryRow = new();
     private readonly Dictionary<string, ActionVisual> _actions = new(StringComparer.Ordinal);
     private string? _recommendedKey;
+    private bool _busy;
+    private int _stateGeneration;
     private Color _stateBorder = Color.FromArgb(118, 171, 163);
 
-    internal InstallerForm(string bundleRoot)
+    internal InstallerForm(string bundleRoot, InstallerEngine? engine = null)
     {
-        _engine = new InstallerEngine(bundleRoot, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+        _engine = engine ?? new InstallerEngine(bundleRoot, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
         _manifest = _engine.LoadManifest();
         _primaryAction = NewButton("Continue", ButtonTone.Primary);
         _verifyAction = NewButton("Verify files", ButtonTone.Outline);
@@ -71,6 +73,7 @@ internal sealed class InstallerForm : Form
         Load += (_, _) => RefreshTargets();
         Shown += (_, _) => _primaryAction.Focus();
         _targets.SelectedIndexChanged += (_, _) => RefreshInstallationState();
+        FormClosing += (_, e) => {if (_busy) e.Cancel = true;};
     }
 
     private Control BuildShell()
@@ -334,7 +337,10 @@ internal sealed class InstallerForm : Form
         _verifyAction.Margin = new Padding(0, 0, 8, 0);
         _verifyAction.TabIndex = 5;
         _verifyAction.AccessibleName = "Verify installed Solcord files";
-        _verifyAction.Click += (_, _) => RunAction("Verification", () => _engine.VerifyInstalled() ? $"Installed files match {_manifest.CandidateLabel}." : $"Installed files do not match {_manifest.CandidateLabel}.");
+        _verifyAction.Click += (_, _) => {
+            DiscordTarget selected = Target();
+            RunAction("Verification", () => _engine.VerifyInstalled(selected) ? $"Installed files match {_manifest.CandidateLabel} for {selected.Channel} {selected.Version}." : $"Installed files do not match {_manifest.CandidateLabel} for {selected.Channel} {selected.Version}.");
+        };
         _recoveryAction.Dock = DockStyle.Fill;
         _recoveryAction.Margin = new Padding(0, 0, 8, 0);
         _recoveryAction.TabIndex = 6;
@@ -377,22 +383,55 @@ internal sealed class InstallerForm : Form
 
     private void RefreshTargets()
     {
+        DiscordTarget? previous = _targets.SelectedItem as DiscordTarget;
         _targets.Items.Clear();
         foreach (DiscordTarget target in _engine.DetectTargets()) _targets.Items.Add(target);
-        if (_targets.Items.Count > 0) _targets.SelectedIndex = 0;
+        // Retain an explicit route to the receipt-selected older version after
+        // Discord downloads an update, including managed rollback and launch.
+        try
+        {
+            DiscordTarget? managed = _engine.ManagedTarget();
+            if (managed is not null && !_targets.Items.Cast<DiscordTarget>().Any(target => target.Channel == managed.Channel && target.Version == managed.Version))
+                _targets.Items.Add(managed);
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException) {/* Readiness errors are shown by the selected-target check. */}
+        if (_targets.Items.Count > 0)
+        {
+            int previousIndex = previous is null ? -1 : _targets.Items.Cast<DiscordTarget>().ToList().FindIndex(target => target.Channel == previous.Channel && target.Version == previous.Version);
+            _targets.SelectedIndex = previousIndex >= 0 ? previousIndex : 0;
+        }
         else {SetState("Discord not found", "Install Discord first", "Stable, PTB, or Canary was not detected on this PC.", StateTone.Warning, null); SetActionAvailability(false, false, false, false, false);}
     }
 
-    private void RefreshInstallationState()
+    private async void RefreshInstallationState()
     {
-        bool targetReady = _targets.SelectedItem is DiscordTarget;
+        if (!_busy) await RefreshInstallationStateAsync();
+    }
+
+    private async Task RefreshInstallationStateAsync()
+    {
+        DiscordTarget? selected = _targets.SelectedItem as DiscordTarget;
+        bool targetReady = selected is not null;
         if (!targetReady) {SetActionAvailability(false, false, false, false, false); return;}
+        int generation = ++_stateGeneration;
         try
         {
-            bool pending = _engine.HasPendingRecovery();
-            bool managed = _engine.HasManagedInstall();
-            bool packageRecorded = managed && _engine.IsCurrentPackageRecorded();
-            bool exact = !pending && packageRecorded && _engine.VerifyInstalled();
+            var status = await Task.Run(() => {
+                bool pending = _engine.HasPendingRecovery();
+                bool managed = _engine.HasManagedInstall();
+                bool channelMatches = _engine.IsManagedChannel(selected!);
+                bool packageRecorded = managed && channelMatches && _engine.IsCurrentPackageRecorded();
+                bool exact = !pending && packageRecorded && _engine.VerifyInstalled(selected);
+                return (pending, managed, channelMatches, packageRecorded, exact);
+            });
+            if (IsDisposed || generation != _stateGeneration) return;
+            var (pending, managed, channelMatches, packageRecorded, exact) = status;
+            if (managed && !channelMatches)
+            {
+                SetActionAvailability(false, false, false, false, false);
+                SetState("Different channel", "Select the managed Discord channel", "Solcord manages one channel at a time. Uninstall from its recorded channel before switching.", StateTone.Warning, null);
+                return;
+            }
             SetActionAvailability(targetReady, managed, exact, packageRecorded, pending);
             if (pending) SetState("Recovery required", "Restore the last known state", "A previous change stopped early. Restore its backup to continue.", StateTone.Warning, "rollback");
             else if (exact) SetState("Installed and verified", $"{_manifest.CandidateLabel} is ready", "Installed files match this package.", StateTone.Protected, "launch");
@@ -402,6 +441,7 @@ internal sealed class InstallerForm : Form
         }
         catch (Exception error)
         {
+            if (IsDisposed || generation != _stateGeneration) return;
             SetActionAvailability(false, false, false, false, _engine.HasPendingRecovery());
             SetState("Needs attention", "Review before continuing", error.Message, StateTone.Danger, _engine.HasPendingRecovery() ? "rollback" : null);
         }
@@ -459,59 +499,66 @@ internal sealed class InstallerForm : Form
 
     private void RunOperation(string key)
     {
+        if (_busy) return;
+        DiscordTarget selected = Target();
+        if (key == "uninstall" && MessageBox.Show("Remove Solcord from this Discord installation?\n\nDiscord returns to normal. Plugins, themes, settings, and recovery files stay on disk.", "Uninstall Solcord", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         ActionVisual? visual = _actions.GetValueOrDefault(key);
         string title = visual?.Title ?? (key == "launch" ? "Open Solcord" : key == "install" ? "Install Solcord" : key == "update" ? "Update Solcord" : "Solcord operation");
         RunAction(title, () => key switch {
-            "install" => CompleteInstall(_engine.InstallNew(Target())),
-            "update" => CompleteInstall(_engine.Update(Target())),
-            "repair" => CompleteInstall(_engine.Repair(Target())),
-            "rollback" => CompleteRollback(_engine.RollBack(Target())),
-            "uninstall" => Uninstall(),
-            "launch" => Launch(),
+            "install" => CompleteInstall(_engine.InstallNew(selected)),
+            "update" => CompleteInstall(_engine.Update(selected)),
+            "repair" => CompleteInstall(_engine.Repair(selected)),
+            "rollback" => CompleteRollback(_engine.RollBack(selected)),
+            "uninstall" => Uninstall(selected),
+            "launch" => Launch(selected),
             _ => throw new InvalidOperationException("The selected Solcord operation is unavailable.")
         }, key);
     }
 
-    private string Launch()
+    private string Launch(DiscordTarget selected)
     {
-        _engine.Launch(Target());
+        _engine.Launch(selected);
         return $"Discord opened with Solcord {_manifest.CandidateLabel}.";
     }
 
     private string CompleteRollback(string backupDirectory)
     {
-        string result = "The previous installation was restored from its verified backup. The Solcord shortcut was removed.";
+        string result = "The previous installation and its ownership record were restored from the verified backup.";
         return _engine.LastLauncherWarning is null ? result : $"{result} {_engine.LastLauncherWarning}";
     }
 
-    private string Uninstall()
+    private string Uninstall(DiscordTarget selected)
     {
-        DialogResult result = MessageBox.Show("Remove Solcord from this Discord installation?\n\nDiscord returns to normal. Plugins, themes, settings, and recovery files stay on disk.", "Uninstall Solcord", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
-        if (result != DialogResult.Yes) return "Uninstall cancelled. Nothing changed.";
-        string backup = _engine.Uninstall(Target());
+        string backup = _engine.Uninstall(selected);
         string message = $"Solcord was removed. A recovery copy was saved at {backup}.";
         return _engine.LastLauncherWarning is null ? message : $"{message} {_engine.LastLauncherWarning}";
     }
 
-    private void RunAction(string actionName, Func<string> action, string? retryKey = null)
+    private async void RunAction(string actionName, Func<string> action, string? retryKey = null)
     {
+        if (_busy) return;
+        _busy = true;
+        ++_stateGeneration;
         Control? previousFocus = ActiveControl;
+        _targets.Enabled = false;
         UseWaitCursor = true;
         foreach (ActionVisual visual in _actions.Values) visual.Button.Enabled = false;
         _primaryAction.Enabled = false;
         _verifyAction.Enabled = false;
         _recoveryAction.Enabled = false;
         SetState("Working", actionName, "Settings, add-ons, and account data stay in place.", StateTone.Protected, null);
-        try {string result = action(); RefreshInstallationState(); _stateBody.Text = result;}
+        try {string result = await Task.Run(action); RefreshTargets(); await RefreshInstallationStateAsync(); _stateBody.Text = result;}
         catch (Exception error)
         {
-            RefreshInstallationState();
+            await RefreshInstallationStateAsync();
             bool pending = _engine.HasPendingRecovery();
             string? next = pending ? "rollback" : retryKey;
             SetState("Action needed", $"{actionName} couldn't finish", FriendlyError(error), StateTone.Danger, next, pending ? "Restore backup" : next is null ? null : "Try again");
         }
         finally
         {
+            _busy = false;
+            _targets.Enabled = true;
             UseWaitCursor = false;
             if (previousFocus is {IsDisposed: false, CanFocus: true}) previousFocus.Focus();
         }
@@ -557,6 +604,28 @@ internal sealed class InstallerForm : Form
         if (stream is null) return null;
         using var source = Image.FromStream(stream);
         return new Bitmap(source);
+    }
+
+    internal static void ValidateResponsiveOperations(string bundleRoot)
+    {
+        string fixtureRoot = Path.Combine(Path.GetTempPath(), $"solcord-ui-fixture-{Guid.NewGuid():N}");
+        var engine = new InstallerEngine(bundleRoot, Path.Combine(fixtureRoot, "local"), Path.Combine(fixtureRoot, "roaming"), _ => 0);
+        using var form = new InstallerForm(bundleRoot, engine);
+        form.CreateControl();
+        int ticks = 0;
+        using var timer = new System.Windows.Forms.Timer {Interval = 10};
+        timer.Tick += (_, _) => ticks++;
+        timer.Start();
+        var returned = System.Diagnostics.Stopwatch.StartNew();
+        form.RunAction("Fixture delayed engine", () => {Thread.Sleep(350); return "Fixture operation completed.";});
+        if (returned.ElapsedMilliseconds > 150 || !form._busy) throw new InvalidDataException("installer-responsiveness: engine work blocked the UI handler");
+        var closing = new FormClosingEventArgs(CloseReason.UserClosing, false);
+        form.OnFormClosing(closing);
+        if (!closing.Cancel) throw new InvalidDataException("installer-responsiveness: close bypassed the active transaction");
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (form._busy && deadline.ElapsedMilliseconds < 5000) {Application.DoEvents(); Thread.Sleep(1);}
+        if (form._busy || ticks < 3 || form._stateBody.Text != "Fixture operation completed.")
+            throw new InvalidDataException("installer-responsiveness: message pump or operation completion failed");
     }
 
     internal static void ValidateGeometryMatrix(string bundleRoot)
