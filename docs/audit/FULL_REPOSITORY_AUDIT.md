@@ -12,11 +12,11 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 
 | Measure | Count |
 | --- | ---: |
-| Persistent tracked files | 720 |
-| Text files scanned | 705 |
+| Persistent tracked files | 723 |
+| Text files scanned | 708 |
 | Binary files classified | 15 |
-| Text lines scanned | 141,191 |
-| Custom Solcord lines | 59,990 |
+| Text lines scanned | 142,183 |
+| Custom Solcord lines | 60,982 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -26,12 +26,12 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | Signal | Whole tree | Custom Solcord surfaces |
 | --- | ---: | ---: |
 | TODO / FIXME / HACK | 30 | 4 |
-| Timer calls | 82 | 43 |
-| Mutation observers | 22 | 15 |
-| DOM queries | 343 | 245 |
-| Webpack discovery calls | 84 | 9 |
+| Timer calls | 84 | 45 |
+| Mutation observers | 24 | 17 |
+| DOM queries | 350 | 252 |
+| Webpack discovery calls | 86 | 11 |
 | Patch calls | 30 | 10 |
-| Synchronous filesystem calls | 931 | 828 |
+| Synchronous filesystem calls | 932 | 829 |
 | Console calls | 79 | 58 |
 | Empty catch blocks | 5 | 3 |
 
@@ -39,10 +39,10 @@ These counts are inventory signals, not findings by themselves. Each use still r
 
 | Rank | Path | Lines | Size |
 | ---: | --- | ---: | ---: |
-| 1 | `src/betterdiscord/modules/solcord/runtime.ts` | 4,891 | 296.0 KiB |
+| 1 | `src/betterdiscord/modules/solcord/runtime.ts` | 4,958 | 300.0 KiB |
 | 2 | `src/betterdiscord/modules/solcord/native-suite.ts` | 2,340 | 143.5 KiB |
 | 3 | `scripts/prepare-solcord-disposable-acceptance.ts` | 1,630 | 75.8 KiB |
-| 4 | `src/betterdiscord/ui/solcord/panel.tsx` | 1,604 | 155.5 KiB |
+| 4 | `src/betterdiscord/ui/solcord/panel.tsx` | 1,617 | 156.6 KiB |
 | 5 | `tests/solcord/storage-security.test.ts` | 1,595 | 94.1 KiB |
 | 6 | `tests/solcord/native-suite-security.test.ts` | 1,447 | 76.4 KiB |
 | 7 | `src/betterdiscord/styles/solcord.css` | 1,308 | 97.2 KiB |
@@ -64,10 +64,10 @@ These counts are inventory signals, not findings by themselves. Each use still r
 
 | Rank | Path | Lines | Size |
 | ---: | --- | ---: | ---: |
-| 1 | `src/betterdiscord/modules/solcord/runtime.ts` | 4,891 | 296.0 KiB |
+| 1 | `src/betterdiscord/modules/solcord/runtime.ts` | 4,958 | 300.0 KiB |
 | 2 | `src/betterdiscord/modules/solcord/native-suite.ts` | 2,340 | 143.5 KiB |
 | 3 | `scripts/prepare-solcord-disposable-acceptance.ts` | 1,630 | 75.8 KiB |
-| 4 | `src/betterdiscord/ui/solcord/panel.tsx` | 1,604 | 155.5 KiB |
+| 4 | `src/betterdiscord/ui/solcord/panel.tsx` | 1,617 | 156.6 KiB |
 | 5 | `tests/solcord/storage-security.test.ts` | 1,595 | 94.1 KiB |
 | 6 | `tests/solcord/native-suite-security.test.ts` | 1,447 | 76.4 KiB |
 | 7 | `src/betterdiscord/styles/solcord.css` | 1,308 | 97.2 KiB |
@@ -79,11 +79,11 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 13 | `src/electron/main/modules/solcord-timeline.ts` | 832 | 36.8 KiB |
 | 14 | `installer/Solcord.Installer/InstallerForm.cs` | 768 | 43.4 KiB |
 | 15 | `src/common/solcord/v2-feature-models.ts` | 661 | 36.1 KiB |
-| 16 | `docs/audit/2026-11-07/file-coverage.csv` | 627 | 73.8 KiB |
-| 17 | `tests/solcord/settings.test.ts` | 601 | 31.9 KiB |
-| 18 | `tests/solcord/renderer-security.test.ts` | 569 | 42.1 KiB |
-| 19 | `installer/Solcord.Installer/Program.cs` | 557 | 37.6 KiB |
-| 20 | `src/betterdiscord/modules/solcord/message-timeline.ts` | 552 | 24.7 KiB |
+| 16 | `tests/solcord/fake-deafen.test.ts` | 628 | 33.0 KiB |
+| 17 | `docs/audit/2026-11-07/file-coverage.csv` | 627 | 73.8 KiB |
+| 18 | `tests/solcord/settings.test.ts` | 601 | 31.9 KiB |
+| 19 | `src/betterdiscord/modules/solcord/fake-deafen.ts` | 573 | 25.1 KiB |
+| 20 | `tests/solcord/renderer-security.test.ts` | 569 | 42.1 KiB |
 
 ## Earlier repository corrections
 

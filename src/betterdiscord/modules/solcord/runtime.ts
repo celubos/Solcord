@@ -12,7 +12,7 @@ import ThemeManager from "@modules/thememanager";
 import SettingsRenderer from "@ui/settings";
 import Modals from "@ui/modals";
 import DiscordModules from "@modules/discordmodules";
-import {Filters, getByKeys, getLazy, getLazyByKeys, getLazyBySource, getModule, getStore, getWithKey} from "@webpack";
+import {Filters, getByKeys, getLazy, getLazyBySource, getModule, getStore, getWithKey} from "@webpack";
 
 import type {PrivacyCapabilityRecord, PrivacyDecisionReceipt, PrivacyProfile, SolcordCuratedAddonState, SolcordMaturity, SolcordModuleHealth, SolcordModuleId, SolcordPowerExperimentId} from "./contracts";
 import {SolcordDisposalScope} from "./disposal";
@@ -32,6 +32,7 @@ import {InvisibleTypingAdapter} from "./invisible-typing";
 import {DoubleClickReplyFeature, type DoubleClickReplyAdapter, type DoubleClickReplyContext, type DoubleClickReplyTarget} from "./double-click-reply";
 import {DoNotTrackAdapter, discordAnalyticsMethods, resolveDiscordAnalyticsTrack, type AnalyticsMethodTarget} from "./do-not-track";
 import {applySolcordFakeDeafenConsentTransition, SolcordFakeDeafenButton, SolcordFakeDeafenController, type SolcordFakeDeafenStatus, type SolcordGatewaySocket} from "./fake-deafen";
+import {discoverSolcordFakeDeafenCapabilities, isSolcordFakeDeafenGateway, isSolcordFakeDeafenMediaActions} from "./fake-deafen-capabilities";
 import {normalizeDiscordRelationships, planSolcordFriendWatchNotices, reconcileSolcordRelationships, SolcordFriendWatchAccountBarrier, SolcordFriendWatchJournal, type SolcordFriendWatchNoticeState, type SolcordOwnerRelationshipAction, type SolcordRelationshipEvent, type SolcordRelationshipSnapshot} from "@common/solcord/friend-watch";
 import {inspectSolcordDomain, SolcordDomainMemory, type SolcordDomainDecision, type SolcordDomainMemoryRecord, type SolcordDomainRisk} from "@common/solcord/domain-memory";
 import {inspectSolcordAttachment, inspectSolcordLocalAttachment, type SolcordAttachmentInspection} from "@common/solcord/attachment-guard";
@@ -1437,7 +1438,9 @@ class SolcordRuntimeStore extends Store {
             if (this.#started) await this.#synchronizePowerLab();
         }
         return SolcordSettings.snapshot().powerLab[id].enabled === enabled
-            && (enabled || id !== "fake-deafen" || this.#fakeDeafenStatus.phase !== "attention");
+            && (id !== "fake-deafen" || (enabled
+                ? Boolean(this.#fakeDeafen && this.#fakeDeafenStatus.accountBound && !this.#fakeDeafenStatus.pending && this.#fakeDeafenStatus.phase !== "attention")
+                : this.#fakeDeafenStatus.phase !== "attention"));
     }
 
     armFakeDeafen(): boolean {
@@ -1457,6 +1460,10 @@ class SolcordRuntimeStore extends Store {
     }
 
     async toggleFakeDeafenDirect(): Promise<boolean> {
+        if (!this.#started) {
+            Toasts.error("Solcord is still starting. Wait for startup to finish, then retry Fake Deafen.", {forceShow: true});
+            return false;
+        }
         if (this.#recoveryMode) {
             Toasts.error("Fake Deafen is unavailable during Safe Start. Resume Solcord first.", {forceShow: true});
             return false;
@@ -1466,21 +1473,57 @@ class SolcordRuntimeStore extends Store {
             Toasts.error("Disable the separate FakeDeafen plugin before using Solcord's built-in control.", {forceShow: true});
             return false;
         }
-        if (!SolcordSettings.snapshot().powerLab["fake-deafen"].enabled) {
-            if (!await this.setPowerExperiment("fake-deafen", true, true)) {
-                Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
-                return false;
+        try {
+            const wasCancelled = (generation: number) => !SolcordSettings.snapshot().powerLab["fake-deafen"].enabled
+                || (generation !== this.#fakeDeafenGeneration && this.#fakeDeafenStatus.phase !== "attention");
+            // Ownership failure removes the old controller's patch. A deliberate
+            // click may load a fresh adapter; background checks never re-arm it.
+            if (this.#fakeDeafen && !this.#fakeDeafen.validateOwnership()) {
+                this.#stopFakeDeafen();
+                if (this.#fakeDeafen) {
+                    Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
+                    return false; // Cleanup ownership was retained.
+                }
             }
+            if (!SolcordSettings.snapshot().powerLab["fake-deafen"].enabled) {
+                const change = this.setPowerExperiment("fake-deafen", true, true);
+                const generation = this.#fakeDeafenGeneration;
+                const accepted = await change;
+                if (wasCancelled(generation)) return false;
+                if (!accepted) {
+                    Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
+                    return false;
+                }
+            }
+            if (!this.#fakeDeafen) {
+                const synchronization = this.#synchronizePowerLab();
+                const generation = this.#fakeDeafenGeneration;
+                await synchronization;
+                if (wasCancelled(generation)) return false;
+            }
+            const controller = this.#fakeDeafen;
+            let toggled = controller?.toggleDirect() === true;
+            if (toggled && controller?.snapshot().pending) toggled = await controller.waitForActivation();
+            if (controller !== this.#fakeDeafen) return false;
+            if (toggled && controller && !controller.validateOwnership()) toggled = false;
+            this.#fakeDeafenStatus = controller?.snapshot() ?? this.#fakeDeafenStatus;
+            this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
+            this.emitChange();
+            if (this.#fakeDeafenStatus.armed) Toasts.success("Fake Deafen is on. Click the adjacent control again to restore normal deafen state.", {timeout: 4_000});
+            else if (toggled) Toasts.info("Fake Deafen is off and Discord's normal voice state is restored.", {timeout: 4_000});
+            else Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
+            return toggled;
         }
-        if (!this.#fakeDeafen) await this.#synchronizePowerLab();
-        const toggled = this.#fakeDeafen?.toggleDirect() === true;
-        this.#fakeDeafenStatus = this.#fakeDeafen?.snapshot() ?? this.#fakeDeafenStatus;
-        this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
-        this.emitChange();
-        if (this.#fakeDeafenStatus.armed) Toasts.success("Fake Deafen is on. Click the adjacent control again to restore normal deafen state.", {timeout: 4_000});
-        else if (toggled) Toasts.info("Fake Deafen is off and Discord's normal voice state is restored.", {timeout: 4_000});
-        else Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
-        return toggled;
+        catch {
+            this.#stopFakeDeafen();
+            if (this.#fakeDeafenStatus.phase !== "attention") {
+                this.#fakeDeafenStatus = {...this.#fakeDeafenStatus, phase: "attention", detail: "Fake Deafen could not apply the native voice action. Its adapter was stopped; click again to retry.", armed: false, pending: false};
+            }
+            this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
+            this.emitChange();
+            Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
+            return false;
+        }
     }
 
     #applyProductPresentation(): void {
@@ -3424,15 +3467,29 @@ class SolcordRuntimeStore extends Store {
         this.#fakeDeafenScope.dispose();
         this.#fakeDeafenScope = new SolcordDisposalScope();
         const scope = this.#fakeDeafenScope;
-        const gateway = await getLazyByKeys<{getSocket?(): SolcordGatewaySocket | undefined;}>(["getSocket"]);
-        const mediaActions = await getLazyByKeys<{toggleSelfDeaf?(): void; toggleSelfMute?(): void;}>(["toggleSelfDeaf", "toggleSelfMute"]);
+        const cancellation = new AbortController();
+        const releaseDiscovery = scope.own(() => cancellation.abort());
+        const userStore = getStore("UserStore") as {getCurrentUser?: () => {id?: string;} | undefined;} | undefined;
+        const accountId = normalizeTimelineAccountId(userStore?.getCurrentUser?.()?.id);
+        this.#fakeDeafenStatus = {phase: "ready", detail: "Waiting for Discord's voice controls. The adapter will stay off if they are unavailable.", connected: false, accountBound: false, capturedVoiceState: false, armed: false, pending: true};
+        this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
+        this.emitChange();
+        let capabilities;
+        try {
+            capabilities = await discoverSolcordFakeDeafenCapabilities({
+                gateway: signal => getLazy(isSolcordFakeDeafenGateway, {signal}),
+                mediaActions: signal => getLazy(isSolcordFakeDeafenMediaActions, {signal})
+            }, cancellation.signal);
+        }
+        finally {releaseDiscovery();}
         if (generation !== this.#fakeDeafenGeneration || scope.disposed || this.#fakeDeafenScope !== scope) return;
+        const {gateway, mediaActions} = capabilities ?? {};
         const selectedChannelStore = getStore("SelectedChannelStore") as {getVoiceChannelId?: () => string | undefined;} | undefined;
         const mediaEngineStore = getStore("MediaEngineStore") as {isDeaf?: () => boolean; isSelfDeaf?: () => boolean;} | undefined;
-        const userStore = getStore("UserStore") as {getCurrentUser?: () => {id?: string;} | undefined;} | undefined;
         const socket = gateway?.getSocket?.();
-        if (!socket || typeof socket.send !== "function" || typeof mediaActions?.toggleSelfDeaf !== "function" || typeof selectedChannelStore?.getVoiceChannelId !== "function" || typeof userStore?.getCurrentUser !== "function" || !normalizeTimelineAccountId(userStore.getCurrentUser()?.id) || (typeof mediaEngineStore?.isDeaf !== "function" && typeof mediaEngineStore?.isSelfDeaf !== "function")) {
-            this.#fakeDeafenStatus = {phase: "attention", detail: "Discord voice or account modules failed structural validation; Fake Deafen stayed off.", connected: false, accountBound: false, capturedVoiceState: false, armed: false};
+        if (!socket || typeof socket.send !== "function" || !mediaActions || typeof selectedChannelStore?.getVoiceChannelId !== "function" || typeof userStore?.getCurrentUser !== "function" || !accountId || accountId !== normalizeTimelineAccountId(userStore.getCurrentUser()?.id) || (typeof mediaEngineStore?.isDeaf !== "function" && typeof mediaEngineStore?.isSelfDeaf !== "function")) {
+            this.#fakeDeafenStatus = {phase: "attention", detail: "Discord voice or account controls are unavailable or changed while loading. Fake Deafen stayed off; click again to retry.", connected: false, accountBound: false, capturedVoiceState: false, armed: false};
+            this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
             this.emitChange();
             return;
         }
@@ -3440,8 +3497,9 @@ class SolcordRuntimeStore extends Store {
         const controller = new SolcordFakeDeafenController({
             getAccountId: () => normalizeTimelineAccountId(userStore.getCurrentUser?.()?.id),
             getSocket: () => gateway?.getSocket?.(),
+            getConnectionIdentity: () => (gateway?.getSocket?.() as SolcordGatewaySocket & {webSocket?: unknown;} | undefined)?.webSocket,
             getVoiceChannelId: () => selectedChannelStore.getVoiceChannelId?.(),
-            isLocallyDeafened: () => Boolean(mediaEngineStore.isDeaf?.() ?? mediaEngineStore.isSelfDeaf?.()),
+            isLocallyDeafened: () => Boolean(mediaEngineStore.isSelfDeaf?.() ?? mediaEngineStore.isDeaf?.()),
             toggleLocalDeafen: () => mediaActions.toggleSelfDeaf!(),
             patchSend: (target, observe) => Patcher.before("Solcord~FakeDeafen", target, "send", (_thisObject, args) => observe(args as unknown[]), {forcePatch: false}),
             onStatus: status => {
@@ -3451,12 +3509,21 @@ class SolcordRuntimeStore extends Store {
                 this.emitChange();
             }
         });
-        if (!controller.start()) {
-            this.#fakeDeafenStatus = controller.snapshot();
-            return;
-        }
+        // Starting publishes status synchronously. Own the controller first so
+        // a throwing observer or reentrant stop cannot orphan its gateway patch.
         this.#fakeDeafen = controller;
         scope.own(() => controller.stop(), "patch");
+        if (!controller.start()) {
+            const failedStatus = controller.snapshot();
+            this.#stopFakeDeafen();
+            if (!this.#fakeDeafen) {
+                this.#fakeDeafenStatus = failedStatus;
+                this.#fakeDeafenButton?.update(failedStatus);
+                this.emitChange();
+            }
+            return;
+        }
+        if (generation !== this.#fakeDeafenGeneration || scope.disposed || this.#fakeDeafenScope !== scope || this.#fakeDeafen !== controller) return;
         scope.interval(() => controller.validateOwnership(), 5_000);
         this.#fakeDeafenStatus = controller.snapshot();
         this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);

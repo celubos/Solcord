@@ -2,6 +2,7 @@ import {afterAll, afterEach, describe, expect, mock, test} from "bun:test";
 import React, {act} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import * as StoreExports from "../../src/betterdiscord/modules/solcord/store";
+import {SolcordFakeDeafenButton, SolcordFakeDeafenController, type SolcordFakeDeafenStatus, type SolcordGatewaySocket} from "../../src/betterdiscord/modules/solcord/fake-deafen";
 
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean;}).IS_REACT_ACT_ENVIRONMENT = true;
 let state = StoreExports.normalizeSolcordDocument(undefined);
@@ -15,6 +16,15 @@ function emit() {for (const listeners of subscriptions.values()) for (const list
 let reminders: Array<{id: string; label: string; dueAt: number; createdAt: number; route: string;}> = [];
 const writes: string[] = [];
 const toasts: string[] = [];
+const idleFakeStatus = (): SolcordFakeDeafenStatus => ({phase: "off", detail: "Controlled adapter is idle.", connected: false, accountBound: false, capturedVoiceState: false, armed: false});
+let fakeStatus = idleFakeStatus();
+let accountGeneration = 1;
+let communityFakeProvider = false;
+let powerOverride: ((enabled: boolean, acknowledged: boolean) => Promise<boolean>) | undefined;
+const powerCalls: Array<[string, boolean, boolean]> = [];
+function updateFakeConsent(enabled: boolean) {
+    state = {...state, powerLab: {...state.powerLab, "fake-deafen": enabled ? {enabled: true, acknowledgementVersion: state.consentVersion, acknowledgedAt: 1} : {enabled: false, acknowledgementVersion: 0}}};
+}
 const store = {
     ...observed("settings"),
     snapshot: () => structuredClone(state),
@@ -40,15 +50,15 @@ recoveryMode: false,
     friendWatchEvents: () => empty,
 friendWatchPersistent: () => false,
 returnLaterItems: () => reminders,
-    privateAccountGeneration: () => 1,
-privateAccountIsCurrent: () => true,
+    privateAccountGeneration: () => accountGeneration,
+privateAccountIsCurrent: (generation: number) => generation === accountGeneration,
     nativeSuiteView: () => empty,
 nativeSuiteController: () => undefined,
     currentPeopleObjectId: () => undefined,
 resolvePeopleObject: () => undefined,
     baselineSuiteStatus: () => ({active: false, resources: {}, enabled: empty, unavailable: empty}),
-    fakeDeafenStatus: () => ({phase: "unavailable", detail: "Controlled host has no voice adapter."}),
-fakeDeafenProvider: () => "off",
+    fakeDeafenStatus: () => structuredClone(fakeStatus),
+fakeDeafenProvider: () => communityFakeProvider ? "community" : state.powerLab["fake-deafen"].enabled ? "solcord" : "off",
     audienceGuardStatus: () => ({phase: "unavailable", armed: false, detail: "Controlled host has no call."}),
     audienceGuardPrivatePolicy: () => ({loaded: false, policy: {entries: empty}, storage: {persistent: false}}),
     audienceGuardArmReadiness: () => ({ready: false, detail: "Controlled host has no call."}),
@@ -69,6 +79,13 @@ profileAddonExecutionPlan: () => ({canApply: true, changes: empty, blocked: empt
     setProductPreferences(next: typeof state.productPreferences) {writes.push("preferences"); state = {...state, productPreferences: next}; emit(); return true;},
     setPrivacyProfile: async () => {writes.push("privacy"); throw new Error("Live privacy actions are outside this fixture flow");},
     setCuratedAddonEnabled: async () => false,
+    async setPowerExperiment(id: string, enabled: boolean, acknowledged: boolean) {
+        powerCalls.push([id, enabled, acknowledged]);
+        if (powerOverride) return powerOverride(enabled, acknowledged);
+        updateFakeConsent(enabled);
+        fakeStatus = enabled ? {...idleFakeStatus(), phase: "ready", accountBound: true, detail: "Ready. Join a voice channel, then use the adjacent Fake Deafen button."} : idleFakeStatus();
+        emit(); return true;
+    },
     exportDiagnostics: async () => {writes.push("diagnostics");}
 };
 mock.module("@assets/branding/solcord-mark.svg", () => ({"default": "controlled-solcord-mark.svg"}));
@@ -100,6 +117,7 @@ afterEach(async () => {
     expect(errors).toEqual([]);
     document.body.replaceChildren(); errors.length = 0; writes.length = 0; toasts.length = 0; reminders = [];
     frames.clear();
+    fakeStatus = idleFakeStatus(); accountGeneration = 1; communityFakeProvider = false; powerOverride = undefined; powerCalls.length = 0;
     state = StoreExports.normalizeSolcordDocument(undefined); state.onboarding.status = "complete";
 });
 async function mount() {
@@ -128,6 +146,12 @@ async function navigate(host: HTMLElement, label: string) {
 }
 async function flushFrames() {
     await act(async () => {const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(0);});
+}
+function fakeControls(host: HTMLElement) {
+    const section = [...host.querySelectorAll<HTMLElement>(".solcord-section")].find(item => item.querySelector("h3")?.textContent === "Fake Deafen");
+    if (!section) throw new Error("Fake Deafen production controls did not render");
+    const toggle = section.querySelector<HTMLInputElement>("input[aria-label='Keep Fake Deafen adapter ready']")!;
+    return {section, toggle, feedback: () => section.querySelector(".solcord-import-status")?.textContent ?? ""};
 }
 
 describe("production Solcord Control Center React tree with controlled host interfaces", () => {
@@ -203,5 +227,163 @@ describe("production Solcord Control Center React tree with controlled host inte
         assertHealthy(host);
         expect(host.querySelector(".solcord-workspace")?.getAttribute("data-workspace")).toBe("chat");
         expect(host.querySelector("[aria-label='Return Later reminders']")?.textContent).toContain("Controlled reminder");
+    });
+
+    test("saving Fake Deafen consent while its adapter is idle never claims the direct control is ready", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        powerOverride = async enabled => {
+            updateFakeConsent(enabled); fakeStatus = {...idleFakeStatus(), detail: "Adapter is waiting for startup; no voice control is active."}; emit(); return true;
+        };
+        await act(async () => controls.toggle.click());
+        expect(powerCalls).toEqual([["fake-deafen", true, true]]);
+        expect(controls.toggle.checked).toBe(true);
+        expect(controls.feedback()).toContain("waiting for startup");
+        expect(controls.feedback()).not.toContain("Direct voice control is ready");
+    });
+
+    test("a failed Fake Deafen write clears earlier success feedback and keeps the saved selection", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        await act(async () => controls.toggle.click());
+        expect(controls.feedback().toLowerCase()).toContain("ready");
+        powerOverride = async () => {throw new Error("controlled disk write failure");};
+        await act(async () => controls.toggle.click());
+        expect(controls.toggle.checked).toBe(true);
+        expect(controls.feedback().toLowerCase()).not.toContain("ready");
+        expect(controls.feedback()).toContain("did not finish");
+    });
+
+    test("Fake Deafen ready selection preserves explicit acknowledgement and disable clears it", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        await act(async () => controls.toggle.click());
+        expect(powerCalls).toEqual([["fake-deafen", true, true]]);
+        expect(controls.toggle.checked).toBe(true); expect(controls.feedback()).toBe(fakeStatus.detail);
+        expect(controls.feedback()).toContain("Join a voice channel");
+        await act(async () => controls.toggle.click());
+        expect(powerCalls).toEqual([["fake-deafen", true, true], ["fake-deafen", false, false]]);
+        expect(controls.toggle.checked).toBe(false); expect(state.powerLab["fake-deafen"].acknowledgementVersion).toBe(0);
+        expect(controls.feedback()).toBe(fakeStatus.detail);
+    });
+
+    test("Fake Deafen toggle is single-flight while saving and remains retryable after completion", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        let finish!: () => void;
+        powerOverride = async enabled => {
+            await new Promise<void>(resolve => {finish = resolve;});
+            updateFakeConsent(enabled); fakeStatus = {...idleFakeStatus(), phase: "ready", detail: "Ready. Controlled gateway validated."}; emit(); return true;
+        };
+        controls.toggle.focus(); await act(async () => controls.toggle.click());
+        expect(controls.toggle.disabled).toBe(true); expect(controls.toggle.getAttribute("aria-busy")).toBe("true");
+        await act(async () => controls.toggle.click()); expect(powerCalls).toHaveLength(1);
+        await act(async () => finish());
+        expect(controls.toggle.disabled).toBe(false); expect(controls.toggle.checked).toBe(true);
+        expect(controls.feedback()).toBe("Ready. Controlled gateway validated.");
+    });
+
+    test("an unsupported gateway reports the runtime's attention detail and never claims ready", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        powerOverride = async () => {fakeStatus = {...idleFakeStatus(), phase: "attention", detail: "Scoped gateway validation failed; nothing was patched."}; emit(); return false;};
+        await act(async () => controls.toggle.click());
+        expect(controls.toggle.checked).toBe(false); expect(controls.feedback()).toBe(fakeStatus.detail);
+        expect(controls.feedback()).not.toContain("ready");
+    });
+
+    test("an existing community Fake Deafen provider disables the built-in toggle without writing consent", async () => {
+        communityFakeProvider = true;
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        expect(controls.toggle.disabled).toBe(true); expect(controls.section.textContent).toContain("community plugin active");
+        await act(async () => controls.toggle.click()); expect(powerCalls).toEqual([]);
+    });
+
+    test("late Fake Deafen completion cannot publish success into a replacement account's panel", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        let finish!: (value: boolean) => void;
+        powerOverride = () => new Promise<boolean>(resolve => {finish = resolve;});
+        await act(async () => controls.toggle.click());
+        await act(async () => {accountGeneration++; fakeStatus = {...idleFakeStatus(), detail: "Replacement account has no active adapter."}; emit();});
+        await act(async () => finish(true));
+        expect(controls.feedback()).toBe(""); expect(controls.section.textContent).toContain("Replacement account has no active adapter.");
+    });
+
+    test("a community provider arriving during a pending Fake Deafen change suppresses stale built-in feedback", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        let finish!: (value: boolean) => void;
+        powerOverride = () => new Promise<boolean>(resolve => {finish = resolve;});
+        await act(async () => controls.toggle.click());
+        await act(async () => {communityFakeProvider = true; emit();});
+        await act(async () => finish(true));
+        expect(controls.toggle.disabled).toBe(true); expect(controls.feedback()).toBe("");
+        expect(controls.section.textContent).toContain("community plugin active");
+    });
+
+    test("leaving Voice while a Fake Deafen change is pending cannot retain feedback after reopening", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        let finish!: (value: boolean) => void;
+        powerOverride = () => new Promise<boolean>(resolve => {finish = resolve;});
+        await act(async () => controls.toggle.click()); await navigate(host, "Overview");
+        await act(async () => finish(true)); await navigate(host, "Voice & Activities");
+        expect(fakeControls(host).feedback()).toBe(""); expect(errors).toEqual([]);
+    });
+
+    test("pending Fake Deafen activation shows waiting until the runtime validates account ownership", async () => {
+        const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+        powerOverride = async enabled => {
+            updateFakeConsent(enabled);
+            fakeStatus = {...idleFakeStatus(), phase: "ready", pending: true, detail: "Waiting for Discord voice controls…"}; emit(); return true;
+        };
+        await act(async () => controls.toggle.click());
+        expect(controls.section.querySelector(".solcord-status")?.textContent).toBe("waiting");
+        expect(controls.feedback()).toBe("Waiting for Discord voice controls…");
+        await act(async () => {fakeStatus = {...idleFakeStatus(), phase: "ready", pending: false, accountBound: true, detail: "Ready. Scoped gateway and native voice controls validated."}; emit();});
+        expect(controls.section.querySelector(".solcord-status")?.textContent).toBe("ready");
+        expect(controls.feedback()).toBe("Ready. Scoped gateway and native voice controls validated.");
+    });
+
+    test("the real ready toggle and adjacent controller button activate and restore a controlled voice state", async () => {
+        const nativeHost = document.createElement("div"); nativeHost.id = "app-mount";
+        nativeHost.innerHTML = "<section aria-label=\"User area\"><button type=\"button\" aria-label=\"Deafen\">Native deafen</button></section>";
+        document.body.append(nativeHost);
+        const native = nativeHost.querySelector<HTMLButtonElement>("button")!;
+        let locallyDeafened = false;
+        const sent: Array<{opcode: number; payload: {self_deaf: boolean;};}> = [];
+        const socket: SolcordGatewaySocket = {send: (opcode, payload) => {sent.push({opcode, payload: structuredClone(payload) as {self_deaf: boolean;}});}};
+        const controller = new SolcordFakeDeafenController({
+            getAccountId: () => "111111111111111111",
+getVoiceChannelId: () => "222222222222222222",
+getSocket: () => socket,
+            isLocallyDeafened: () => locallyDeafened,
+toggleLocalDeafen: () => native.click(),
+            patchSend: (target, observe) => {
+                const original = target.send;
+                target.send = function (...args) {observe(args); return Reflect.apply(original, this, args);};
+                return () => {target.send = original;};
+            },
+            onStatus: status => {fakeStatus = status; directControl?.update(status); emit();}
+        });
+        native.addEventListener("click", () => {
+            locallyDeafened = !locallyDeafened; native.setAttribute("aria-label", locallyDeafened ? "Undeafen" : "Deafen");
+            socket.send(4, {channel_id: "222222222222222222", guild_id: "333333333333333333", self_deaf: locallyDeafened, self_mute: false});
+        });
+        const directControl = new SolcordFakeDeafenButton({document,
+getStatus: () => controller.snapshot(),
+toggle: async () => {
+            const accepted = controller.toggleDirect();
+            return accepted && (controller.snapshot().pending ? await controller.waitForActivation() : true);
+        }});
+        directControl.start();
+        try {
+            const host = await mount(); await navigate(host, "Voice & Activities"); const controls = fakeControls(host);
+            powerOverride = async enabled => {updateFakeConsent(enabled); const ready = enabled ? controller.start() : controller.stop(); emit(); return ready;};
+            await act(async () => controls.toggle.click());
+            expect(controller.snapshot().phase).toBe("ready"); expect(controller.snapshot().armed).toBe(false);
+            expect(sent).toEqual([]); expect(controls.toggle.checked).toBe(true);
+            const directButton = nativeHost.querySelector<HTMLButtonElement>("button[data-solcord-fake-deafen]")!;
+            await act(async () => directButton.click());
+            expect(controller.snapshot().phase).toBe("armed"); expect(directButton.getAttribute("aria-pressed")).toBe("true");
+            expect(locallyDeafened).toBe(false); expect(sent.at(-1)?.payload.self_deaf).toBe(true);
+            await act(async () => directButton.click());
+            expect(controller.snapshot().armed).toBe(false); expect(directButton.getAttribute("aria-pressed")).toBe("false");
+            expect(sent.at(-1)?.payload.self_deaf).toBe(false); expect(powerCalls).toEqual([["fake-deafen", true, true]]);
+        }
+        finally {await act(async () => {directControl?.stop(); controller.stop(); nativeHost.remove();});}
     });
 });

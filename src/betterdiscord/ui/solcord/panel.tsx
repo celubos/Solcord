@@ -1488,23 +1488,36 @@ function FakeDeafenControls() {
     const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({
         consent: SolcordSettings.slice("powerLab")["fake-deafen"],
         status: SolcordRuntime.fakeDeafenStatus(),
-        provider: SolcordRuntime.fakeDeafenProvider()
+        provider: SolcordRuntime.fakeDeafenProvider(),
+        accountGeneration: SolcordRuntime.privateAccountGeneration()
     }));
-    const [actionStatus, setActionStatus] = useState("");
-    const toggleFakeDeafen = (enabled: boolean) => {
-        return SolcordRuntime.setPowerExperiment("fake-deafen", enabled, enabled).then(succeeded => {
+    const [actionResult, setActionResult] = useState<"runtime" | {error: string;}>();
+    const actionStatus = actionResult === "runtime" ? state.status.detail || "The selection was saved; runtime readiness is not confirmed." : actionResult?.error ?? "";
+    const communityProvider = state.provider === "community";
+    const results = useSolcordResultScope(String(state.accountGeneration), () => SolcordRuntime.privateAccountGeneration() === state.accountGeneration && SolcordRuntime.fakeDeafenProvider() !== "community");
+    useEffect(() => setActionResult(undefined), [state.accountGeneration, communityProvider]);
+    const toggleFakeDeafen = async (enabled: boolean) => {
+        const isCurrent = results.begin();
+        if (!isCurrent()) return false;
+        setActionResult(undefined);
+        try {
+            const succeeded = await SolcordRuntime.setPowerExperiment("fake-deafen", enabled, enabled);
+            if (!isCurrent()) return false;
             const status = SolcordRuntime.fakeDeafenStatus();
-            setActionStatus(status.phase === "attention"
-                ? status.detail
-                : succeeded
-                    ? (enabled ? "Direct voice control is ready." : "Adapter is idle. The adjacent button will load it again when clicked.")
-                    : "The adapter failed closed.");
-        });
+            setActionResult(!succeeded && status.phase !== "attention"
+                ? {error: "The adapter change did not finish. Check the saved selection, then retry."}
+                : "runtime");
+            return succeeded;
+        }
+        catch {
+            if (isCurrent()) setActionResult({error: "The adapter change did not finish. Check the saved selection, then retry."});
+            return false;
+        }
     };
     const experiment = SOLCORD_POWER_LAB.find(candidate => candidate.id === "fake-deafen")!;
-    const communityProvider = state.provider === "community";
+    const adapterWaiting = state.status.phase !== "attention" && (state.status.pending === true || (state.status.phase === "ready" && !state.status.accountBound));
     return <Section title="Fake Deafen" summary="A direct built-in control beside Discord's normal Deafen button.">
-        <div className="solcord-power-control"><div><span className={`solcord-status solcord-status-${communityProvider || state.status.phase === "armed" ? "active" : state.status.phase === "attention" ? "failed" : "starting"}`}>{communityProvider ? "community plugin active" : state.status.phase}</span><p>{communityProvider ? "Solcord leaves the separate plugin untouched and does not stack a second gateway patch." : state.status.detail}</p></div><SolcordSwitch label="Keep Fake Deafen adapter ready" checked={state.consent.enabled} disabled={communityProvider} onChange={toggleFakeDeafen} /></div>
+        <div className="solcord-power-control"><div><span className={`solcord-status solcord-status-${communityProvider || (!adapterWaiting && state.status.phase === "armed") ? "active" : state.status.phase === "attention" ? "failed" : "starting"}`}>{communityProvider ? "community plugin active" : adapterWaiting ? "waiting" : state.status.phase}</span><p>{communityProvider ? "Solcord leaves the separate plugin untouched and does not stack a second gateway patch." : state.status.detail}</p></div><SolcordSwitch label="Keep Fake Deafen adapter ready" checked={state.consent.enabled} disabled={communityProvider} onChange={toggleFakeDeafen} /></div>
         <p className="solcord-key-hint">In a voice call, use the <strong>F</strong>-badged button immediately beside normal Deafen. One click turns Fake Deafen on; the next click restores normal voice state. There is no per-call confirmation.</p>
         <details className="solcord-secondary-tools"><summary>Behavior and automatic cleanup</summary><p>{experiment.summary} This changes only the voice-state information your client sends; it does not grant permissions or affect other accounts. Solcord restores or disarms on disconnect, channel change, account change, adapter drift, recovery mode, or module disable.</p></details>
         {actionStatus && <p role="status" className="solcord-import-status">{actionStatus}</p>}

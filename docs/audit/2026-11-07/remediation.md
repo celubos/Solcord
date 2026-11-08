@@ -1,6 +1,6 @@
 # Audit remediation candidate
 
-Implementation branch: `sol/audit-remediation-20261107`. Audit handoff: `9550a432a7a178473d152cdcc44efba3d74c4048`; audited product: `9b3004ff8c25c9879803a6c07fa8b28d04731438`. The implementation identifies itself as **v2.0.1-rc.5**, distinct from the published stable package. No release has been published by this work.
+Implementation branch: `sol/audit-remediation-20261107`. Audit handoff: `9550a432a7a178473d152cdcc44efba3d74c4048`; audited product: `9b3004ff8c25c9879803a6c07fa8b28d04731438`. The implementation identifies itself as **v2.0.1-rc.6**, distinct from the published stable package. No release has been published by this work.
 
 ## Findings and regression coverage
 
@@ -65,5 +65,7 @@ Strict Privacy now rejects contradictory persisted allow flags. Legacy settings 
 These controls do not establish zero traffic or anonymity. Core Discord authentication, messages, voice and media still reach Discord. Native crash reporting, arbitrary privileged Node networking, unknown future endpoints and untrusted software running as the same Windows account are outside complete coverage. See [Privacy and security](../../SECURITY_AND_PRIVACY.md).
 
 ## Acceptance boundary
+
+RC6 repairs Fake Deafen responsiveness and recovery. Voice discovery validates the named gateway store and native actions, runs both lookups together, and aborts their listeners after a deadline or owner disposal. A manual retry replaces an adapter stopped by account or gateway drift without stacking patches. Local state prefers `isSelfDeaf`; the underlying transport is checked before every rewritten voice update. Direct activation waits for a validated native update and has a bounded, generation-owned cancellation path. Button exceptions release the busy state, and stopped controls ignore late work. The settings panel reports actual readiness and suppresses stale account/provider feedback. Tests execute the production Runtime methods, controller, DOM button, and React controls; the pre-fix Runtime fails the retry and local-state reproductions. These fixtures do not establish real-call acceptance or authorize additional Discord traffic.
 
 Integrated verification and exact candidate package checks are recorded for each build. Live desktop startup, actual local editor behavior under CSP, signed-in Control Center use, real recording/playback and interactive rollback must be reported separately from unit tests, browser fixtures and native disposable self-tests. No skipped or unobserved path is a pass. The existing broader CSS diagnostics and reviewed dependency cycles remain explicit debt rather than a claim of a perfect codebase.
