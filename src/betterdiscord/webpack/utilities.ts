@@ -80,6 +80,12 @@ export async function getMangledLazy<T extends object>(
 }
 
 export function bulkGetMatched<T>(module: Webpack.Module<any>, options: Webpack.BulkQueries): T | undefined {
+    try {return matchBulkModule<T>(module, options);}
+    catch {return undefined;}
+}
+
+function matchBulkModule<T>(module: Webpack.Module<any>, options: Webpack.BulkQueries): T | undefined {
+    if (!module || shouldSkipModule(module.exports)) return;
     const {filter, defaultExport = true, searchExports = false, searchDefault = true, raw = false, map} = options;
 
     if (filter(module.exports, module, module.id)) {
@@ -136,8 +142,8 @@ export function getBulk<T extends any[]>(...queries: Webpack.BulkQueries[]): T {
 
     // Check the firstId for each query
     for (let i = 0; i < queries.length; i++) {
-        const {firstId} = queries[i];
-        if (!firstId) continue;
+        const {firstId, all} = queries[i];
+        if (all || !firstId) continue;
 
         const module = webpackRequire.c[firstId];
         if (!module) continue;
@@ -176,7 +182,6 @@ export function getBulk<T extends any[]>(...queries: Webpack.BulkQueries[]): T {
     const keys = Object.keys(webpackRequire.c);
     webpack: for (let i = 0; i < keys.length; i++) {
         const module = webpackRequire.c[keys[i]];
-        if (shouldSkipModule(module.exports)) continue;
 
         for (let index = 0; index < queries.length; index++) {
             const {all = false, cacheId} = queries[index];

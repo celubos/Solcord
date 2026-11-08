@@ -4,6 +4,14 @@ import {webpackRequire} from "./require";
 import WebpackCache from "./cache";
 
 export function getMatched<T>(module: Webpack.Module<any>, filter: Webpack.ModuleFilter, options: Webpack.Options): T | undefined {
+    try {return matchModule<T>(module, filter, options);}
+    catch {return undefined;}
+}
+
+// Discord export getters may still be in a temporal dead zone during a lazy
+// module's initialization. A broken candidate must not abort the whole scan.
+function matchModule<T>(module: Webpack.Module<any>, filter: Webpack.ModuleFilter, options: Webpack.Options): T | undefined {
+    if (!module) return;
     const {defaultExport = true, searchExports = false, searchDefault = true, raw = false} = options;
 
     if (shouldSkipModule(module.exports)) return;
@@ -82,46 +90,50 @@ export function getAllModules<T extends unknown[]>(filter: Webpack.ModuleFilter,
 
     const webpackModules = Object.values(webpackRequire.c);
     for (let i = 0; i < webpackModules.length; i++) {
-        const module = webpackModules[i];
+        try {
+            const module = webpackModules[i];
+            if (!module) continue;
 
-        if (shouldSkipModule(module.exports)) continue;
+            if (shouldSkipModule(module.exports)) continue;
 
-        if (filter(module.exports, module, module.id)) {
-            if (options.declarationFilter) {
-                const declared = getDeclaration(module, options.declarationFilter);
-                if (declared) modules.push(declared);
-            }
-            else {modules.push(raw ? module : module.exports);}
-        }
-
-        if (!searchExports && !searchDefault) continue;
-
-        let defaultKey: string | undefined;
-        const searchKeys: string[] = [];
-        if (searchExports) searchKeys.push(...Object.keys(module.exports));
-        else if (searchDefault && (defaultKey = getDefaultKey(module))) searchKeys.push(defaultKey);
-
-        for (let j = 0; j < searchKeys.length; j++) {
-            const key = searchKeys[j];
-            const exported = module.exports[key];
-
-            if (shouldSkipModule(exported)) continue;
-
-            if (filter(exported, module, module.id)) {
+            if (filter(module.exports, module, module.id)) {
                 if (options.declarationFilter) {
                     const declared = getDeclaration(module, options.declarationFilter);
                     if (declared) modules.push(declared);
-                    continue;
                 }
+                else {modules.push(raw ? module : module.exports);}
+            }
 
-                if (!defaultExport && defaultKey === key) {
-                    modules.push(module.exports);
-                    continue;
+            if (!searchExports && !searchDefault) continue;
+
+            let defaultKey: string | undefined;
+            const searchKeys: string[] = [];
+            if (searchExports) searchKeys.push(...Object.keys(module.exports));
+            else if (searchDefault && (defaultKey = getDefaultKey(module))) searchKeys.push(defaultKey);
+
+            for (let j = 0; j < searchKeys.length; j++) {
+                const key = searchKeys[j];
+                const exported = module.exports[key];
+
+                if (shouldSkipModule(exported)) continue;
+
+                if (filter(exported, module, module.id)) {
+                    if (options.declarationFilter) {
+                        const declared = getDeclaration(module, options.declarationFilter);
+                        if (declared) modules.push(declared);
+                        continue;
+                    }
+
+                    if (!defaultExport && defaultKey === key) {
+                        modules.push(module.exports);
+                        continue;
+                    }
+
+                    modules.push(raw ? module : exported);
                 }
-
-                modules.push(raw ? module : exported);
             }
         }
+        catch {continue;}
     }
 
     if (fatal && modules.length === 0) throw makeException();

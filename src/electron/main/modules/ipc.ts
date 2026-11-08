@@ -105,7 +105,7 @@ const createBrowserWindow = (_: IpcMainInvokeEvent, url: string, {windowOptions,
         return Promise.reject(new Error("Invalid URL"));
     }
 
-    return new Promise<void>(resolve => {
+    return new Promise<void>((resolve, reject) => {
         const safeOptions: BrowserWindowConstructorOptions = {
             ...windowOptions,
             webPreferences: {
@@ -115,12 +115,31 @@ const createBrowserWindow = (_: IpcMainInvokeEvent, url: string, {windowOptions,
             }
         };
         const windowInstance = new BrowserWindow(safeOptions);
-        windowInstance.webContents.on("did-navigate", (__, navUrl) => {
+        let settled = false;
+        const finish = (error?: unknown, failed = false) => {
+            if (settled) return;
+            settled = true;
+            windowInstance.webContents.off("did-navigate", onNavigate);
+            windowInstance.off("closed", onClosed);
+            if (failed) reject(error);
+            else resolve();
+        };
+        const onClosed = () => finish();
+        const onNavigate = (_event: Electron.Event, navUrl: string) => {
             if (navUrl != closeOnUrl) return;
+            finish();
             windowInstance.close();
-            resolve();
-        });
-        windowInstance.loadURL(url);
+        };
+        const failed = (error: unknown) => {
+            if (settled) return;
+            finish(error, true);
+            try {if (!windowInstance.isDestroyed()) windowInstance.destroy();}
+            catch {/* The rejected invocation already reports the original navigation failure. */}
+        };
+        windowInstance.once("closed", onClosed);
+        windowInstance.webContents.on("did-navigate", onNavigate);
+        try {void windowInstance.loadURL(url).catch(failed);}
+        catch (error) {failed(error);}
     });
 };
 

@@ -3994,7 +3994,7 @@ class SolcordRuntimeStore extends Store {
                 onClose: callbacks.onClose,
                 onRenderError: callbacks.onRenderError
             }),
-            close: modalKey => Modals.ModalActions.closeModal(modalKey)
+            close: modalKey => Modals.ModalActions?.closeModal(modalKey)
         }, {confirm: onConfirm, cancel: onCancel, failure: onFailure});
         return result !== "unavailable";
     }

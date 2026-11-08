@@ -10,8 +10,7 @@ import React, {Children, type MouseEvent, type ReactNode} from "react";
 import {useStateFromStores} from "@ui/hooks";
 import SimpleMarkdownExt from "@structs/markdown";
 import ErrorBoundary from "@ui/errorboundary";
-
-const spring = DiscordModules.ReactSpring;
+import type {Root} from "react-dom/client";
 
 export type NotificationType = "warning" | "error" | "info" | "success";
 
@@ -60,8 +59,12 @@ const Icon = ({type}: {type: NotificationType;}) => {
 
 class NotificationUI {
     static container: HTMLDivElement | null = null;
+    private root?: Root;
 
-    constructor() {
+    initialize(): boolean {
+        if (this.root) return true;
+        const spring = DiscordModules.ReactSpring;
+        if (typeof ReactDOM.createRoot !== "function" || typeof spring?.useSpring !== "function" || !spring.animated?.div) return false;
         const containerId = "bd-notifications-container";
         let container = document.getElementById(containerId) as HTMLDivElement;
         if (!container) {
@@ -71,10 +74,15 @@ class NotificationUI {
         }
         NotificationUI.container = container;
 
-        ReactDOM.createRoot(container).render(<PersistentNotificationContainer />);
+        const root = ReactDOM.createRoot(container);
+        try {root.render(<PersistentNotificationContainer />);}
+        catch (error) {root.unmount(); throw error;}
+        this.root = root;
+        return true;
     }
 
     show(notif: Notification) {
+        if (!this.initialize()) throw new Error("Discord notification interface is unavailable; retry after the interface finishes loading.");
         // If there are many notifications of one ID. This will cause eccentric issues like notifications not closing.
         // Or duplicate notifications.
 
@@ -146,6 +154,7 @@ const PersistentNotificationContainer = () => {
 const NotificationUIInstance = new NotificationUI();
 
 const NotificationItem = ({notification}: {notification: Notification;}) => {
+    const spring = DiscordModules.ReactSpring;
     const {
         id,
         title = "",

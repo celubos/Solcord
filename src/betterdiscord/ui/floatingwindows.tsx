@@ -9,23 +9,29 @@ import Store from "@stores/base";
 class FloatingWindows extends Store {
     private hasInitialized = false;
 
-    public initialize() {
-        if (this.hasInitialized) return;
-        this.hasInitialized = true;
+    public initialize(): boolean {
+        if (this.hasInitialized) return true;
+        if (typeof ReactDOM.createRoot !== "function") return false;
 
         const div = document.createElement("div");
         div.id = "floating-windows-layer";
 
         DOMManager.bdBody.append(div);
 
-        const root = ReactDOM.createRoot(div);
-        root.render(<FloatingWindowContainer />);
+        try {
+            const root = ReactDOM.createRoot(div);
+            try {root.render(<FloatingWindowContainer />);}
+            catch (error) {root.unmount(); throw error;}
+            this.hasInitialized = true;
+            return true;
+        }
+        catch (error) {div.remove(); throw error;}
     }
 
     public windows: FloatingWindowProps[] = [];
 
     public open(window: FloatingWindowProps) {
-        this.initialize();
+        if (!this.initialize()) throw new Error("Discord floating window interface is unavailable; retry after the interface finishes loading.");
 
         // If one exists under the same id do nothing
         if (this.windows.findIndex((win) => win.id === window.id) === -1) {

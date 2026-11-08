@@ -12,11 +12,11 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 
 | Measure | Count |
 | --- | ---: |
-| Persistent tracked files | 696 |
-| Text files scanned | 681 |
+| Persistent tracked files | 712 |
+| Text files scanned | 697 |
 | Binary files classified | 15 |
-| Text lines scanned | 137,772 |
-| Custom Solcord lines | 57,782 |
+| Text lines scanned | 139,801 |
+| Custom Solcord lines | 58,823 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -25,14 +25,14 @@ These counts are inventory signals, not findings by themselves. Each use still r
 
 | Signal | Whole tree | Custom Solcord surfaces |
 | --- | ---: | ---: |
-| TODO / FIXME / HACK | 33 | 4 |
-| Timer calls | 75 | 40 |
+| TODO / FIXME / HACK | 30 | 4 |
+| Timer calls | 81 | 43 |
 | Mutation observers | 22 | 15 |
-| DOM queries | 307 | 216 |
-| Webpack discovery calls | 80 | 5 |
+| DOM queries | 319 | 224 |
+| Webpack discovery calls | 84 | 9 |
 | Patch calls | 30 | 10 |
-| Synchronous filesystem calls | 915 | 814 |
-| Console calls | 78 | 58 |
+| Synchronous filesystem calls | 921 | 820 |
+| Console calls | 79 | 58 |
 | Empty catch blocks | 5 | 3 |
 
 ## Largest maintainable files
@@ -56,9 +56,9 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 15 | `src/electron/main/modules/solcord-setup.ts` | 904 | 52.1 KiB |
 | 16 | `src/electron/main/modules/solcord-timeline.ts` | 832 | 36.8 KiB |
 | 17 | `installer/Solcord.Installer/InstallerForm.cs` | 768 | 43.4 KiB |
-| 18 | `src/betterdiscord/modules/addonstore.ts` | 732 | 23.4 KiB |
-| 19 | `src/betterdiscord/api/contextmenu.ts` | 666 | 22.7 KiB |
-| 20 | `src/common/solcord/v2-feature-models.ts` | 661 | 36.1 KiB |
+| 18 | `src/betterdiscord/modules/addonstore.ts` | 734 | 23.5 KiB |
+| 19 | `src/betterdiscord/ui/settings.tsx` | 706 | 28.2 KiB |
+| 20 | `src/betterdiscord/api/contextmenu.ts` | 666 | 22.7 KiB |
 
 ## Largest custom Solcord files
 

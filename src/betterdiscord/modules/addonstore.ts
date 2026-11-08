@@ -292,13 +292,15 @@ export class Addon {
 
             let installing = false;
 
-            const key = Modals.ModalActions.openModal((props) => React.createElement(InstallModal, {
+            const actions = Modals.ModalActions;
+            if (!actions) {queueMicrotask(onFinish); return;}
+            const key = actions.openModal((props) => React.createElement(InstallModal, {
                 ...props,
                 addon: this,
                 install: async (shouldEnable: boolean) => {
                     installing = true;
                     await install(shouldEnable);
-                    Modals.ModalActions.closeModal(key);
+                    actions.closeModal(key);
                 }
             }), {
                 onCloseCallback: onFinish,
@@ -306,7 +308,7 @@ export class Addon {
                 onCloseRequest() {
                     // If installing make it so the modal cannot close until install is finished
                     if (installing) return;
-                    Modals.ModalActions.closeModal(key);
+                    actions.closeModal(key);
                 },
                 // backdropStyle: "BLUR"
             });

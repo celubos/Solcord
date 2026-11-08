@@ -50,3 +50,29 @@ export function panelHandlerFixture(componentName: string, handlerName: string, 
     if (!handler) throw new Error(`Production panel handler is missing: ${componentName}.${handlerName}`);
     return evaluate(handler.getText(parsed), "", bindings);
 }
+
+export function mainStartupMethodFixture(name: string, bindings: Record<string, unknown>): FixtureMethod {
+    const parsed = source("src/electron/main/modules/betterdiscord.ts");
+    const owner = parsed.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === "BetterDiscord") as ts.ClassDeclaration | undefined;
+    const method = owner?.members.find(node => ts.isMethodDeclaration(node) && node.name.getText(parsed) === name) as ts.MethodDeclaration | undefined;
+    if (!method?.body) throw new Error(`Production main startup method is missing: ${name}`);
+    const asynchronous = method.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword) ? "async " : "";
+    return evaluate(`(${asynchronous}function(${method.parameters.map(parameter => parameter.getText(parsed)).join(",")}) ${method.body.getText(parsed)})`, "", bindings);
+}
+
+export function nativeIpcHandlerFixture(name: string, bindings: Record<string, unknown>): FixtureMethod {
+    const parsed = source("src/electron/main/modules/ipc.ts");
+    const declarations = parsed.statements.filter(ts.isVariableStatement);
+    const handler = declarations.flatMap(statement => statement.declarationList.declarations).find(declaration => declaration.name.getText(parsed) === name)?.initializer;
+    if (!handler) throw new Error(`Production IPC handler is missing: ${name}`);
+    const dependencies = declarations.filter(statement => statement.declarationList.declarations.some(declaration => declaration.name.getText(parsed) === "SAFE_WEB_PREFERENCES")).map(statement => statement.getText(parsed)).join("\n");
+    return evaluate(handler.getText(parsed), dependencies, bindings);
+}
+
+export function modalMethodFixture(name: string, bindings: Record<string, unknown>): FixtureMethod {
+    const parsed = source("src/betterdiscord/ui/modals.ts");
+    const owner = parsed.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === "Modals") as ts.ClassDeclaration | undefined;
+    const member = owner?.members.find(node => (ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node)) && node.name.getText(parsed) === name) as ts.MethodDeclaration | ts.GetAccessorDeclaration | undefined;
+    if (!member?.body) throw new Error(`Production modal member is missing: ${name}`);
+    return evaluate(`(function(${member.parameters.map(parameter => parameter.getText(parsed)).join(",")}) ${member.body.getText(parsed)})`, "", bindings);
+}

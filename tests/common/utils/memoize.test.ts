@@ -109,4 +109,25 @@ describe("Memoize Utility", () => {
         expect(firstResult).toBe(secondResult);
         expect(count).toBe(1);
     });
+
+    test("optional late-module mode retries an absent getter and caches its first available value", () => {
+        let available = false;
+        let calls = 0;
+        const module = {ready: true};
+        const memoized = memoize({get module() {calls++; return available ? module : undefined;}}, {cacheUndefined: false});
+        expect(memoized.module).toBeUndefined();
+        expect(memoized.module).toBeUndefined();
+        available = true;
+        expect(memoized.module).toBe(module);
+        expect(memoized.module).toBe(module);
+        expect(calls).toBe(3);
+    });
+
+    test("ordinary memoization still caches undefined unless late-module mode is requested", () => {
+        let calls = 0;
+        const memoized = memoize({get missing() {calls++; return undefined;}});
+        expect(memoized.missing).toBeUndefined();
+        expect(memoized.missing).toBeUndefined();
+        expect(calls).toBe(1);
+    });
 });

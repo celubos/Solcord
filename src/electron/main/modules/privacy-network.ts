@@ -32,6 +32,30 @@ export function persistedNativePrivacy(document: unknown): SolcordPrivacyPrefere
     return normalizePrivacyPreferences(policy);
 }
 
+/** Bound allocation and detect replacement/growth on the descriptor actually read. */
+export function readBoundedNativePrivacyFile(file: string, maximumBytes = 8 * 1024 * 1024): unknown {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 8 * 1024 * 1024) throw new RangeError("Invalid native privacy file limit.");
+    const descriptor = fs.openSync(file, "r");
+    let buffer: Buffer | undefined;
+    try {
+        const before = fs.fstatSync(descriptor, {bigint: true});
+        const named = fs.lstatSync(file, {bigint: true});
+        if (!before.isFile() || !named.isFile() || named.isSymbolicLink() || before.dev !== named.dev || before.ino !== named.ino
+            || before.size < 1n || before.size > BigInt(maximumBytes)) throw new TypeError("Invalid native privacy file.");
+        buffer = Buffer.alloc(Number(before.size) + 1);
+        let used = 0;
+        while (used < buffer.length) {
+            const count = fs.readSync(descriptor, buffer, used, buffer.length - used, used);
+            if (count === 0) break;
+            used += count;
+        }
+        const after = fs.fstatSync(descriptor, {bigint: true});
+        if (BigInt(used) !== before.size || after.size !== before.size || after.mtimeNs !== before.mtimeNs) throw new Error("Native privacy file changed during read.");
+        return JSON.parse(buffer.subarray(0, used).toString("utf8"));
+    }
+    finally {buffer?.fill(0); fs.closeSync(descriptor);}
+}
+
 function loadPersistedPrivacy(): SolcordPrivacyPreferences {
     try {
         const root = resolveSolcordBetterDiscordRoot(app.getPath("userData"));
@@ -39,9 +63,7 @@ function loadPersistedPrivacy(): SolcordPrivacyPreferences {
         if (!["stable", "ptb", "canary", "development"].includes(channel)) throw new Error("Invalid channel");
         const file = path.join(root, "data", channel, "solcord.json");
         assertRegularOwnedPath(root, file);
-        const stat = fs.lstatSync(file);
-        if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 8 * 1024 * 1024) throw new Error("Invalid privacy settings");
-        const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+        const saved = readBoundedNativePrivacyFile(file);
         return persistedNativePrivacy(saved);
     }
     catch {return defaultStrictPrivacyPreferences();}

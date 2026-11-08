@@ -1,5 +1,6 @@
 import {expect, mock, test} from "bun:test";
-mock.module("electron", () => ({app: {getPath: () => {throw new Error("No user profile in this test");}}}));
+const electron = {app: {getPath: () => {throw new Error("No user profile in this test");}}};
+mock.module("electron", () => ({"default": electron, ...electron}));
 const {installNativePrivacyGuard, optionalDiscordRequestBlocked, synchronizeNativePrivacy, persistedNativePrivacy} = await import("../../src/electron/main/modules/privacy-network");
 const {defaultStrictPrivacyPreferences, applyPrivacyProfile} = await import("../../src/common/solcord/privacy");
 test("strict blocks exact optional endpoints and preserves core Discord traffic", () => {

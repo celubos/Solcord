@@ -1,6 +1,7 @@
 import Logger from "@common/logger";
 import type {RawModule} from "../../../betterdiscord/types/discord/webpack";
 import parseDeclarations from "@common/parseDeclarations";
+import {isReactRuntime} from "@common/react-readiness";
 
 const getPrefix = /^(.*?)\(/;
 // Functions like ones from objects ({ a() {} }) will throw so we replace 'a' with 'function'
@@ -17,6 +18,7 @@ function toStringFunction(stringed: string): string {
 (window.rspackChunkdiscord_app ??= window.webpackChunkdiscord_app ??= [])
     .push([[Symbol()], {}, (require: any) => {
         if (!require.b) return;
+        let rendererScheduled = false;
 
         // Rspack can supply direct values separately from getter exports. The
         // third argument must survive our patchability wrapper (e.g. Logger.A).
@@ -168,16 +170,11 @@ function toStringFunction(stringed: string): string {
                     }
 
                     try {
-                        if (
-                            typeof module.exports === "object"
-                            && module.exports !== null
-                            && module.exports.createElement
-                        ) {
+                        if (!rendererScheduled && isReactRuntime(module.exports)) {
+                            rendererScheduled = true;
                             requestIdleCallback(() => {
                                 window.BetterDiscordRunRenderer();
                             });
-
-                            // setTimeout(() => window.BetterDiscordRunRenderer(), 1000);
                         }
                     }
                     catch {/* empty */}

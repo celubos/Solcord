@@ -77,6 +77,30 @@ describe("Discord Rspack export compatibility", () => {
         expect(exports[Symbol.for("BetterDiscord.Polyfilled.class") as any]).toBeUndefined();
     });
 
+    test("the early trigger waits for required React APIs and schedules exactly one renderer attempt", () => {
+        const previousIdle = Object.getOwnPropertyDescriptor(globalThis, "requestIdleCallback");
+        const previousRun = Object.getOwnPropertyDescriptor(window, "BetterDiscordRunRenderer");
+        const callbacks: Array<() => void> = []; let attempts = 0;
+        Object.defineProperty(globalThis, "requestIdleCallback", {configurable: true, value: (callback: () => void) => {callbacks.push(callback); return callbacks.length;}});
+        Object.defineProperty(window, "BetterDiscordRunRenderer", {configurable: true, value: () => {attempts++;}});
+        try {
+            runtime.m[126] = vm.runInNewContext("({126(m){m.exports={createElement(){},cloneElement(){}}}})[126]");
+            runtime(126); expect(callbacks).toHaveLength(0);
+            const functions = ["Component", "createElement", "cloneElement", "createContext", "forwardRef", "memo", "useCallback", "useEffect", "useMemo", "useRef", "useState", "useSyncExternalStore"].map(key => `${key}:function(){}`).join(",");
+            for (const id of [127, 128]) {
+                runtime.m[id] = vm.runInNewContext(`({${id}(m){m.exports={Fragment:Symbol.for("react.fragment"),${functions}}}})[${id}]`);
+                runtime(id);
+            }
+            expect(callbacks).toHaveLength(1); expect(attempts).toBe(0);
+            callbacks[0](); expect(attempts).toBe(1);
+        }
+        finally {
+            if (previousIdle) Object.defineProperty(globalThis, "requestIdleCallback", previousIdle);
+            if (previousRun) Object.defineProperty(window, "BetterDiscordRunRenderer", previousRun);
+            else delete (window as Partial<Window>).BetterDiscordRunRenderer;
+        }
+    });
+
     test("renderer module discovery uses the same Rspack queue instead of the stale webpack queue", async () => {
         const {webpackRequire} = await import("../../src/betterdiscord/webpack/require");
         expect(webpackRequire as unknown).toBe(runtime);

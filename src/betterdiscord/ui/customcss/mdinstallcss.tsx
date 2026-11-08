@@ -16,16 +16,46 @@ import type {Rule} from "@typed/discord/modules";
 
 class InstallCSS {
     static activeNotifications = new Map();
+    private static initialized = false;
+    private static initializing?: Promise<boolean>;
 
-    static async initialize() {
-        if (!DiscordModules.SimpleMarkdownWrapper) return;
+    static initialize(): Promise<boolean> {
+        if (this.initialized) return Promise.resolve(true);
+        if (this.initializing) return this.initializing;
+        const controller = new AbortController();
+        const cancel = () => controller.abort();
+        const deadline = setTimeout(cancel, 10_000);
+        window.addEventListener("beforeunload", cancel, {once: true});
+        // Defer work so the single-flight owner exists before any host callback.
+        this.initializing = Promise.resolve().then(() => this.initializeOwned(controller.signal)).catch(() => {
+            Logger.warn("InstallCSS", "Optional CSS message integration is unavailable; initialization can be retried.");
+            return false;
+        }).finally(() => {
+            clearTimeout(deadline);
+            window.removeEventListener("beforeunload", cancel);
+            controller.abort();
+            this.initializing = undefined;
+        });
+        return this.initializing;
+    }
 
-        const patch = DiscordModules.SimpleMarkdownWrapper.defaultRules.codeBlock as Required<Rule>;
+    private static async initializeOwned(signal: AbortSignal): Promise<boolean> {
+        const patch = DiscordModules.SimpleMarkdownWrapper?.defaultRules?.codeBlock as Required<Rule> | undefined;
+        if (signal.aborted || typeof patch?.react !== "function") return false;
 
-        const codeBlockStyles: any = await getLazy(Filters.byKeys(["codeActions"]), {firstId: 992595, cacheId: "core-mdinstallcss-codeBlockStyles"});
-        if (!patch.react || typeof patch.react !== "function") return;
+        let cancelLookup: () => void = () => {};
+        const cancelled = new Promise<undefined>(resolve => {
+            cancelLookup = () => resolve(undefined);
+            signal.addEventListener("abort", cancelLookup, {once: true});
+        });
+        let codeBlockStyles: Record<string, unknown> | undefined;
+        try {
+            codeBlockStyles = await Promise.race([getLazy<Record<string, unknown>>(Filters.byKeys(["codeActions"]), {firstId: 992595, cacheId: "core-mdinstallcss-codeBlockStyles", signal}), cancelled]);
+        }
+        finally {signal.removeEventListener("abort", cancelLookup);}
+        if (signal.aborted || !codeBlockStyles || !["markup", "codeContainer", "codeActions"].every(key => typeof codeBlockStyles![key] === "string" && codeBlockStyles![key])) return false;
 
-        Patcher.after("InstallCSS", patch, "react", (_, [args]: [{content?: string; lang?: string;}, any, any], child) => {
+        const unpatch = Patcher.after("InstallCSS", patch, "react", (_, [args]: [{content?: string; lang?: string;}, any, any], child) => {
             const isEnabled = Settings.get("customcss", "customcss");
             if (!isEnabled) return;
 
@@ -67,13 +97,23 @@ class InstallCSS {
             ];
         });
 
-        DOMManager.injectStyle("bd-installcss",
+        if (typeof unpatch !== "function") return false;
+        try {
+            DOMManager.injectStyle("bd-installcss",
             `.${codeBlockStyles.markup} .${codeBlockStyles.codeContainer}:hover .${codeBlockStyles.codeActions} {
                 display: flex;
                 flex-direction: row-reverse;
                 gap: 8px;
             }`
-        );
+            );
+            this.initialized = true;
+            return true;
+        }
+        catch (error) {
+            try {unpatch();}
+            finally {DOMManager.removeStyle("bd-installcss");}
+            throw error;
+        }
     }
 
     static handleCSSInstall(cssBlock: string) {
