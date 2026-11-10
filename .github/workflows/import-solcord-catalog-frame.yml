@@ -1,0 +1,26 @@
+name: Import verified catalog and fixture correction
+on: create
+permissions:
+  contents: write
+jobs:
+  import:
+    if: github.repository == 'celubos/Solcord' && github.event.ref_type == 'branch' && github.event.ref == 'delivery/solcord-catalog-frame-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Verify and import exact correction
+        run: |
+          set -euo pipefail
+          bundle='.delivery/catalog-frame-history.bundle'
+          test "$(wc -c < "$bundle")" = '4227'
+          printf '%s  %s\n' 'b43bc83f37dd7b3db6d435f490e82afef29d2f6301747ac176cafb1633afa251' "$bundle" | sha256sum --check --strict
+          git bundle verify "$bundle"
+          git fetch "$bundle" HEAD
+          test "$(git rev-parse FETCH_HEAD)" = '9dfe00b9e6577e61d60cd0b4ee7fba03b96cc0d7'
+          git merge-base --is-ancestor '26d74e9d8c2d7388838a81b69ee3674d9182072d' FETCH_HEAD
+          test "$(git rev-parse 'FETCH_HEAD^{tree}')" = 'f1c20c347d77864419fc10e41c3fa24a040448cd'
+          git push origin '9dfe00b9e6577e61d60cd0b4ee7fba03b96cc0d7:refs/heads/sol/release-2.0.1-ci-frame'
+          test "$(git ls-remote origin refs/heads/sol/release-2.0.1-ci-frame | cut -f1)" = '9dfe00b9e6577e61d60cd0b4ee7fba03b96cc0d7'
