@@ -1,6 +1,7 @@
 import fs from "@polyfill/fs";
 import path from "path";
 import Config from "@stores/config";
+import Logger from "@common/logger";
 
 export default class WebpackCache {
     private static data: Record<string, string>;
@@ -11,6 +12,7 @@ export default class WebpackCache {
     }
 
     static set(id: string, moduleId: string) {
+        if (!this.data) this.load();
         this.data[id] = moduleId;
         this.saveDebounced();
     }
@@ -20,10 +22,16 @@ export default class WebpackCache {
         const filePath = path.resolve(Config.get("channelPath"), `webpack.json`);
         try {
             const data = fs.readFileSync(filePath).toString();
-            this.data = JSON.parse(data);
+            const parsed: unknown = JSON.parse(data);
+            this.data = Object.create(null);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                for (const [key, value] of Object.entries(parsed)) {
+                    if (typeof value === "string" && /^\d+$/.test(value)) this.data[key] = value;
+                }
+            }
         }
         catch {
-            this.data = {};
+            this.data = Object.create(null);
         }
     }
 
@@ -53,8 +61,15 @@ export default class WebpackCache {
     }
 
     private static save() {
-        const filePath = path.resolve(Config.get("channelPath"), `webpack.json`);
-        fs.writeFileSync(filePath, JSON.stringify(this.data, null, 4));
+        try {
+            const filePath = path.resolve(Config.get("channelPath"), `webpack.json`);
+            fs.writeFileSync(filePath, JSON.stringify(this.data, null, 4));
+        }
+        catch {
+            // This cache only accelerates validated module discovery. An
+            // unwritable cache must not crash a renderer timer or block startup.
+            Logger.warn("WebpackCache", "Could not persist the optional module cache; discovery will continue without saved hints.");
+        }
     }
 
     // eslint-disable-next-line no-useless-escape

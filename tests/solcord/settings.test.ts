@@ -396,10 +396,22 @@ describe("Solcord settings schema", () => {
         const document = normalizeSolcordDocument({schemaVersion: 6});
 
         expect(document.productPreferences.privacy).toEqual(expect.objectContaining({
-            profile: "standard",
-            migrationPending: true
+            profile: "strict",
+            migrationPending: true,
+            telemetry: "block",
+            crashReporting: "block-optional",
+            activityDiscovery: "block",
+            updates: "manual",
+            externalProviders: "off"
         }));
         expect(document.migrationProvenance.at(-1)).toEqual(expect.objectContaining({fromSchema: 6, toSchema: 10}));
+    });
+
+    test("preserves an explicitly selected standard or custom privacy profile with a migration receipt", () => {
+        for (const profile of ["standard", "custom"] as const) {
+            const document = normalizeSolcordDocument({schemaVersion: 6, productPreferences: {privacy: {profile, migratedAt: 123, telemetry: "allow", updates: "automatic"}}});
+            expect(document.productPreferences.privacy).toMatchObject({profile, migratedAt: 123, telemetry: "allow", updates: "automatic"});
+        }
     });
 
     test("disables Power Lab entries unless their versioned acknowledgement is current", () => {

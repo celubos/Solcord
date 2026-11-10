@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES} from "./addon-catalog.generated";
+import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES} from "./addon-trust.generated";
 import {isSolcordBuiltInAddon} from "./builtin-addons";
 
 

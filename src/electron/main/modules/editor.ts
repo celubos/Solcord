@@ -1,7 +1,12 @@
-import {BrowserWindow, dialog, shell, type BrowserWindowConstructorOptions, type WebContents} from "electron";
+import {BrowserWindow, dialog, shell, app, clipboard, type BrowserWindowConstructorOptions, type WebContents} from "electron";
+import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "path";
 import {pathToFileURL} from "url";
 import * as IPCEvents from "@common/constants/ipcevents";
+import {safeAddonFileName} from "@common/solcord/addon-file-policy";
+import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
+import {assertRegularOwnedPath} from "./addon-files";
 
 interface Windows {
     "custom-css"?: BrowserWindow,
@@ -18,6 +23,13 @@ export default class Editor {
     public static open(type: "theme" | "plugin", filename: string): WebContents;
     public static open(type: "custom-css"): WebContents;
     public static open(type: "custom-css" | "theme" | "plugin", filename?: string): WebContents {
+        if (!["custom-css", "theme", "plugin"].includes(type)) throw new TypeError("Invalid editor kind.");
+        if (type !== "custom-css") safeAddonFileName(filename!, type);
+        const root = resolveSolcordBetterDiscordRoot(app.getPath("userData"));
+        const channel = process.env.DISCORD_RELEASE_CHANNEL ?? "stable";
+        if (!["stable", "ptb", "canary", "development"].includes(channel)) throw new TypeError("Invalid Discord channel.");
+        const target = type === "custom-css" ? path.join(root, "data", channel, "custom.css") : path.join(root, `${type}s`, filename!);
+        assertRegularOwnedPath(root, target, type === "custom-css");
         const openedViaWindow = !!this._options;
 
         let window = type === "custom-css" ? this.windows["custom-css"] : this.windows[type][filename!];
@@ -39,9 +51,14 @@ export default class Editor {
                 webPreferences: {
                     ...this._options?.webPreferences,
                     preload: path.join(__dirname, "editor/preload.js"),
-                    sandbox: false,
-                    allowRunningInsecureContent: true,
-                    webSecurity: false
+                    nodeIntegration: false,
+                    nodeIntegrationInSubFrames: false,
+                    nodeIntegrationInWorker: false,
+                    contextIsolation: true,
+                    sandbox: true,
+                    webviewTag: false,
+                    allowRunningInsecureContent: false,
+                    webSecurity: true
                 }
             });
 
@@ -50,8 +67,48 @@ export default class Editor {
             window.setMenu(null);
 
             const url = pathToFileURL(path.join(__dirname, "editor/index.html"));
-            url.searchParams.set("type", type);
-            url.searchParams.set("filename", filename || "custom.css");
+            url.searchParams.set("session", crypto.randomUUID());
+            const editorWindow = window;
+            editorWindow.webContents.ipc.on(IPCEvents.EDITOR_SESSION, (event, command: string, payload?: unknown) => {
+                try {
+                    if (event.senderFrame !== editorWindow.webContents.mainFrame || event.senderFrame.url !== url.href || editorWindow.webContents.getURL() !== url.href) throw new Error("Editor session is not authorized.");
+                    assertRegularOwnedPath(root, target, type === "custom-css");
+                    let value: unknown;
+                    switch (command) {
+                        case "metadata": value = {type, filename: filename || "custom.css"}; break;
+                        case "read": value = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : ""; break;
+                        case "write": {
+                            if (typeof payload !== "string" || Buffer.byteLength(payload) > 8 * 1024 * 1024) throw new TypeError("Editor content exceeds its limit.");
+                            const temporary = `${target}.${crypto.randomBytes(12).toString("hex")}.tmp`;
+                            try {
+                                fs.writeFileSync(temporary, payload, {encoding: "utf8", flag: "wx", mode: 0o600});
+                                assertRegularOwnedPath(root, target, type === "custom-css");
+                                fs.renameSync(temporary, target);
+                            }
+                            finally {
+                                try {fs.unlinkSync(temporary);}
+                                catch {/* The main-process-bound temporary file is eligible for cleanup. */}
+                            }
+                            break;
+                        }
+                        case "open": void shell.openPath(target); break;
+                        case "clipboard": value = clipboard.readText(); break;
+                        case "warning": shouldWarn = payload === true; break;
+                        case "settings-get": value = this.getSettings(); break;
+                        case "settings-set": {
+                            if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new TypeError("Invalid editor settings.");
+                            this.updateSettings({...this.#settings, ...payload});
+                            this._window?.webContents.send(IPCEvents.EDITOR_SETTINGS_UPDATE, payload);
+                            break;
+                        }
+                        default: throw new TypeError("Unknown editor operation.");
+                    }
+                    event.returnValue = {ok: true, value};
+                }
+                catch {event.returnValue = {ok: false};}
+            });
+            window.webContents.on("will-navigate", event => event.preventDefault());
+            window.webContents.on("will-redirect", event => event.preventDefault());
 
             if (openedViaWindow) {
                 window.webContents.once("will-navigate", (e) => {
@@ -71,9 +128,6 @@ export default class Editor {
             }
 
             let shouldWarn = false;
-            window.webContents.ipc.handle(IPCEvents.EDITOR_SHOULD_SHOW_WARNING, (_, $shouldWarn) => {
-                shouldWarn = $shouldWarn;
-            });
 
             window.on("close", (event) => {
                 if (!shouldWarn) return;
@@ -96,19 +150,8 @@ export default class Editor {
                 }
             });
 
-            window.webContents.ipc.handle(IPCEvents.EDITOR_SETTINGS_UPDATE, (_, settings: Partial<import("../../../editor/preload").Settings>) => {
-                this.updateSettings(Object.assign({}, this.#settings, settings));
 
-                if (this._window) {
-                    this._window.webContents.send(IPCEvents.EDITOR_SETTINGS_UPDATE, settings);
-                }
-            });
-
-            window.webContents.setWindowOpenHandler((details) => {
-                shell.openExternal(details.url);
-
-                return {action: "deny"};
-            });
+            window.webContents.setWindowOpenHandler(() => ({action: "deny"}));
 
             if (this._window) {
                 const listener = () => {

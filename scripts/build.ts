@@ -5,9 +5,12 @@ import path from "node:path";
 import pkg from "../package.json";
 import styleLoader from "bun-style-loader";
 import * as esbuild from "esbuild";
+import buildPackage from "./helpers/package";
+import {writeEmittedFiles} from "./helpers/emitted-files";
 
 import {assertSolcordBuildAllowed, captureSolcordBuildProvenance, type SolcordBuildMode, writeSolcordBuildProvenance} from "./helpers/build-provenance";
 import {assertSolcordPackageVersion, SOLCORD_PRODUCT_IDENTITY} from "../src/common/solcord/product-identity";
+import {solcordLocalAssets, stageSolcordLocalAssets} from "./helpers/local-assets";
 
 
 const fileURL = Bun.fileURLToPath(import.meta.url);
@@ -94,6 +97,9 @@ function buildOptions() {
 async function runBuild() {
     const before = performance.now();
     const names = modulesRequested.join(", ");
+    stageSolcordLocalAssets(rootDir);
+    const emittedManifest = path.join(rootDir, "dist", "emitted-files.json");
+    if (Bun.file(emittedManifest).size) await Bun.file(emittedManifest).delete();
 
     console.log("");
     console.log(`Building ${names}...`);
@@ -105,6 +111,11 @@ async function runBuild() {
     else {
         await esbuild.build(buildOptions());
         writeSolcordBuildProvenance(path.join(rootDir, "dist", "build-provenance.json"), provenance);
+        buildPackage(path.join(rootDir, "dist"));
+        writeEmittedFiles(path.join(rootDir, "dist"), [
+            ...entryPoints.map(entry => `${entry.out}.${entry.in.endsWith(".html") ? "html" : "js"}`),
+            "package.json", "build-provenance.json", ...solcordLocalAssets(rootDir).map(asset => asset.target)
+        ]);
     }
 
     const after = performance.now();

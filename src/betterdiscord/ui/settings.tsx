@@ -2,7 +2,7 @@ import ReactDOM from "@modules/reactdom";
 import React from "react";
 import Settings, {type SettingsCollection} from "@stores/settings";
 import JsonStore from "@stores/json";
-import {Filters, getByKeys, getLazy, getMangled, getMangledLazy} from "@webpack";
+import {Filters, getByKeys, getLazy, getMangled, getMangledLazy, getMatched, lazyListeners} from "@webpack";
 import Patcher from "@modules/patcher";
 
 import AddonPage from "@ui/settings/addonpage";
@@ -27,15 +27,88 @@ import toasts from "@stores/toasts";
 import ContextMenuPatcher from "@api/contextmenu";
 import type {GroupOnChange} from "./settings/group";
 import {normalizeSettingsSearchTerms, resolveAddonDisplayNames} from "./settings/addon-names";
+import Logger from "@common/logger";
+import ModalRoot from "./modals/root";
+import ErrorBoundary from "./errorboundary";
+import type {Webpack} from "@typed/discord";
 
 const ContextMenu = new ContextMenuPatcher();
 
-const UserSettings = getByKeys<any>(["openUserSettings", "USER_SETTINGS_MODAL_KEY"], {firstId: 840065, cacheId: "core-settings-usersettings"});
+const getUserSettings = () => getByKeys<any>(["openUserSettings"], {firstId: 840065, cacheId: "core-settings-usersettings"});
 
 const SettingsRenderer = new class SettingsRenderer {
-    initialize() {
-        this.patchModalSettings();
-        this.patchVersionInformation();
+    private initialized = false;
+    private initializing?: Promise<boolean>;
+    private searchPatched = false;
+    private versionPatched = false;
+    private navigationRootAvailable = false;
+    private lateNavigationListener?: Webpack.ModuleFilter;
+    private retryQueued = false;
+    private disposed = false;
+    private activeController?: AbortController;
+    private controlCenterModal?: string | number;
+    get isAvailable() {return this.initialized;}
+    private readonly onPageHide = () => {
+        this.disposed = true;
+        this.activeController?.abort();
+        this.stopLateNavigationWatch();
+    };
+
+    private stopLateNavigationWatch() {
+        if (this.lateNavigationListener) lazyListeners.delete(this.lateNavigationListener);
+        this.lateNavigationListener = undefined;
+        window.removeEventListener("pagehide", this.onPageHide);
+    }
+
+    private watchLateNavigation() {
+        if (this.lateNavigationListener || this.initialized || this.disposed) return;
+        this.lateNavigationListener = (_, module) => {
+            const root = getMatched(module, m => m?.key === "$Root" && typeof m.buildLayout === "function", {searchExports: true, searchDefault: false});
+            if (root) this.navigationRootAvailable = true;
+            if (!this.navigationRootAvailable || this.retryQueued) return;
+            this.retryQueued = true;
+            queueMicrotask(async () => {
+                // A late module may arrive while the bounded startup attempt is
+                // settling. Retry after it releases ownership, never alongside it.
+                await this.initializing;
+                this.retryQueued = false;
+                if (!this.disposed && !this.initialized) void this.initialize();
+            });
+        };
+        lazyListeners.add(this.lateNavigationListener);
+        window.addEventListener("pagehide", this.onPageHide, {once: true});
+    }
+
+    initialize(): Promise<boolean> {
+        if (this.disposed) return Promise.resolve(false);
+        // The product-owned entry must remain available even when Discord's
+        // private settings layout has not loaded or changed shape.
+        Settings.setPanelOpener(id => this.openSettingsPage(id));
+        if (this.initialized) return Promise.resolve(true);
+        if (this.initializing) return this.initializing;
+        this.watchLateNavigation();
+        const controller = new AbortController();
+        this.activeController = controller;
+        const deadline = setTimeout(() => controller.abort(), 10_000);
+        // Version decoration is optional. It shares the bounded lookup lifetime
+        // but cannot reject the navigation registration or delay its readiness.
+        void this.patchVersionInformation(controller.signal).catch(() => {
+            Logger.warn("SettingsRenderer", "Optional version decoration is unavailable.");
+        });
+        this.initializing = this.patchModalSettings(controller.signal).then(ready => {
+            this.initialized = ready;
+            if (ready) this.stopLateNavigationWatch();
+            return ready;
+        }).catch(() => {
+            Logger.warn("SettingsRenderer", "Discord settings integration is unavailable; initialization can be retried after modules load.");
+            return false;
+        }).finally(() => {
+            clearTimeout(deadline);
+            controller.abort();
+            this.activeController = undefined;
+            this.initializing = undefined;
+        });
+        return this.initializing;
     }
 
     onDrawerToggle(collection: string, group: string, state: boolean) {
@@ -81,6 +154,7 @@ const SettingsRenderer = new class SettingsRenderer {
         const out: Partial<LayoutBuilder> = {};
         for (const key in layoutModuleRaw) {
             if (!Object.hasOwn(layoutModuleRaw, key)) continue;
+            if (typeof layoutModuleRaw[key] !== "function") continue;
 
             const match = String(layoutModuleRaw[key]).match(/\..{1,3}\.(.+?),/);
 
@@ -100,18 +174,20 @@ const SettingsRenderer = new class SettingsRenderer {
             }
         }
 
+        for (const key of ["custom", "category", "panel", "sidebarItem", "section"] as const) {
+            if (typeof out[key] !== "function") throw new Error("Discord settings layout builders are unavailable");
+        }
         return this.layoutBuilder = out as LayoutBuilder;
     }
 
-    async patchModalSettings() {
+    async patchModalSettings(signal?: AbortSignal): Promise<boolean> {
         // if discords creates another root check buildLayout
         const rootLayout = await getLazy<{
             key: "$Root";
             buildLayout(): SectionLayout[];
-        }>(m => m?.key === "$Root", {searchExports: true, searchDefault: false});
-        if (!rootLayout) return;
-
-        this.patchSettingsSearch();
+        }>(m => m?.key === "$Root" && typeof m.buildLayout === "function", {searchExports: true, searchDefault: false, signal});
+        if (!rootLayout || signal?.aborted) return false;
+        this.navigationRootAvailable = true;
 
         const layoutBuilder = this.getLayoutBuilder();
 
@@ -299,21 +375,28 @@ const SettingsRenderer = new class SettingsRenderer {
             useTitle: () => Object.assign(<LayerSettingTitle />, {toString: () => "Solcord"}),
         });
 
-        Patcher.after("SettingsManager", rootLayout, "buildLayout", (_, __, res) => {
+        const cancel = Patcher.after("SettingsManager", rootLayout, "buildLayout", (_, __, res) => {
+            if (!Array.isArray(res) || res.includes(section)) return;
             const index = res.findIndex((layout) => (layout as any).key === "games_and_apps_section") + 1;
 
             res.splice(index, 0, section);
         });
+        if (typeof cancel !== "function") return false;
+        try {this.patchSettingsSearch();}
+        catch {Logger.warn("SettingsRenderer", "Optional settings search integration is unavailable.");}
+        return true;
     }
 
     patchSettingsSearch() {
+        if (this.searchPatched) return;
         const search = getMangled<{
             search(): Record<string, any>;
         }>(".PRIVACY_AND_SAFETY_PERSISTENT_VERIFICATION_CODES]", {
             search: Filters.byStrings(".PRIVACY_AND_SAFETY_PERSISTENT_VERIFICATION_CODES]")
         }, {cacheId: "core-settings-search"});
 
-        Patcher.after("SettingsManager", search, "search", (_, __, res) => {
+        if (typeof search.search !== "function") return;
+        const cancel = Patcher.after("SettingsManager", search, "search", (_, __, res) => {
             res = {...res}; // Discord freezes the object
 
             function insert(key: string, item: {
@@ -361,33 +444,74 @@ const SettingsRenderer = new class SettingsRenderer {
 
             return Object.freeze(res);
         });
+        this.searchPatched = typeof cancel === "function";
     }
 
-    async patchVersionInformation() {
+    async patchVersionInformation(signal?: AbortSignal) {
+        if (this.versionPatched) return;
         const versionDisplayModule = await getMangledLazy<{
             versionDisplay: React.FC;
         }>(["copyValue", "RELEASE_CHANNEL", "Build Override"], {
             versionDisplay: Filters.byStrings("copyValue", "RELEASE_CHANNEL", "Build Override")
         }, {
             searchDefault: false,
-            mapDeclarations: true
+            mapDeclarations: true,
+            signal
         });
 
         if (typeof versionDisplayModule.versionDisplay !== "function") return;
 
-        Patcher.instead("SettingsManager", versionDisplayModule, "versionDisplay", () => <VersionInfo />);
+        const cancel = Patcher.instead("SettingsManager", versionDisplayModule, "versionDisplay", () => <VersionInfo />);
+        this.versionPatched = typeof cancel === "function";
     }
 
-    public openSettingsPage(key: string) {
-        UserSettings?.openUserSettings?.(`betterdiscord_${key === "customcss" ? "customcss_tab" : key}_panel`, {
+    public openSettingsPage(key: string): boolean {
+        if (key === "solcord") return this.openControlCenter();
+        const UserSettings = getUserSettings();
+        if (typeof UserSettings?.openUserSettings !== "function") return false;
+        UserSettings.openUserSettings(`betterdiscord_${key === "customcss" ? "customcss_tab" : key}_panel`, {
             section: key
         });
+        return true;
     }
 
-    private readonly DISCORD_USER_SETTINGS_MODAL_KEY: string = typeof UserSettings?.USER_SETTINGS_MODAL_KEY === "string" ? UserSettings.USER_SETTINGS_MODAL_KEY : "USER_SETTINGS_MODAL_MODAL_KEY";
+    private openControlCenter(): boolean {
+        const Panel = Settings.panels.find(panel => panel.id === "solcord")?.element;
+        if (!Panel) return false;
+        if (this.controlCenterModal !== undefined) return true;
+        const retired = () => {this.controlCenterModal = undefined;};
+        try {
+            this.controlCenterModal = Modals.openModal(rawProps => {
+                const props = (rawProps ?? {}) as {onClose?(): void; transitionState?: number;};
+                const close = () => {retired(); props.onClose?.();};
+                return <ModalRoot className="solcord-control-center-dialog" transitionState={props.transitionState}>
+                    <div className="solcord-control-center-dialog-header">
+                        <h2>Solcord Suite</h2>
+                        <button type="button" onClick={close} aria-label="Close Solcord settings">Close</button>
+                    </div>
+                    <div className="solcord-control-center-dialog-content">
+                        <ErrorBoundary id="SolcordControlCenter" name="Solcord settings" fallback={<p role="alert">Solcord could not render this page. Close and reopen settings to retry.</p>}>
+                            <Panel />
+                        </ErrorBoundary>
+                    </div>
+                </ModalRoot>;
+            }, {modalKey: "solcord-control-center", onCloseCallback: retired});
+            return true;
+        }
+        catch {
+            retired();
+            toasts.error("Solcord settings could not open. Please retry after Discord finishes loading.", {forceShow: true});
+            return false;
+        }
+    }
+
+    private get DISCORD_USER_SETTINGS_MODAL_KEY(): string {
+        const UserSettings = getUserSettings();
+        return typeof UserSettings?.USER_SETTINGS_MODAL_KEY === "string" ? UserSettings.USER_SETTINGS_MODAL_KEY : "USER_SETTINGS_MODAL_MODAL_KEY";
+    }
 
     public closeUserSettingsModal() {
-        Modals.ModalActions.closeModal(this.DISCORD_USER_SETTINGS_MODAL_KEY);
+        Modals.ModalActions?.closeModal?.(this.DISCORD_USER_SETTINGS_MODAL_KEY);
     }
 };
 

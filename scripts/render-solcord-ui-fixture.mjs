@@ -22,6 +22,9 @@ if (!browser) throw new Error("No supported headless Chromium browser was found.
 if (!existsSync(fixture)) throw new Error(`Fixture is missing: ${fixture}`);
 
 const scenarios = [
+    ...["modern", "legacy"].flatMap(tokens => ["dark", "light"].map(host => ({name: `host-palette-${tokens}-${host}`, width: 1282, height: 720, query: `tokens=${tokens}&host=${host}`, fixture: "solcord-host-palette.html"}))),
+    {name: "host-palette-modern-dark-narrow", width: 940, height: 540, query: "tokens=modern&host=dark", fixture: "solcord-host-palette.html"},
+    ...["solcord-dark", "solcord-light", "oled"].map(mode => ({name: `host-palette-custom-${mode}`, width: 1282, height: 720, query: `tokens=modern&host=dark&mode=${mode}`, fixture: "solcord-host-palette.html"})),
     ...["on", "off", "reduced", "drift"].map(variant => ({name: `ambient-shell-${variant}`, width: 960, height: 900, query: `variant=${variant}`, fixture: "solcord-ambient-shell.html"})),
     {name: "ambient-shell-light", width: 960, height: 900, query: "variant=on&mode=solcord-light", fixture: "solcord-ambient-shell.html"},
     {name: "overview-dark-1366x768", width: 1366, height: 768, query: "workspace=overview&state=healthy&mode=solcord-dark&scale=100"},

@@ -28,16 +28,22 @@ describe("Solcord repository audit portability", () => {
             const files = [
                 "scripts/finalize-solcord-audit.mjs",
                 ".github/workflows/solcord-quality-finalization.yml",
-                ".github/workflows/solcord-final-docs.yml"
+                ".github/workflows/solcord-final-docs.yml",
+                "src/betterdiscord/modules/solcord/runtime.ts",
+                "installer/Solcord.Installer/InstallerEngine.cs"
             ];
             for (const file of files) {
                 mkdirSync(path.dirname(path.join(fixture, file)), {recursive: true});
                 writeFileSync(path.join(fixture, file), "fixture\n");
             }
+            writeFileSync(path.join(fixture, files[3]), "setTimeout(work, 10);\n");
+            writeFileSync(path.join(fixture, files[4]), "// TODO: installer ownership fixture\n");
             expect(command("git", ["add", "--", ...files]).status).toBe(0);
             expect(command(process.execPath, [script]).status).toBe(0);
             const report = readFileSync(path.join(fixture, "docs/audit/FULL_REPOSITORY_AUDIT.md"), "utf8");
-            expect(report).toContain("| Persistent tracked files | 3 |");
+            expect(report).toContain("| Persistent tracked files | 5 |");
+            expect(report).toContain("| Timer calls | 1 | 1 |");
+            expect(report).toContain("| TODO / FIXME / HACK | 1 | 1 |");
             for (const file of files) expect(report).toContain(file);
             expect(command(process.execPath, [script, "--check"]).status).toBe(0);
 

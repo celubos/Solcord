@@ -13,6 +13,9 @@ const invokePrivate = ipc.invoke.bind(ipc);
 
 
 export default new class IPCRenderer {
+    synchronizePrivacyPolicy(policy: import("@common/solcord/privacy").SolcordPrivacyPreferences): Promise<Pick<import("@common/solcord/privacy").SolcordPrivacyPreferences, "telemetry" | "crashReporting">> {
+        return invokePrivate(IPCEvents.PRIVACY_POLICY_UPDATE, policy);
+    }
 
     constructor() {
         ipc.on(IPCEvents.NAVIGATE, () => Events.dispatch("navigate"));

@@ -1,5 +1,16 @@
 # Solcord Changelog
 
+## 2.0.1 - Reliability and privacy (2026-11-10)
+
+- Restored startup across modern Discord builds and late login. **Open Solcord Suite** opens an independent, readable settings panel.
+- Repaired Fake Deafen activation, transport confirmation, and the current user's deafened indicator while preserving local audio. Turning it off restores ordinary voice state.
+- Hardened editor and addon file boundaries, redirected requests, private-store isolation, and Strict Privacy acknowledgement and coverage.
+- Fixed Timeline batch persistence and excluded-author edits, voice-note cancellation, recycled attachment controls, and installer interrupted recovery.
+- Reduced repeated embed resolution and tooltip observation, and moved catalog browsing data out of the startup renderer.
+- Added installer refresh, safe checking states, useful busy feedback, and complete local error details.
+- Added a separate macOS command-line preview for Apple Silicon and Intel with owned copied-app installation and recovery. Live Mac Discord acceptance and notarization remain outstanding.
+- Added a 30-minute controller soak, renderer/navigation benchmarks, native Mac packaging checks, and immutable GitHub release packaging.
+
 ## 2.0.0 - Signal (2026-10-25)
 
 - Promoted the reviewed V2 line to the first stable Solcord release while retaining the unsigned Windows publisher warning and every rollback check.

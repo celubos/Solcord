@@ -82,6 +82,11 @@ describe("Solcord privacy policy", () => {
         expect(boundPrivacyReceipts([receipt, {...receipt, sequence: 0}, {...receipt, dataClass: "url"}], 10)).toEqual([receipt]);
     });
 
+    test("strict cannot silently retain optional-network permissions from stale settings", () => {
+        expect(normalizePrivacyPreferences({...legacyPrivacyPreferences(), profile: "strict", migrationPending: false})).toEqual(defaultStrictPrivacyPreferences());
+        expect(normalizePrivacyPreferences({...legacyPrivacyPreferences(), profile: "custom", migrationPending: false}).telemetry).toBe("allow");
+    });
+
     test("blocks only explicitly named validated optional surfaces and restores them completely", async () => {
         const state = harness();
         expect(state.adapter.start()).toEqual([

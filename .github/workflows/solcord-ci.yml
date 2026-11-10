@@ -1,8 +1,10 @@
 name: Solcord V2 CI
 
 on:
+  workflow_call:
+  workflow_dispatch:
   push:
-    branches: ["main", "development", "fork/**", "v2/**", "audit/**"]
+    branches: ["main", "development", "fork/**", "v2/**", "audit/**", "sol/**"]
   pull_request:
     branches: ["main", "development"]
 
@@ -31,6 +33,8 @@ jobs:
         run: bun run lint
       - name: Lint Solcord CSS
         run: bun run lint-css:solcord
+      - name: Check all styles against reviewed CSS debt
+        run: bun run lint-css:baseline
       - name: Typecheck
         run: bun run typecheck
       - name: Generate public compatibility types
@@ -58,6 +62,36 @@ jobs:
             dist/checksums.txt
             dist/solcord-build-manifest.json
 
+      - name: Upload compatibility ASAR artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{github.event_name == 'pull_request'}}
+        with:
+          name: solcord-asar-${{github.sha}}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+          path: dist/solcord.asar
+      - name: Upload compatibility checksum artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{github.event_name == 'pull_request'}}
+        with:
+          name: solcord-checksums-${{github.sha}}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+          path: dist/checksums.txt
+
+  build:
+    name: build
+    needs: verify
+    if: ${{always()}}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preserve the compatibility build gate
+        env:
+          SOURCE_RESULT: ${{needs.verify.result}}
+        run: test "$SOURCE_RESULT" = success
+
   windows-policy:
     name: Windows policy, safety, and installer
     runs-on: windows-latest
@@ -78,9 +112,12 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - name: Run Windows-sensitive fixtures
-        run: bun test --isolate tests/electron/preload-policy.test.ts tests/electron/original-preload.test.ts tests/solcord/safety.test.ts tests/solcord/settings.test.ts
+        run: bun test --isolate tests/electron/preload-policy.test.ts tests/electron/original-preload.test.ts tests/solcord/safety.test.ts tests/solcord/settings.test.ts tests/solcord/disposable-acceptance.test.ts
       - name: Typecheck
         run: bun run typecheck
+      - name: Test installer recovery across process restarts
+        shell: pwsh
+        run: dotnet run --project tests/installer/RecoveryTests.csproj --configuration Release "-p:BaseIntermediateOutputPath=$env:RUNNER_TEMP\solcord-recovery-obj\" "-p:BaseOutputPath=$env:RUNNER_TEMP\solcord-recovery-bin\"
       - name: Build self-contained installer candidate
         shell: pwsh
         run: bun run installer:candidate -- dist/solcord.asar "$env:RUNNER_TEMP\solcord-v2-installer" "$env:GITHUB_SHA"
@@ -95,3 +132,51 @@ jobs:
           retention-days: 14
           compression-level: 0
           path: ${{runner.temp}}/solcord-v2-installer
+
+  macos-preview:
+    name: macOS preview (${{matrix.arch}})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{matrix.runner}}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Prepare pinned Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Test native copy, signing, and recovery
+        run: bun test --isolate tests/solcord/macos-installer*.test.ts
+      - name: Build clean production core
+        run: bun run dist
+      - name: Package native preview
+        run: bun scripts/build-solcord-macos-installer.ts dist/solcord.asar "$RUNNER_TEMP/solcord-macos-${{matrix.arch}}" "$GITHUB_SHA" --arch=${{matrix.arch}}
+      - name: Verify the current official Discord bundle without launching it
+        run: bun scripts/verify-solcord-macos-official.ts "$RUNNER_TEMP/solcord-macos-${{matrix.arch}}" "$RUNNER_TEMP/solcord-macos-evidence-${{matrix.arch}}"
+      - name: Upload official bundle validation
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: solcord-macos-validation-${{matrix.arch}}-${{github.sha}}
+          if-no-files-found: warn
+          retention-days: 14
+          path: ${{runner.temp}}/solcord-macos-evidence-${{matrix.arch}}
+      - name: Upload macOS preview
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: solcord-macos-${{matrix.arch}}-${{github.sha}}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          path: ${{runner.temp}}/solcord-macos-${{matrix.arch}}

@@ -1,4 +1,7 @@
 import Logger from "@common/logger";
+import {chunkTimelineEvents, drainTimelineChunks, fitTimelineEventBytes, timelineSerializedBytes} from "@common/solcord/timeline-limits";
+import {mapSolcordVisibleRecords} from "@common/solcord/bounded-selector";
+import {SolcordAccountReadCoalescer} from "@common/solcord/account-read";
 import Store from "@stores/base";
 import JsonStore from "@stores/json";
 import Toasts from "@stores/toasts";
@@ -9,7 +12,8 @@ import ThemeManager from "@modules/thememanager";
 import SettingsRenderer from "@ui/settings";
 import Modals from "@ui/modals";
 import DiscordModules from "@modules/discordmodules";
-import {Filters, getByKeys, getLazy, getLazyByKeys, getLazyBySource, getStore, getWithKey} from "@webpack";
+import {getInternalInstance} from "@utils/react";
+import {Filters, getByKeys, getLazy, getLazyBySource, getModule, getStore, getWithKey} from "@webpack";
 
 import type {PrivacyCapabilityRecord, PrivacyDecisionReceipt, PrivacyProfile, SolcordCuratedAddonState, SolcordMaturity, SolcordModuleHealth, SolcordModuleId, SolcordPowerExperimentId} from "./contracts";
 import {SolcordDisposalScope} from "./disposal";
@@ -19,16 +23,21 @@ import {runReversiblePatchCanary, runStructuralProbes, type StructuralProbeResul
 import {inspectLink, interceptLinkActivation, LinkReviewLifecycle, type LinkInspection} from "./link-lens";
 import {BoundedPerformanceSampler, type PerformanceSample} from "./performance";
 import {evaluateCrashGuard, type CrashGuardDocument} from "./crash-guard";
-import {channelIsInTimelineScope, MessageTimelineJournal, normalizeDiscordTimelineDispatch, normalizeTimelineAccountId, TimelineAccountGuard, timelineEventAccountMatches, type DiscordTimelineDispatchType, type TimelineAccountIdentity, type TimelineEvent, type TimelineMessageState} from "./message-timeline";
+import {channelIsInTimelineScope, MessageTimelineJournal, normalizeDiscordTimelineDispatch, normalizeTimelineAccountId, resolveTimelineEventIdentity, timelineAuthorPolicyAllows, TimelineAccountGuard, timelineEventAccountMatches, type DiscordTimelineDispatchType, type TimelineAccountIdentity, type TimelineEvent, type TimelineMessageState} from "./message-timeline";
 import {planLargeMessage} from "./message-splitter";
 import {configureReviewedExecutionOwnership, integrityBlocksExecution, integrityFailureReason, integrityRecordIsAccepted, integrityRequiresQuarantine, normalizeIntegrityAudit, reviewBlocksEnable, summarizeIntegrity, unavailableIntegrityRecords, type AddonIntegrityKind, type AddonIntegrityRecord, type AddonIntegritySummary, type ReviewedExecutionOwnership} from "./integrity";
-import {SOLCORD_CATALOG_INDEX, SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-catalog.generated";
+import {SOLCORD_CATALOG_INDEX, SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-trust.generated";
 import {canonicalizeSolcordProviderMigrationPlan, captureExactAddonStates, communityAddonIsEnabled, createSolcordProviderMigrationPlan, isSolcordBuiltInAddon, planSolcordNativeSuiteLookups, resolveCommunityAddon, solcordBuiltInDoctorId, solcordProviderMigrationPlansMatch, solcordProviderReplacementIsReady, solcordStandaloneProviderFileName, type SolcordProviderMigrationIdentity, type SolcordProviderMigrationPlan} from "@common/solcord/builtin-addons";
 import {resolveSolcordSetupPlan} from "@common/solcord/setup-catalog";
 import {InvisibleTypingAdapter} from "./invisible-typing";
 import {DoubleClickReplyFeature, type DoubleClickReplyAdapter, type DoubleClickReplyContext, type DoubleClickReplyTarget} from "./double-click-reply";
-import {DoNotTrackAdapter, resolveDiscordAnalyticsTrack, validateDiscordAnalyticsTrack} from "./do-not-track";
+import {DoNotTrackAdapter, discordAnalyticsMethods, resolveDiscordAnalyticsTrack, type AnalyticsMethodTarget} from "./do-not-track";
 import {applySolcordFakeDeafenConsentTransition, SolcordFakeDeafenButton, SolcordFakeDeafenController, type SolcordFakeDeafenStatus, type SolcordGatewaySocket} from "./fake-deafen";
+import {discoverSolcordFakeDeafenCapabilities, isSolcordFakeDeafenGateway, isSolcordFakeDeafenMediaActions} from "./fake-deafen-capabilities";
+import {readSolcordOwnVoiceDeafenState} from "./fake-deafen-voice-state";
+import {findSolcordFakeDeafenPresentationKey, isSolcordFakeDeafenPresentationModule, preserveSolcordOwnVoiceDeafenPresentation} from "./fake-deafen-presentation";
+import {patchSolcordFakeDeafenSend} from "./fake-deafen-send";
+import {refreshSolcordFakeDeafenCurrentChannelRow} from "./fake-deafen-row-refresh";
 import {normalizeDiscordRelationships, planSolcordFriendWatchNotices, reconcileSolcordRelationships, SolcordFriendWatchAccountBarrier, SolcordFriendWatchJournal, type SolcordFriendWatchNoticeState, type SolcordOwnerRelationshipAction, type SolcordRelationshipEvent, type SolcordRelationshipSnapshot} from "@common/solcord/friend-watch";
 import {inspectSolcordDomain, SolcordDomainMemory, type SolcordDomainDecision, type SolcordDomainMemoryRecord, type SolcordDomainRisk} from "@common/solcord/domain-memory";
 import {inspectSolcordAttachment, inspectSolcordLocalAttachment, type SolcordAttachmentInspection} from "@common/solcord/attachment-guard";
@@ -44,7 +53,7 @@ import {describeSolcordStreamShieldResolution, normalizeSolcordStreamShieldSetti
 import {SOLCORD_V2_REPLACEMENT_MANIFEST, solcordV2ArchiveReceiptMatchesPreview, solcordV2QuarantineIdsForArchivedFiles} from "@common/solcord/v2-replacement-manifest";
 import {resolveSolcordPerformancePolicy} from "@common/solcord/product";
 import {planSolcordPreferenceEffects} from "@common/solcord/preference-effects";
-import {applyPrivacyProfile, boundPrivacyReceipts, createPrivacyDecisionReceipt} from "@common/solcord/privacy";
+import {applyPrivacyProfile, boundPrivacyReceipts, createPrivacyDecisionReceipt, type SolcordPrivacyPreferences} from "@common/solcord/privacy";
 import {resolvePrivacyMethodTarget, SolcordPrivacyPolicyAdapter, type PrivacyMethodSpec} from "./privacy-policy";
 import {setSolcordAutomaticUpdatesAllowed} from "./privacy-runtime-state";
 import {strictCommunityAddonActivationDecision} from "./addon-outbound-policy";
@@ -63,6 +72,11 @@ export interface AddonIntegrityStatus {
     phase: "pending" | "startup" | "pre-setup" | "post-setup" | "pre-rollback" | "toggle" | "retry" | "failed";
     summary: AddonIntegritySummary;
     records: AddonIntegrityRecord[];
+}
+
+export interface NativePrivacyPolicyStatus {
+    state: "unverified" | "pending" | "applied" | "failed";
+    profile?: PrivacyProfile;
 }
 
 interface SolcordPrivateStorageStatus {
@@ -349,6 +363,12 @@ class SolcordRuntimeStore extends Store {
     #peopleStateLoadGeneration = 0;
     #sessionFocusChannelIds: string[] = [];
     #timelinePersistent = false;
+    #flushTimelinePersistence?: () => Promise<boolean>;
+    #timelinePolicyChanged?: () => void;
+    #timelineUnpersisted = false;
+    #timelineIncompleteAccounts = new Set<string>();
+    #resetTimelinePersistence?: () => void;
+    #timelineRetentionDirty = false;
     #curatedScope = new SolcordDisposalScope();
     #curatedSynchronizationError?: string;
     #curatedCommunitySignature = "";
@@ -357,6 +377,7 @@ class SolcordRuntimeStore extends Store {
     #curatedAdapterRetryScheduled = false;
     #curatedAdapterRetryGeneration = 0;
     #nativeSuite?: SolcordNativeSuiteController;
+    readonly #emptyNativeSuiteView: readonly SolcordNativeSuiteStatus[] = Object.freeze([]);
     #baselineSuite?: SolcordBaselineSuite;
     #splitReviewOpen = false;
     #integrityQueue = Promise.resolve();
@@ -373,11 +394,13 @@ class SolcordRuntimeStore extends Store {
     #fakeDeafenButton?: SolcordFakeDeafenButton;
     #fakeDeafenScope = new SolcordDisposalScope();
     #fakeDeafenGeneration = 0;
+    #fakeDeafenIndicatorReady = false;
     #fakeDeafenStatus: SolcordFakeDeafenStatus = {phase: "off", detail: "Built-in adapter is idle. Use the Fake Deafen button beside Discord's normal Deafen control.", connected: false, accountBound: false, capturedVoiceState: false, armed: false};
     #audienceGuard?: SolcordStreamAudienceGuard;
     #audienceGuardStatus: SolcordAudienceGuardStatus = {phase: "off", detail: "Audience Guard is off.", available: false, armed: false, accountBound: false, channelBound: false, denylistCount: 0, detectedCount: 0, activeModes: {preventStart: false, stopOnJoin: false, stopOnWatch: false}};
     #audiencePolicy: SolcordAudienceGuardPrivatePolicy = {version: 1, entries: []};
     #audiencePolicyAccountId?: string;
+    #audienceReads = new SolcordAccountReadCoalescer<boolean>();
     #audiencePersistent = false;
     #audienceStorageStatus: SolcordPrivateStorageStatus = {persistent: false, sessionOnly: true, reason: "Audience Guard storage has not been checked yet."};
     #audienceLoadGeneration = 0;
@@ -386,6 +409,8 @@ class SolcordRuntimeStore extends Store {
     #privacyReceipts: PrivacyDecisionReceipt[] = [];
     #privacyReceiptStorage: "unverified" | "persistent" | "session-only" = "unverified";
     #privacySequence = 0;
+    #privacyNativeGeneration = 0;
+    #privacyNativeStatus: NativePrivacyPolicyStatus = {state: "unverified"};
     #strictCommunityPolicyBusy = false;
     #firstSetupIntentId?: string;
 
@@ -460,11 +485,13 @@ class SolcordRuntimeStore extends Store {
         if (this.#startPromise) return this.#startPromise;
         const task = (async () => {
             await this.initialize();
-            const privacyReady = await this.#startupPhases!.run("privacy-outbound", () => {
+            const privacyReady = await this.#startupPhases!.run("privacy-outbound", async () => {
                 // Required privacy policy installs before optional addon traffic.
-                // The lookups are structural and bounded; failures remain visible
-                // as degraded capability records rather than blocking Discord.
-                this.#synchronizePrivacyPolicy();
+                // Native acknowledgement gates activation; optional renderer
+                // adapter misses remain separate capability records.
+                await this.#synchronizePrivacyPolicy();
+                const profile = SolcordSettings.snapshot().productPreferences.privacy.profile;
+                if (this.#privacyNativeStatus.state !== "applied" || this.#privacyNativeStatus.profile !== profile) throw new Error("NativePrivacyPolicyUnconfirmed");
                 return true;
             });
             this.#started = privacyReady === true;
@@ -810,10 +837,17 @@ class SolcordRuntimeStore extends Store {
     }
 
     timelineEntries(channelId?: string): TimelineMessageState[] {
+        if (this.#timeline.prune(SolcordSettings.slice("timelinePolicy"))) this.#timelineRetentionDirty = true;
         return this.#timeline.snapshot(channelId, 250);
     }
 
+    timelineView(): readonly TimelineMessageState[] {
+        if (this.#timeline.prune(SolcordSettings.slice("timelinePolicy"))) this.#timelineRetentionDirty = true;
+        return this.#timeline.view();
+    }
+
     timelineStatus(): ReturnType<MessageTimelineJournal["status"]> & {persistent: boolean;} {
+        if (this.#timeline.prune(SolcordSettings.slice("timelinePolicy"))) this.#timelineRetentionDirty = true;
         return {...this.#timeline.status(), persistent: this.#timelinePersistent};
     }
 
@@ -832,13 +866,14 @@ class SolcordRuntimeStore extends Store {
         const channelId = selectedChannelStore?.getChannelId?.();
         const channel = typeof channelId === "string" ? channelStore?.getChannel?.(channelId) : undefined;
         if (!channel || typeof channel.id !== "string" || !/^\d{1,32}$/.test(channel.id) || typeof channel.guild_id !== "string") return false;
-        const current = SolcordSettings.snapshot().timelinePolicy;
+        const current = SolcordSettings.slice("timelinePolicy");
         const serverChannelIds = included ? [...new Set([...current.serverChannelIds, channel.id])] : current.serverChannelIds.filter(id => id !== channel.id);
         await this.setTimelinePolicy({...current, scope: serverChannelIds.length ? "selected-channels" : "dm-only", serverChannelIds});
         return true;
     }
 
     async clearTimeline(clearOpaqueStores = false): Promise<TimelineClearOutcome> {
+        if (this.#flushTimelinePersistence) await this.#flushTimelinePersistence();
         const identity = this.#captureTimelineIdentity();
         if (!identity.accountId) return {status: "unavailable", cleared: 0, remaining: 0, opaqueStores: 0, requiresOpaqueRecovery: false};
         const identityIsCurrent = () => this.#timelineIdentityIsCurrent(identity);
@@ -852,6 +887,9 @@ class SolcordRuntimeStore extends Store {
             if (outcome.status === "complete") {
                 if (!identityIsCurrent()) return {status: "failed", cleared: 0, remaining: 0, opaqueStores: 0, requiresOpaqueRecovery: false};
                 this.#timeline.clear();
+                this.#timelineIncompleteAccounts.delete(identity.accountId);
+                this.#timelineUnpersisted = false;
+                this.#resetTimelinePersistence?.();
                 this.emitChange();
             }
             return outcome;
@@ -863,8 +901,10 @@ class SolcordRuntimeStore extends Store {
 
     async setTimelinePolicy(value: Partial<import("./contracts").SolcordTimelinePolicy>): Promise<void> {
         const current = SolcordSettings.snapshot().timelinePolicy;
-        SolcordSettings.setTimelinePolicy({...current, ...value});
-        if (this.#started && JSON.stringify(current) !== JSON.stringify(SolcordSettings.snapshot().timelinePolicy)) await this.#synchronizeFeatures(["message-timeline"]);
+        await SolcordSettings.setTimelinePolicyAsync({...current, ...value});
+        const next = SolcordSettings.slice("timelinePolicy");
+        if (this.#started && current.enabled !== next.enabled) await this.#synchronizeFeatures(["message-timeline"]);
+        else this.#timelinePolicyChanged?.();
     }
 
     friendWatchEvents(): SolcordRelationshipEvent[] {
@@ -878,9 +918,9 @@ class SolcordRuntimeStore extends Store {
     }
 
     async setProductPreferences(value: unknown): Promise<void> {
-        const previous = SolcordSettings.snapshot().productPreferences;
-        const rollbackSnapshot = SolcordSettings.setProductPreferences(value);
-        const next = SolcordSettings.snapshot().productPreferences;
+        const previous = SolcordSettings.slice("productPreferences");
+        const rollbackSnapshot = await SolcordSettings.setProductPreferencesAsync(value);
+        const next = SolcordSettings.slice("productPreferences");
         const effects = planSolcordPreferenceEffects(previous, next);
         if (!effects.changed) return;
         if (effects.presentation) this.#applyProductPresentation();
@@ -999,6 +1039,10 @@ class SolcordRuntimeStore extends Store {
         return this.#privacyReceiptStorage;
     }
 
+    privacyNativePolicyStatus(): NativePrivacyPolicyStatus {
+        return {...this.#privacyNativeStatus};
+    }
+
     canActivateCommunityAddon(addon: {filename: string; fileContent?: string; sourceSha256?: string;}): boolean {
         if (SolcordSettings.snapshot().productPreferences.privacy.profile !== "strict") return true;
         return strictCommunityAddonActivationDecision({
@@ -1107,7 +1151,10 @@ class SolcordRuntimeStore extends Store {
 
     async setPrivacyProfile(profile: PrivacyProfile): Promise<string | undefined> {
         const current = SolcordSettings.snapshot().productPreferences;
-        if (current.privacy.profile === profile && !current.privacy.migrationPending) return;
+        if (current.privacy.profile === profile && !current.privacy.migrationPending) {
+            await this.#synchronizePrivacyPolicy();
+            return;
+        }
         const snapshot = SolcordSettings.capture(`Before applying ${profile} privacy`, {
             plugins: this.#enabledAddonFiles(PluginManager),
             themes: this.#enabledAddonFiles(ThemeManager)
@@ -1145,21 +1192,34 @@ class SolcordRuntimeStore extends Store {
                 }
             }
             this.#strictCommunityPolicyBusy = false;
-            this.#synchronizePrivacyPolicy();
+            await this.#synchronizePrivacyPolicy();
             this.emitChange();
             return snapshot.id;
         }
         catch (error) {
             const failures = this.#restorePrivacyRollback(disabledCommunity, snapshot.id);
             this.#strictCommunityPolicyBusy = false;
-            this.#synchronizePrivacyPolicy();
+            await this.#synchronizePrivacyPolicy();
             if (failures.length) throw this.#privacyRollbackError(snapshot.id, failures);
             throw error;
         }
     }
 
     fakeDeafenStatus(): SolcordFakeDeafenStatus {
-        return structuredClone(this.#fakeDeafenStatus);
+        const status = structuredClone(this.#fakeDeafenStatus);
+        status.ownRowIndicator = this.#fakeDeafenIndicatorReady;
+        try {
+            const user = getStore("UserStore") as {getCurrentUser?: () => {id?: string;} | undefined;} | undefined;
+            const selected = getStore("SelectedChannelStore") as {getVoiceChannelId?: () => string | undefined;} | undefined;
+            status.voice = readSolcordOwnVoiceDeafenState({
+                userId: user?.getCurrentUser?.()?.id,
+                channelId: selected?.getVoiceChannelId?.(),
+                mediaEngineStore: getStore("MediaEngineStore"),
+                voiceStateStore: getStore("VoiceStateStore")
+            });
+        }
+        catch {status.voice = undefined;}
+        return status;
     }
 
     fakeDeafenProvider(): "community" | "solcord" | "off" {
@@ -1184,6 +1244,10 @@ class SolcordRuntimeStore extends Store {
 
     nativeSuiteStatus(): SolcordNativeSuiteStatus[] {
         return this.#nativeSuite?.statuses() ?? [];
+    }
+
+    nativeSuiteView(): readonly SolcordNativeSuiteStatus[] {
+        return this.#nativeSuite?.statusView() ?? this.#emptyNativeSuiteView;
     }
 
     nativeSuiteController(): SolcordNativeSuiteController | undefined {
@@ -1393,7 +1457,9 @@ class SolcordRuntimeStore extends Store {
             if (this.#started) await this.#synchronizePowerLab();
         }
         return SolcordSettings.snapshot().powerLab[id].enabled === enabled
-            && (enabled || id !== "fake-deafen" || this.#fakeDeafenStatus.phase !== "attention");
+            && (id !== "fake-deafen" || (enabled
+                ? Boolean(this.#fakeDeafen && this.#fakeDeafenStatus.accountBound && !this.#fakeDeafenStatus.pending && this.#fakeDeafenStatus.phase !== "attention")
+                : this.#fakeDeafenStatus.phase !== "attention"));
     }
 
     armFakeDeafen(): boolean {
@@ -1413,6 +1479,10 @@ class SolcordRuntimeStore extends Store {
     }
 
     async toggleFakeDeafenDirect(): Promise<boolean> {
+        if (!this.#started) {
+            Toasts.error("Solcord is still starting. Wait for startup to finish, then retry Fake Deafen.", {forceShow: true});
+            return false;
+        }
         if (this.#recoveryMode) {
             Toasts.error("Fake Deafen is unavailable during Safe Start. Resume Solcord first.", {forceShow: true});
             return false;
@@ -1422,21 +1492,58 @@ class SolcordRuntimeStore extends Store {
             Toasts.error("Disable the separate FakeDeafen plugin before using Solcord's built-in control.", {forceShow: true});
             return false;
         }
-        if (!SolcordSettings.snapshot().powerLab["fake-deafen"].enabled) {
-            if (!await this.setPowerExperiment("fake-deafen", true, true)) {
-                Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
-                return false;
+        try {
+            const wasCancelled = (generation: number) => !SolcordSettings.snapshot().powerLab["fake-deafen"].enabled
+                || (generation !== this.#fakeDeafenGeneration && this.#fakeDeafenStatus.phase !== "attention");
+            // Ownership failure removes the old controller's patch. A deliberate
+            // click may load a fresh adapter; background checks never re-arm it.
+            if (this.#fakeDeafen && !this.#fakeDeafen.validateOwnership()) {
+                this.#stopFakeDeafen();
+                if (this.#fakeDeafen) {
+                    Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
+                    return false; // Cleanup ownership was retained.
+                }
             }
+            if (!SolcordSettings.snapshot().powerLab["fake-deafen"].enabled) {
+                const change = this.setPowerExperiment("fake-deafen", true, true);
+                const generation = this.#fakeDeafenGeneration;
+                const accepted = await change;
+                if (wasCancelled(generation)) return false;
+                if (!accepted) {
+                    Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
+                    return false;
+                }
+            }
+            if (!this.#fakeDeafen) {
+                const synchronization = this.#synchronizePowerLab();
+                const generation = this.#fakeDeafenGeneration;
+                await synchronization;
+                if (wasCancelled(generation)) return false;
+            }
+            const controller = this.#fakeDeafen;
+            let toggled = controller?.toggleDirect() === true;
+            if (toggled && controller?.snapshot().pending) toggled = await controller.waitForActivation();
+            if (controller !== this.#fakeDeafen) return false;
+            if (toggled && controller && !controller.validateOwnership()) toggled = false;
+            this.#fakeDeafenStatus = controller?.snapshot() ?? this.#fakeDeafenStatus;
+            this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
+            this.emitChange();
+            if (toggled && this.#fakeDeafenStatus.armed && this.#fakeDeafenIndicatorReady) Toasts.success("Fake Deafen is on. Click the adjacent control again to restore normal deafen state.", {timeout: 4_000});
+            else if (toggled && this.#fakeDeafenStatus.armed) Toasts.info("Fake Deafen is active, but its voice-row indicator is not available yet. Check the Voice workspace for its current state.", {timeout: 4_000});
+            else if (toggled) Toasts.info("Fake Deafen is off and Discord's normal voice state is restored.", {timeout: 4_000});
+            else Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
+            return toggled;
         }
-        if (!this.#fakeDeafen) await this.#synchronizePowerLab();
-        const toggled = this.#fakeDeafen?.toggleDirect() === true;
-        this.#fakeDeafenStatus = this.#fakeDeafen?.snapshot() ?? this.#fakeDeafenStatus;
-        this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
-        this.emitChange();
-        if (this.#fakeDeafenStatus.armed) Toasts.success("Fake Deafen is on. Click the adjacent control again to restore normal deafen state.", {timeout: 4_000});
-        else if (toggled) Toasts.info("Fake Deafen is off and Discord's normal voice state is restored.", {timeout: 4_000});
-        else Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
-        return toggled;
+        catch {
+            this.#stopFakeDeafen();
+            if (this.#fakeDeafenStatus.phase !== "attention") {
+                this.#fakeDeafenStatus = {...this.#fakeDeafenStatus, phase: "attention", detail: "Fake Deafen could not apply the native voice action. Its adapter was stopped; click again to retry.", armed: false, pending: false};
+            }
+            this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
+            this.emitChange();
+            Toasts.error(this.#fakeDeafenStatus.detail, {forceShow: true});
+            return false;
+        }
     }
 
     #applyProductPresentation(): void {
@@ -1547,8 +1654,11 @@ class SolcordRuntimeStore extends Store {
     }
 
     async exportTimeline(): Promise<TimelineExportOutcome> {
+        if (this.#flushTimelinePersistence) await this.#flushTimelinePersistence();
+        if (this.#timelineUnpersisted) return {status: "incomplete", omittedSegments: 1, unreadableSegments: 0, retentionApplied: false};
         const identity = this.#captureTimelineIdentity();
         if (!identity.accountId) return {status: "unavailable", omittedSegments: 0, unreadableSegments: 0, retentionApplied: false};
+        if (this.#timelineIncompleteAccounts.has(identity.accountId)) return {status: "incomplete", omittedSegments: 1, unreadableSegments: 0, retentionApplied: false};
         const identityIsCurrent = () => this.#timelineIdentityIsCurrent(identity);
         const policy = SolcordSettings.snapshot().timelinePolicy;
         let loaded: TimelineReadOutcome;
@@ -1919,7 +2029,7 @@ class SolcordRuntimeStore extends Store {
 
     async setValue(id: SolcordModuleId, key: string, value: unknown): Promise<void> {
         const previous = SolcordSettings.module(id);
-        SolcordSettings.setValue(id, key, value);
+        await SolcordSettings.setValueAsync(id, key, value);
         const next = SolcordSettings.module(id);
         if (!this.#started || !next.enabled || (this.#recoveryMode && id !== "plugin-doctor") || JSON.stringify(previous) === JSON.stringify(next)) return;
         this.#stopFeature(id);
@@ -2625,15 +2735,11 @@ class SolcordRuntimeStore extends Store {
             results.DoNotTrack = communityResult("DoNotTrack");
         }
         else {
-            const analyticsContainer = getByKeys<Record<string, unknown>>(["AnalyticEventConfigs"]);
+            const analyticsContainer = getModule<Record<string, unknown>>(candidate => Boolean(resolveDiscordAnalyticsTrack(candidate)), {firstId: 129230, cacheId: "solcord-analytics-container", searchDefault: false});
             const adapter = new DoNotTrackAdapter({
                 scope,
                 patcher: Patcher,
-                methods: [{
-                    key: "track",
-                    lookup: () => resolveDiscordAnalyticsTrack(analyticsContainer),
-                    validate: target => validateDiscordAnalyticsTrack(analyticsContainer, target)
-                }],
+                methods: discordAnalyticsMethods(analyticsContainer),
                 getSettings: () => ({enabled: true})
             });
             if (adapter.start()) {
@@ -2641,7 +2747,7 @@ class SolcordRuntimeStore extends Store {
                 PluginDoctor.recordSuccessfulStart(solcordBuiltInDoctorId("DoNotTrack"));
             }
             else {
-                const reason = "Discord analytics lookup failed structural validation; Do Not Track stayed off.";
+                const reason = "Full analytics coverage is unavailable because an emitter is missing or cannot be safely patched. Existing Privacy protection remains in effect.";
                 results.DoNotTrack = {enabled: false, provider: "off", reason};
                 PluginDoctor.recordCapabilityMiss(solcordBuiltInDoctorId("DoNotTrack"));
             }
@@ -2949,12 +3055,14 @@ class SolcordRuntimeStore extends Store {
             const statuses = new Set(["online", "idle", "dnd", "offline"]);
             const relationshipTypes = new Map<number, "friend" | "blocked" | "incoming" | "outgoing" | "ignored">([[1, "friend"], [2, "blocked"], [3, "incoming"], [4, "outgoing"], [5, "ignored"]]);
             const entries = relationships instanceof Map ? relationships.entries() : Object.entries(relationships);
-            return [...entries].flatMap(([id, relationship]) => {
+            return mapSolcordVisibleRecords(entries, ([id, relationship]) => {
                 const relationshipLabel = typeof relationship === "number" ? relationshipTypes.get(relationship) : undefined;
-                if (!relationshipLabel) return [];
+                if (!relationshipLabel) return;
                 const normalizedId = normalizeTimelineAccountId(id);
                 const user = normalizedId ? userStore.getUser!(normalizedId) : undefined;
-                if (!normalizedId || user?.id !== normalizedId) return [];
+                if (!normalizedId || user?.id !== normalizedId) return;
+                return {normalizedId, user, relationshipLabel};
+            }, ({normalizedId, user, relationshipLabel}) => {
                 const rawStatus = presenceStore?.getStatus?.(normalizedId);
                 const status = typeof rawStatus === "string" && statuses.has(rawStatus) ? rawStatus as "online" | "idle" | "dnd" | "offline" : "unknown" as const;
                 const rawSince = relationshipStore?.getRelationshipSince?.(normalizedId);
@@ -2966,8 +3074,8 @@ class SolcordRuntimeStore extends Store {
                 const rawMutualGuilds = mutualGuildStore?.getMutualGuilds?.(normalizedId);
                 const mutualGuildCount = Array.isArray(rawMutualGuilds) ? Math.min(500, rawMutualGuilds.length)
                     : rawMutualGuilds && typeof rawMutualGuilds === "object" ? Math.min(500, Object.keys(rawMutualGuilds as Record<string, unknown>).length) : undefined;
-                return [{id: normalizedId, label: (user.globalName || user.username || "Unknown person").slice(0, 80), status, relationship: relationshipLabel, relationshipSince, mutualGuildCount}];
-            }).slice(0, 1_000);
+                return {id: normalizedId, label: (user.globalName || user.username || "Unknown person").slice(0, 80), status, relationship: relationshipLabel, relationshipSince, mutualGuildCount};
+            });
         };
         const dmUnreadCount = (channelId: string): number => {
             const count = readStateStore?.getMentionCount?.(channelId);
@@ -3036,11 +3144,11 @@ class SolcordRuntimeStore extends Store {
                 return notificationScope === "mentions" ? readStateStore.getMentionCount!(id) > 0 : readStateStore.hasUnread!(id) || readStateStore.getMentionCount!(id) > 0;
             }).slice(0, 500);
         };
-        const markNotificationsRead = (_scope: "guild" | "mentions" | "all", reviewedIds: readonly string[]): void => {
+        const markNotificationsRead = (_scope: "guild" | "mentions" | "all", reviewedIds: readonly string[], reviewedMessages: Readonly<Record<string, string>> = {}): void => {
             if (typeof readStateStore?.lastMessageId !== "function" || typeof DiscordModules.Dispatcher?.dispatch !== "function") throw new Error("Discord's reviewed notification action is unavailable.");
             const channels = reviewedIds.slice(0, 500).map(channelId => {
                 const id = normalizeTimelineAccountId(channelId);
-                const messageId = id ? normalizeTimelineAccountId(readStateStore.lastMessageId!(id)) : undefined;
+                const messageId = id ? normalizeTimelineAccountId(reviewedMessages[id]) : undefined;
                 return id && messageId ? {channelId: id, messageId, readStateType: 0} : undefined;
             }).filter((entry): entry is {channelId: string; messageId: string; readStateType: number;} => Boolean(entry));
             if (!channels.length) return;
@@ -3105,6 +3213,8 @@ class SolcordRuntimeStore extends Store {
                 }));
             } : undefined,
             notificationIds: notificationAdapterAvailable ? notificationIds : undefined,
+            notificationMessageId: notificationAdapterAvailable ? channelId => normalizeTimelineAccountId(readStateStore?.lastMessageId?.(channelId)) : undefined,
+            notificationAccountId: notificationAdapterAvailable ? () => normalizeTimelineAccountId(userStore?.getCurrentUser?.()?.id) : undefined,
             markNotificationsRead: notificationAdapterAvailable ? markNotificationsRead : undefined,
             voiceHealthSample: voiceHealthCapability.reader,
             voiceHealthInitialSample: voiceHealthCapability.initialSample,
@@ -3377,40 +3487,176 @@ class SolcordRuntimeStore extends Store {
         this.#fakeDeafenScope.dispose();
         this.#fakeDeafenScope = new SolcordDisposalScope();
         const scope = this.#fakeDeafenScope;
-        const gateway = await getLazyByKeys<{getSocket?(): SolcordGatewaySocket | undefined;}>(["getSocket"]);
-        const mediaActions = await getLazyByKeys<{toggleSelfDeaf?(): void; toggleSelfMute?(): void;}>(["toggleSelfDeaf", "toggleSelfMute"]);
+        const cancellation = new AbortController();
+        const releaseDiscovery = scope.own(() => cancellation.abort());
+        const userStore = getStore("UserStore") as {getCurrentUser?: () => {id?: string;} | undefined;} | undefined;
+        const accountId = normalizeTimelineAccountId(userStore?.getCurrentUser?.()?.id);
+        this.#fakeDeafenStatus = {phase: "ready", detail: "Waiting for Discord's voice controls. The adapter will stay off if they are unavailable.", connected: false, accountBound: false, capturedVoiceState: false, armed: false, pending: true};
+        this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
+        this.emitChange();
+        let capabilities;
+        try {
+            capabilities = await discoverSolcordFakeDeafenCapabilities({
+                gateway: signal => getLazy(isSolcordFakeDeafenGateway, {signal}),
+                mediaActions: signal => getLazy(isSolcordFakeDeafenMediaActions, {signal})
+            }, cancellation.signal);
+        }
+        finally {releaseDiscovery();}
         if (generation !== this.#fakeDeafenGeneration || scope.disposed || this.#fakeDeafenScope !== scope) return;
+        const {gateway, mediaActions} = capabilities ?? {};
         const selectedChannelStore = getStore("SelectedChannelStore") as {getVoiceChannelId?: () => string | undefined;} | undefined;
         const mediaEngineStore = getStore("MediaEngineStore") as {isDeaf?: () => boolean; isSelfDeaf?: () => boolean;} | undefined;
-        const userStore = getStore("UserStore") as {getCurrentUser?: () => {id?: string;} | undefined;} | undefined;
         const socket = gateway?.getSocket?.();
-        if (!socket || typeof socket.send !== "function" || typeof mediaActions?.toggleSelfDeaf !== "function" || typeof selectedChannelStore?.getVoiceChannelId !== "function" || typeof userStore?.getCurrentUser !== "function" || !normalizeTimelineAccountId(userStore.getCurrentUser()?.id) || (typeof mediaEngineStore?.isDeaf !== "function" && typeof mediaEngineStore?.isSelfDeaf !== "function")) {
-            this.#fakeDeafenStatus = {phase: "attention", detail: "Discord voice or account modules failed structural validation; Fake Deafen stayed off.", connected: false, accountBound: false, capturedVoiceState: false, armed: false};
+        if (!socket || typeof socket.send !== "function" || !mediaActions || typeof selectedChannelStore?.getVoiceChannelId !== "function" || typeof userStore?.getCurrentUser !== "function" || !accountId || accountId !== normalizeTimelineAccountId(userStore.getCurrentUser()?.id) || (typeof mediaEngineStore?.isDeaf !== "function" && typeof mediaEngineStore?.isSelfDeaf !== "function")) {
+            this.#fakeDeafenStatus = {phase: "attention", detail: "Discord voice or account controls are unavailable or changed while loading. Fake Deafen stayed off; click again to retry.", connected: false, accountBound: false, capturedVoiceState: false, armed: false};
+            this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
             this.emitChange();
             return;
         }
 
+        let scheduleOwnRowRefresh = () => {};
         const controller = new SolcordFakeDeafenController({
             getAccountId: () => normalizeTimelineAccountId(userStore.getCurrentUser?.()?.id),
             getSocket: () => gateway?.getSocket?.(),
+            getConnectionIdentity: () => (gateway?.getSocket?.() as SolcordGatewaySocket & {webSocket?: unknown;} | undefined)?.webSocket,
             getVoiceChannelId: () => selectedChannelStore.getVoiceChannelId?.(),
-            isLocallyDeafened: () => Boolean(mediaEngineStore.isDeaf?.() ?? mediaEngineStore.isSelfDeaf?.()),
+            isLocallyDeafened: () => Boolean(mediaEngineStore.isSelfDeaf?.() ?? mediaEngineStore.isDeaf?.()),
             toggleLocalDeafen: () => mediaActions.toggleSelfDeaf!(),
-            patchSend: (target, observe) => Patcher.before("Solcord~FakeDeafen", target, "send", (_thisObject, args) => observe(args as unknown[]), {forcePatch: false}),
+            patchSend: (target, before, after) => patchSolcordFakeDeafenSend(target, before, after, Patcher),
             onStatus: status => {
                 if (generation !== this.#fakeDeafenGeneration || scope.disposed || this.#fakeDeafenScope !== scope) return;
+                const presentationChanged = status.armed !== this.#fakeDeafenStatus.armed;
                 this.#fakeDeafenStatus = status;
                 this.#fakeDeafenButton?.update(status);
+                if (presentationChanged) scheduleOwnRowRefresh();
                 this.emitChange();
             }
         });
-        if (!controller.start()) {
-            this.#fakeDeafenStatus = controller.snapshot();
-            return;
-        }
+        // Starting publishes status synchronously. Own the controller first so
+        // a throwing observer or reentrant stop cannot orphan its gateway patch.
         this.#fakeDeafen = controller;
         scope.own(() => controller.stop(), "patch");
-        scope.interval(() => controller.validateOwnership(), 5_000);
+        if (!controller.start()) {
+            const failedStatus = controller.snapshot();
+            this.#stopFakeDeafen();
+            if (!this.#fakeDeafen) {
+                this.#fakeDeafenStatus = failedStatus;
+                this.#fakeDeafenButton?.update(failedStatus);
+                this.emitChange();
+            }
+            return;
+        }
+        if (generation !== this.#fakeDeafenGeneration || scope.disposed || this.#fakeDeafenScope !== scope || this.#fakeDeafen !== controller) return;
+        // Discord loads this presentation helper with its guild call layout.
+        // Watch for that arrival without blocking voice activation or fetching
+        // another chunk. The scope owns and aborts the one lazy listener.
+        const indicatorCancellation = new AbortController();
+        const releaseIndicatorDiscovery = scope.own(() => indicatorCancellation.abort());
+        const connectionIdentity = socket.webSocket;
+        const ownsIndicator = () => generation === this.#fakeDeafenGeneration && !scope.disposed && this.#fakeDeafenScope === scope && this.#fakeDeafen === controller;
+        this.#fakeDeafenIndicatorReady = false;
+        const readRowIdentity = () => {
+            try {
+                const userId = normalizeTimelineAccountId(userStore.getCurrentUser?.()?.id);
+                const channelId = normalizeTimelineAccountId(selectedChannelStore.getVoiceChannelId?.());
+                const authentication = getStore("AuthenticationStore") as {getSessionId?: () => unknown;} | undefined;
+                const sessionId = authentication?.getSessionId?.();
+                if (userId !== accountId || !channelId || typeof sessionId !== "string" || !sessionId || sessionId.length > 256) return;
+                return {userId, channelId, sessionId};
+            }
+            catch {return;}
+        };
+        const refreshRow = (identity: NonNullable<ReturnType<typeof readRowIdentity>>, owns: () => boolean) => {
+            refreshSolcordFakeDeafenCurrentChannelRow({
+                root: document.getElementById("app-mount"),
+                channelId: identity.channelId,
+                getInternalInstance,
+                isCurrent: () => {
+                    const current = readRowIdentity();
+                    return owns() && current?.userId === identity.userId && current?.channelId === identity.channelId && current?.sessionId === identity.sessionId;
+                }
+            });
+        };
+        let rowRefreshQueued = false;
+        scheduleOwnRowRefresh = () => {
+            if (rowRefreshQueued || !ownsIndicator() || !this.#fakeDeafenIndicatorReady) return;
+            const identity = readRowIdentity();
+            if (!identity) return;
+            rowRefreshQueued = true;
+            queueMicrotask(() => {rowRefreshQueued = false; if (ownsIndicator()) refreshRow(identity, ownsIndicator);});
+        };
+        type VoicePresentationModule = Record<string, (...args: unknown[]) => unknown>;
+        void getLazy<VoicePresentationModule>(isSolcordFakeDeafenPresentationModule, {signal: indicatorCancellation.signal, searchDefault: false}).then(target => {
+            if (!target || !ownsIndicator()) return;
+            const key = findSolcordFakeDeafenPresentationKey(target);
+            if (!key) return;
+            const unpatch = Patcher.after("Solcord~FakeDeafenIndicator", target, key, (_thisObject, args, result) => {
+                try {
+                    if (!this.#fakeDeafenStatus.armed || !ownsIndicator() || !args[0] || typeof args[0] !== "object" || (args[0] as {userId?: unknown;}).userId !== accountId) return result;
+                    if (!controller.canPresentArmedState() || normalizeTimelineAccountId(userStore.getCurrentUser?.()?.id) !== accountId || gateway?.getSocket?.() !== socket || socket.webSocket !== connectionIdentity) return result;
+                    const authentication = getStore("AuthenticationStore") as {getSessionId?: () => unknown;} | undefined;
+                    return preserveSolcordOwnVoiceDeafenPresentation(args[0], args[1], result, {
+                        userId: accountId,
+                        channelId: selectedChannelStore.getVoiceChannelId?.(),
+                        sessionId: authentication?.getSessionId?.(),
+                        status: this.fakeDeafenStatus()
+                    });
+                }
+                catch {return result;}
+            }, {forcePatch: false});
+            if (typeof unpatch !== "function") return;
+            scope.own(() => {
+                const identity = readRowIdentity();
+                unpatch();
+                // Native hooks do not subscribe to Solcord. Refresh the exact
+                // current row after unpatch even when no native snapshot changes.
+                const cleanupGeneration = this.#fakeDeafenGeneration;
+                if (identity) queueMicrotask(() => refreshRow(identity, () => cleanupGeneration === this.#fakeDeafenGeneration));
+            }, "patch");
+            if (!ownsIndicator()) return;
+            this.#fakeDeafenIndicatorReady = true;
+            scheduleOwnRowRefresh();
+            this.emitChange();
+        }).catch(() => {
+            if (ownsIndicator()) Logger.warn("Solcord", "Fake Deafen's own-row indicator is unavailable on this Discord layout.");
+        }).finally(releaseIndicatorDiscovery);
+        // Flux listeners only schedule work: never dispatch a native action from
+        // inside another store's dispatch. Read only our own voice record, and
+        // avoid rerendering the suite for other participants' voice updates.
+        let voiceSignature = JSON.stringify(this.fakeDeafenStatus().voice);
+        let voiceUpdateQueued = false;
+        const refreshVoiceState = () => {
+            if (generation !== this.#fakeDeafenGeneration || scope.disposed || this.#fakeDeafenScope !== scope || this.#fakeDeafen !== controller) return;
+            try {
+                if (!controller.validateOwnership()) return;
+                const next = JSON.stringify(this.fakeDeafenStatus().voice);
+                if (next === voiceSignature) return;
+                voiceSignature = next;
+                scheduleOwnRowRefresh();
+                this.emitChange();
+            }
+            catch {Logger.warn("Solcord", "Fake Deafen voice-state observation is unavailable.");}
+        };
+        const scheduleVoiceState = () => {
+            if (voiceUpdateQueued || scope.disposed) return;
+            voiceUpdateQueued = true;
+            queueMicrotask(() => {voiceUpdateQueued = false; refreshVoiceState();});
+        };
+        type ObservableVoiceStore = {addChangeListener?(listener: () => void): void; removeChangeListener?(listener: () => void): void;};
+        for (const candidate of [mediaEngineStore, getStore("VoiceStateStore"), selectedChannelStore]) {
+            const store = candidate as ObservableVoiceStore | undefined;
+            if (typeof store?.addChangeListener !== "function" || typeof store.removeChangeListener !== "function") continue;
+            const release = scope.own(() => store.removeChangeListener?.(scheduleVoiceState), "listener");
+            try {store.addChangeListener(scheduleVoiceState);}
+            catch {release();}
+            if (generation !== this.#fakeDeafenGeneration || scope.disposed || this.#fakeDeafenScope !== scope || this.#fakeDeafen !== controller) {
+                // A host can finish registration after reentering stop. The
+                // scope's earlier remover ran before that late addition.
+                store.removeChangeListener(scheduleVoiceState);
+                return;
+            }
+        }
+        scope.interval(refreshVoiceState, 5_000);
         this.#fakeDeafenStatus = controller.snapshot();
         this.#fakeDeafenButton?.update(this.#fakeDeafenStatus);
         this.emitChange();
@@ -3455,7 +3701,31 @@ class SolcordRuntimeStore extends Store {
         }
     }
 
-    #synchronizePrivacyPolicy(): void {
+    #synchronizeNativePrivacyPolicy(preferences: SolcordPrivacyPreferences): Promise<void> {
+        const generation = ++this.#privacyNativeGeneration;
+        const notify = () => {
+            try {this.emitChange();}
+            catch (error) {Logger.warn("Solcord", `Privacy status observer failed (${errorName(error)}); native policy synchronization continues.`);}
+        };
+        this.#privacyNativeStatus = {state: "pending", profile: preferences.profile};
+        notify();
+        return boundedSolcordStartupOperation(Promise.resolve().then(() => IPC.synchronizePrivacyPolicy(preferences))).then(acknowledgement => {
+            if (generation !== this.#privacyNativeGeneration) return;
+            if (acknowledgement?.telemetry !== preferences.telemetry || acknowledgement?.crashReporting !== preferences.crashReporting) throw new Error("NativePrivacyPolicyMismatch");
+            this.#privacyNativeStatus = {state: "applied", profile: preferences.profile};
+            notify();
+        }).catch(error => {
+            Logger.warn("Solcord", `Native optional-network policy could not be confirmed (${errorName(error)}); review the effective protection status.`);
+            if (generation !== this.#privacyNativeGeneration) return;
+            this.#privacyNativeStatus = {state: "failed", profile: preferences.profile};
+            notify();
+        });
+    }
+
+    #synchronizePrivacyPolicy(): Promise<void> {
+        const preferences = SolcordSettings.snapshot().productPreferences.privacy;
+        const nativePolicy = this.#synchronizeNativePrivacyPolicy(preferences);
+        setSolcordAutomaticUpdatesAllowed(preferences.updates === "automatic");
         if (SolcordSettings.snapshot().productPreferences.privacy.externalProviders !== "approved-only") this.#nativeSuite?.cancelExternalTranslations();
         try {this.#privacyScope.dispose();}
         catch (error) {
@@ -3465,14 +3735,11 @@ class SolcordRuntimeStore extends Store {
                 ? record
                 : {...record, state: "Degraded", summary: detail});
             this.emitChange();
-            return;
+            return nativePolicy;
         }
         this.#privacyScope = new SolcordDisposalScope();
 
-        const preferences = SolcordSettings.snapshot().productPreferences.privacy;
-        setSolcordAutomaticUpdatesAllowed(preferences.updates === "automatic");
-        const analyticsContainer = getByKeys<Record<string, unknown>>(["AnalyticEventConfigs"]);
-        const analyticsTarget = resolveDiscordAnalyticsTrack(analyticsContainer);
+        const analyticsContainer = getModule<Record<string, unknown>>(candidate => Boolean(resolveDiscordAnalyticsTrack(candidate)), {firstId: 129230, cacheId: "solcord-analytics-container", searchDefault: false});
         const crashModule = getByKeys<Record<string, unknown>>(["captureException", "captureMessage"]);
         const nativeProcessUtils = (globalThis as typeof globalThis & {DiscordNative?: {processUtils?: Record<string, unknown>;};}).DiscordNative?.processUtils;
         const runningGameStore = getStore("RunningGameStore") as unknown as Record<string, unknown> | undefined;
@@ -3558,14 +3825,14 @@ class SolcordRuntimeStore extends Store {
             preferences: () => SolcordSettings.snapshot().productPreferences.privacy,
             receipt: receipt => this.#recordPrivacyDecision(receipt),
             specs: [
-                {
-                    id: "discord-analytics-track",
-                    dataClass: "telemetry",
-                    key: "track",
-                    lookup: () => analyticsTarget?.module,
-                    validate: candidate => candidate.module === analyticsTarget?.module && candidate.key === "track" && validateDiscordAnalyticsTrack(analyticsContainer, candidate),
-                    blockedValue: () => undefined
-                },
+                ...discordAnalyticsMethods(analyticsContainer).map(method => ({
+                    id: `discord-analytics-${method.key}`,
+                    dataClass: "telemetry" as const,
+                    key: method.key,
+                    lookup: () => (method.lookup() as AnalyticsMethodTarget | undefined)?.module,
+                    validate: method.validate,
+                    blockedValue: method.blockedValue ?? (() => undefined)
+                })),
                 {
                     id: "optional-crash-exception",
                     dataClass: "crash-reporting",
@@ -3615,10 +3882,12 @@ class SolcordRuntimeStore extends Store {
         this.#recordPrivacyDecision(createPrivacyDecisionReceipt(0, Date.now(), "solcord-updates", preferences.updates === "manual" ? "block" : "allow", "applied"));
         this.#recordPrivacyDecision(createPrivacyDecisionReceipt(0, Date.now(), "community-addons", communityAttentionCount ? "hold" : "allow", communityAttentionCount ? "declaration-required" : "not-applicable"));
         this.#recordPrivacyDecision(createPrivacyDecisionReceipt(0, Date.now(), "external-providers", externalConfigured ? "hold" : "block", externalConfigured ? "declaration-required" : "not-applicable"));
+        return nativePolicy;
     }
 
     #stopFakeDeafen(invalidatePending = true): void {
         if (invalidatePending) this.#fakeDeafenGeneration++;
+        this.#fakeDeafenIndicatorReady = false;
         const controller = this.#fakeDeafen;
         try {this.#fakeDeafenScope.dispose();}
         catch (error) {
@@ -3769,6 +4038,7 @@ class SolcordRuntimeStore extends Store {
         this.#audiencePolicyAccountId = undefined;
         this.#audiencePersistent = false;
         this.#audienceLoadGeneration++;
+        this.#audienceReads.invalidate();
         this.#setHealth("stream-audience-guard", {status: "stopped", maturity: "preview", resources: {}, detail: "Audience Guard is off; all owned resources and private session state were released."});
         this.emitChange();
     }
@@ -3833,7 +4103,7 @@ class SolcordRuntimeStore extends Store {
             const userStore = getStore("UserStore") as {getCurrentUser?: () => unknown;} | undefined;
             this.#driftResults = [patchCanary, ...runStructuralProbes([
                 {id: "renderer-dom", description: "document root", validate: () => document.documentElement instanceof HTMLElement},
-                {id: "webpack-runtime", description: "Discord webpack chunk array", validate: () => Array.isArray((globalThis as typeof globalThis & {webpackChunkdiscord_app?: unknown;}).webpackChunkdiscord_app)},
+                {id: "webpack-runtime", description: "Discord module chunk array", validate: () => {const runtime = globalThis as typeof globalThis & {rspackChunkdiscord_app?: unknown; webpackChunkdiscord_app?: unknown;}; return Array.isArray(runtime.rspackChunkdiscord_app ?? runtime.webpackChunkdiscord_app);}},
                 {id: "current-user-store", description: "UserStore.getCurrentUser", validate: () => typeof userStore?.getCurrentUser === "function"},
                 {id: "patcher", description: "reversible patch registry", validate: () => Array.isArray(Patcher.patches)}
             ])];
@@ -3955,7 +4225,7 @@ class SolcordRuntimeStore extends Store {
                 onClose: callbacks.onClose,
                 onRenderError: callbacks.onRenderError
             }),
-            close: modalKey => Modals.ModalActions.closeModal(modalKey)
+            close: modalKey => Modals.ModalActions?.closeModal(modalKey)
         }, {confirm: onConfirm, cancel: onCancel, failure: onFailure});
         return result !== "unavailable";
     }
@@ -4088,7 +4358,7 @@ class SolcordRuntimeStore extends Store {
 
         const observeAccount = () => {
             const accountId = normalizeTimelineAccountId(userStore.getCurrentUser?.()?.id);
-            if (accountId === this.#audiencePolicyAccountId) return;
+            if (accountId === this.#audiencePolicyAccountId || accountId === this.#audienceReads.pendingAccountId) return;
             this.#audienceLoadGeneration++;
             this.#audienceGuard?.disarm("Audience Guard disarmed because the Discord account changed.");
             this.#audiencePolicy = {version: 1, entries: []};
@@ -4166,8 +4436,11 @@ class SolcordRuntimeStore extends Store {
         return structuredClone(this.#audienceStorageStatus);
     }
 
-    async #loadAudienceGuardPolicy(accountId: string): Promise<boolean> {
-        const generation = ++this.#audienceLoadGeneration;
+    #loadAudienceGuardPolicy(accountId: string): Promise<boolean> {
+        return this.#audienceReads.load(accountId, () => this.#readAudienceGuardPolicy(accountId, ++this.#audienceLoadGeneration));
+    }
+
+    async #readAudienceGuardPolicy(accountId: string, generation: number): Promise<boolean> {
         this.#audiencePolicy = {version: 1, entries: []};
         this.#audiencePolicyAccountId = undefined;
         this.#audiencePersistent = false;
@@ -4453,37 +4726,74 @@ class SolcordRuntimeStore extends Store {
             throw new Error("TimelineAdapterUnavailable");
         }
 
-        const policy = SolcordSettings.snapshot().timelinePolicy;
+        let policy = SolcordSettings.slice("timelinePolicy");
         this.#timelinePersistent = false;
         let accountId: string | undefined;
         let accountGeneration = -1;
         let accountInitialized = false;
         let accountReady = false;
         let storageReadComplete = true;
+        let initialReadComplete = true;
+        let appendRetentionComplete = true;
         let storageAttention = "";
         const seededChannels = new Set<string>();
+        const pendingChunks: TimelineEvent[][] = [];
+        let queuedEvents = 0;
+        let queueOverflow = false;
+        let bufferedBytes = 0;
+        let flushPromise: Promise<boolean> | undefined;
+        let replayBuffered = () => {};
+        const buffered: Array<{event: ReturnType<typeof normalizeDiscordTimelineDispatch>[number]; at: number;}> = [];
         let seedSelectedChannel = () => {};
+        let previousHealthKey = "";
 
         const updateHealth = () => {
             const status = this.#timeline.status();
+            const detail = `${status.records} observed message record(s); ${status.deleted} deleted, ${status.edited} edited, and ${status.ghostPings} ghost ping(s). ${this.#timelinePersistent ? "AES-256-GCM persistence is active through safeStorage." : "Session-only mode is active."}${storageAttention ? ` ${storageAttention}` : ""}`;
+            const key = `${storageReadComplete}:${detail}`;
+            if (key === previousHealthKey) return;
+            previousHealthKey = key;
             this.#setHealth("message-timeline", {
                 maturity: storageReadComplete ? "ready" : "preview",
-                detail: `${status.records} observed message record(s); ${status.deleted} deleted, ${status.edited} edited, and ${status.ghostPings} ghost ping(s). ${this.#timelinePersistent ? "AES-256-GCM persistence is active through safeStorage." : "Session-only mode is active."}${storageAttention ? ` ${storageAttention}` : ""}`
+                detail
             });
-            this.emitChange();
         };
+
+        const policyChanged = () => {
+            const previousRetention = policy.retention;
+            policy = SolcordSettings.slice("timelinePolicy");
+            if (this.#timeline.prune(policy) || policy.retention !== previousRetention) this.#timelineRetentionDirty = true;
+            if (accountReady && this.#timelineRetentionDirty) {
+                pendingChunks.push([]);
+                this.#timelineUnpersisted = true;
+                this.#timelineRetentionDirty = false;
+                void flush();
+            }
+            updateHealth();
+        };
+        this.#timelinePolicyChanged = policyChanged;
 
         const currentAccountId = () => normalizeTimelineAccountId(userStore?.getCurrentUser?.()?.id);
         const activateAccount = async () => {
             const identity = this.#timelineAccountGuard.observe(currentAccountId());
             const valid = identity.accountId;
             if (accountInitialized && valid === accountId && identity.generation === accountGeneration) return;
+            if (accountId && (pendingChunks.length || buffered.length)) this.#timelineIncompleteAccounts.add(accountId);
             accountInitialized = true;
             accountId = valid;
             accountReady = false;
             storageReadComplete = true;
+            initialReadComplete = true;
+            appendRetentionComplete = true;
             storageAttention = "";
             seededChannels.clear();
+            buffered.splice(0);
+            bufferedBytes = 0;
+            pendingChunks.splice(0);
+            queuedEvents = 0;
+            this.#timelineRetentionDirty = false;
+            queueOverflow = false;
+            this.#timelineUnpersisted = valid ? this.#timelineIncompleteAccounts.has(valid) : false;
             accountGeneration = identity.generation;
             const generation = identity.generation;
             this.#timeline.clear();
@@ -4512,17 +4822,24 @@ class SolcordRuntimeStore extends Store {
                 }, identityIsCurrent);
                 if (scope.disposed || generation !== accountGeneration || !identityIsCurrent()) return;
                 this.#timelinePersistent = policy.retention !== "session" && opened.storage.persistent === true && opened.loaded.persistent === true;
-                storageReadComplete = opened.loaded.status === "complete";
-                storageAttention = storageReadComplete ? "" : `The persistent read is partial (${opened.loaded.omittedSegments} omitted, ${opened.loaded.unreadableSegments} unreadable; retention ${opened.loaded.retentionApplied ? "applied" : "incomplete"}).`;
+                initialReadComplete = opened.loaded.status === "complete";
+                storageReadComplete = initialReadComplete && !queueOverflow;
+                storageAttention = queueOverflow ? "Some events exceeded Timeline's capture buffer. Export is incomplete until recovery."
+                    : storageReadComplete ? "" : `The persistent read is partial (${opened.loaded.omittedSegments} omitted, ${opened.loaded.unreadableSegments} unreadable; retention ${opened.loaded.retentionApplied ? "applied" : "incomplete"}).`;
                 this.#timeline.hydrate(opened.loaded.events, policy);
                 accountReady = true;
+                replayBuffered();
                 updateHealth();
                 seedSelectedChannel();
             }
             catch (error) {
                 if (scope.disposed || generation !== accountGeneration || !identityIsCurrent()) return;
                 this.#timelinePersistent = false;
+                initialReadComplete = false;
+                storageReadComplete = false;
+                storageAttention = `The persistent read failed closed (${errorName(error)}).`;
                 accountReady = true;
+                replayBuffered();
                 this.#setHealth("message-timeline", {maturity: "preview", detail: `Persistent timeline opened in fail-closed session mode (${errorName(error)}).`});
                 seedSelectedChannel();
             }
@@ -4537,9 +4854,7 @@ class SolcordRuntimeStore extends Store {
         const observedEventAllowed = (event: ReturnType<typeof normalizeDiscordTimelineDispatch>[number]): boolean => {
             if (event.kind === "delete" || event.kind === "bulk-delete") return true;
             if (policy.filters.alwaysLogGhostPings && event.mentionedCurrentUser) return true;
-            if (policy.filters.ignoreSelf && event.authorId === accountId) return false;
-            if (policy.filters.ignoreBots && event.authorIsBot) return false;
-            if (policy.filters.ignoreBlockedUsers && event.authorId && relationshipType(event.authorId) === 2) return false;
+            if (!timelineAuthorPolicyAllows(event, policy.filters, accountId, Boolean(event.authorId && relationshipType(event.authorId) === 2))) return false;
             const channel = channelStore.getChannel!(event.channelId);
             if (!channel) return false;
             const dm = channel.type === 1 || channel.type === 3;
@@ -4553,33 +4868,75 @@ class SolcordRuntimeStore extends Store {
             )) return false;
             return true;
         };
+        const flush = (): Promise<boolean> => {
+            if (flushPromise) return flushPromise;
+            const flushingAccount = accountId;
+            const flushingGeneration = accountGeneration;
+            const isCurrent = () => !scope.disposed && flushingAccount === currentAccountId() && flushingGeneration === accountGeneration;
+            const operation = (async () => {
+                try {
+                    await drainTimelineChunks(pendingChunks, async chunk => {
+                        const raw = await this.#withTimelineAccount(flushingAccount!, capability => TIMELINE_IPC.append(capability, {events: chunk, policy}), isCurrent);
+                        if (!isCurrent()) return;
+                        const result = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+                        queuedEvents -= chunk.length;
+                        this.#timelinePersistent = policy.retention !== "session" && result.persistent === true;
+                        if (result.retentionApplied !== true) {
+                            appendRetentionComplete = false;
+                            storageReadComplete = false;
+                            storageAttention = "Retention cleanup is incomplete; encrypted residue requires review.";
+                        }
+                    }, isCurrent);
+                }
+                catch (error) {
+                    if (!isCurrent()) return false;
+                    storageAttention = `Timeline persistence is incomplete (${errorName(error)}). ${queuedEvents} event(s) remain queued; Export retries them before writing a file.`;
+                    storageReadComplete = false;
+                    this.#timelinePersistent = false;
+                    updateHealth();
+                    return false;
+                }
+                if (!isCurrent()) return false;
+                this.#timelineUnpersisted = pendingChunks.length > 0 || queueOverflow || Boolean(accountId && this.#timelineIncompleteAccounts.has(accountId));
+                storageReadComplete = initialReadComplete && appendRetentionComplete && !this.#timelineUnpersisted;
+                if (storageReadComplete) storageAttention = "";
+                updateHealth();
+                return !this.#timelineUnpersisted;
+            })();
+            flushPromise = operation.finally(() => {
+                flushPromise = undefined;
+                if (flushingGeneration !== accountGeneration && accountReady && pendingChunks.length) void flush();
+            });
+            return flushPromise;
+        };
+        this.#flushTimelinePersistence = flush;
+        const resetPending = () => {pendingChunks.splice(0); queuedEvents = 0; queueOverflow = false; buffered.splice(0); bufferedBytes = 0;};
+        this.#resetTimelinePersistence = resetPending;
         const persistMany = (events: readonly TimelineEvent[]) => {
             const current = currentAccountId();
             if (!timelineEventAccountMatches(accountId, current, accountReady)) {
                 if (current !== accountId) void activateAccount();
                 return;
             }
-            const changed = events.filter(event => this.#timeline.apply(event, policy));
+            const changed = this.#timeline.applyBatch(events.map(fitTimelineEventBytes), policy);
             if (!changed.length) return;
-            updateHealth();
-            void this.#withPrivateCapability(capability => {
-                if (this.#boundTimelineAccountId !== current) throw new Error("TimelineAccountChangedBeforeAppend");
-                return TIMELINE_IPC.append(capability, {events: changed, policy});
-            }).then(raw => {
-                if (current !== currentAccountId() || this.#boundTimelineAccountId !== current) return;
-                const result = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
-                if (result.retentionApplied === true) return;
+            this.#timelineUnpersisted = true;
+            if (queuedEvents + changed.length > 10_000) {
+                queueOverflow = true;
                 storageReadComplete = false;
-                storageAttention = "Retention cleanup is incomplete; ambiguous encrypted residue remains and requires review.";
+                storageAttention = "Timeline's persistence queue reached its safety limit. Some session records are not stored; export is unavailable until recovery.";
                 updateHealth();
-            }).catch(error => {
-                this.#timelinePersistent = false;
-                this.#setHealth("message-timeline", {maturity: "preview", detail: `A timeline segment failed closed (${errorName(error)}); renderer memory remains session-only.`});
-            });
+                return;
+            }
+            pendingChunks.push(...chunkTimelineEvents(changed));
+            queuedEvents += changed.length;
+            updateHealth();
+            void flush();
         };
         const createFromLoadedMessage = (message: Message | undefined, channelId: string): TimelineEvent | undefined => {
             if (!message) return;
             const normalized = normalizeDiscordTimelineDispatch("MESSAGE_CREATE", {message, channelId}, accountId)[0];
+            if (normalized?.authorId) normalized.authorIsBot = message.author?.bot === true;
             if (!normalized || !scopedChannel(normalized.channelId) || !observedEventAllowed(normalized)) return;
             return {
                 ...normalized,
@@ -4588,22 +4945,48 @@ class SolcordRuntimeStore extends Store {
                 ...(policy.content === "text-only" ? {attachments: []} : {})
             };
         };
-        const prepareObservedEvent = (event: ReturnType<typeof normalizeDiscordTimelineDispatch>[number]): TimelineEvent[] => {
+        const prepareObservedEvent = (raw: ReturnType<typeof normalizeDiscordTimelineDispatch>[number], at = Date.now()): TimelineEvent[] => {
+            const loaded = messageStore?.getMessage?.(raw.channelId, raw.messageId);
+            const cached = loaded ? normalizeDiscordTimelineDispatch("MESSAGE_CREATE", {message: loaded, channelId: raw.channelId}, accountId)[0] : undefined;
+            if (cached?.authorId) cached.authorIsBot = loaded?.author?.bot === true;
+            const known = this.#timeline.identity(raw.messageId) ?? cached;
+            // A partial update never creates a new identity or bypasses a rejected seed.
+            const event = resolveTimelineEventIdentity(raw, known);
+            if (!event) return [];
             if (!scopedChannel(event.channelId) || !observedEventAllowed(event)) return [];
             const normalized: TimelineEvent = {
                 ...event,
                 eventId: eventId(event.kind),
-                observedAt: Date.now(),
+                observedAt: at,
                 ...(policy.content === "text-only" ? {attachments: []} : {})
             };
             if (event.kind === "create" || this.#timeline.has(event.messageId)) return [normalized];
             const seed = createFromLoadedMessage(messageStore?.getMessage?.(event.channelId, event.messageId), event.channelId);
             if (seed) return [seed, normalized];
-            if (event.kind === "edit" && event.content !== undefined) return [{...normalized, eventId: eventId("create"), kind: "create"}];
+            if (event.kind === "edit" && event.content !== undefined && known?.authorId) return [{...normalized, eventId: eventId("create"), kind: "create"}];
             return [normalized];
         };
         const handleDispatch = (type: DiscordTimelineDispatchType, payload: Record<string, unknown>) => {
-            const events = normalizeDiscordTimelineDispatch(type, payload, accountId).flatMap(prepareObservedEvent);
+            const normalized = normalizeDiscordTimelineDispatch(type, payload, accountId);
+            if (!accountReady) {
+                const bytes = timelineSerializedBytes(normalized);
+                if (accountId === currentAccountId() && accountId && buffered.length + normalized.length <= 500 && bufferedBytes + bytes <= 4 * 1024 * 1024) {
+                    buffered.push(...normalized.map(event => ({event, at: Date.now()})));
+                    bufferedBytes += bytes;
+                }
+                else if (normalized.length && accountId) {
+                    queueOverflow = true;
+                    this.#timelineUnpersisted = true;
+                    this.#timelineIncompleteAccounts.add(accountId);
+                }
+                return;
+            }
+            const events = normalized.flatMap(event => prepareObservedEvent(event));
+            if (events.length) persistMany(events);
+        };
+        replayBuffered = () => {
+            const events = buffered.splice(0).flatMap(({event, at}) => prepareObservedEvent(event, at));
+            bufferedBytes = 0;
             if (events.length) persistMany(events);
         };
         seedSelectedChannel = () => {
@@ -4658,12 +5041,29 @@ class SolcordRuntimeStore extends Store {
             userStore.addChangeListener(onAccountChange);
             scope.own(() => userStore.removeChangeListener?.(onAccountChange), "listener");
         }
-        scope.interval(() => void activateAccount(), 5_000);
+        scope.interval(() => {
+            const removed = this.#timeline.prune(policy);
+            if (removed || this.#timelineRetentionDirty) {
+                updateHealth();
+                if (accountReady) {
+                    pendingChunks.push([]);
+                    this.#timelineUnpersisted = true;
+                    this.#timelineRetentionDirty = false;
+                    void flush();
+                }
+            }
+            void activateAccount();
+        }, 5_000);
         scope.own(() => {
+            if (accountId && (pendingChunks.length || buffered.length)) this.#timelineIncompleteAccounts.add(accountId);
             accountId = undefined;
             accountGeneration = -1;
             accountInitialized = false;
             accountReady = false;
+            buffered.splice(0);
+            if (this.#flushTimelinePersistence === flush) this.#flushTimelinePersistence = undefined;
+            if (this.#timelinePolicyChanged === policyChanged) this.#timelinePolicyChanged = undefined;
+            if (this.#resetTimelinePersistence === resetPending) this.#resetTimelinePersistence = undefined;
             seededChannels.clear();
             this.#timeline.clear();
             this.#timelinePersistent = false;

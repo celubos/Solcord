@@ -6,6 +6,7 @@ import path from "path";
 
 import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_THEMES} from "../../src/common/solcord/addon-catalog.generated";
 import {SOLCORD_V2_REPLACEMENT_MANIFEST} from "../../src/common/solcord/v2-replacement-manifest";
+import {chunkTimelineEvents, fitTimelineEventBytes} from "../../src/common/solcord/timeline-limits";
 
 
 let appDataPath = "";
@@ -1135,6 +1136,21 @@ describe("Solcord setup transaction recovery ownership", () => {
 });
 
 describe("Solcord Message Timeline storage security", () => {
+    test("100, 101 and 250-event seeds persist through the actual encrypted store and restart", async () => {
+        for (const count of [100, 101, 250]) {
+            const account = String(count);
+            const input = Array.from({length: count}, (_, index) => fitTimelineEventBytes(timelineEvent({eventId: `boundary-${count}-${index}`, messageId: String(index + 1), content: index === 0 ? "漢🟢".repeat(22_000) : "local"})));
+            const storage = new SolcordTimelineStorage();
+            for (const chunk of chunkTimelineEvents(input)) {
+                const result = await storage.append(account, {events: chunk, policy: {retention: "7-days"}});
+                expect(result).toMatchObject({stored: chunk.length, persistent: true, retentionApplied: true});
+            }
+            const loaded = await new SolcordTimelineStorage().read(account, {policy: {retention: "7-days"}});
+            expect(loaded.complete).toBeTrue();
+            expect(loaded.events.map(item => item.eventId).sort()).toEqual(input.map(item => item.eventId).sort());
+            expect(loaded.events.find(item => item.eventId === input[0].eventId)?.content).toBe(input[0].content);
+        }
+    });
     test("falls back to account-isolated memory without creating plaintext files", async () => {
         encryptionAvailable = false;
         const timeline = new SolcordTimelineStorage();

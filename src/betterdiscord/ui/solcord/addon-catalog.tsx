@@ -5,7 +5,9 @@ import PluginManager from "@modules/pluginmanager";
 import SolcordRuntime from "@modules/solcord/runtime";
 import SolcordSettings from "@modules/solcord/store";
 import PluginDoctor from "@modules/solcord/doctor";
-import {SOLCORD_CATALOG_INDEX, SOLCORD_CATALOG_SNAPSHOT, SOLCORD_RUNTIME_ADDONS} from "@common/solcord/addon-catalog.generated";
+import {SOLCORD_CATALOG_SNAPSHOT, SOLCORD_RUNTIME_ADDONS} from "@common/solcord/addon-trust.generated";
+import type {AddonCandidate} from "@common/solcord/addon-catalog.generated";
+import {loadSolcordCatalogDetails} from "@modules/solcord/catalog-details";
 import {isSolcordBuiltInAddon, resolveCommunityAddon} from "@common/solcord/builtin-addons";
 import {inferSolcordPermissionCard, type SolcordPermissionCard} from "@common/solcord/product";
 
@@ -13,8 +15,19 @@ import {SOLCORD_ADDON_GROUPS, SOLCORD_ADDON_PRESENTATION, visibleSolcordCommunit
 import SolcordSwitch from "./switch";
 import {useSolcordAction} from "./use-action";
 
-const {useMemo, useState} = React;
+const {useEffect, useMemo, useState} = React;
 const OFFICIAL_PLUGIN_STORE = "https://betterdiscord.app/plugins";
+
+function useCatalogDetails() {
+    const [records, setRecords] = useState<readonly AddonCandidate[]>([]);
+    const [error, setError] = useState("");
+    useEffect(() => {
+        let active = true;
+        loadSolcordCatalogDetails().then(value => {if (active) setRecords(value);}, () => {if (active) setError("The local catalog could not be verified. Privacy and integrity checks remain active.");});
+        return () => {active = false;};
+    }, []);
+    return {records, error};
+}
 
 function formatBytes(bytes: number): string {
     return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
@@ -34,6 +47,7 @@ function PermissionCard({permissions}: {permissions: SolcordPermissionCard;}) {
 
 export function CuratedAddonSet() {
     const [message, setMessage] = useState("");
+    const {records: catalogDetails} = useCatalogDetails();
     const state = useStateFromStores([PluginManager, SolcordSettings, PluginDoctor, SolcordRuntime], () => {
         const settings = SolcordSettings.snapshot();
         const quarantines = new Map(PluginDoctor.snapshot().filter(record => record.quarantinedAt).map(record => [record.addonId, record]));
@@ -46,7 +60,7 @@ export function CuratedAddonSet() {
                 const configured = settings.curatedAddons[candidate.name];
                 const builtIn = isSolcordBuiltInAddon(candidate.name, configured?.mode);
                 const addon = resolveCommunityAddon(PluginManager, candidate.name, candidate.fileName);
-                const catalog = SOLCORD_CATALOG_INDEX.find(record => record.type === "plugin" && record.name === candidate.name);
+                const catalog = catalogDetails.find(record => record.type === "plugin" && record.name === candidate.name);
                 return {
                     ...candidate,
                     configured,
@@ -61,7 +75,7 @@ export function CuratedAddonSet() {
                 };
             })
         };
-    });
+    }, [catalogDetails]);
     const {pending: busy, run: toggle} = useSolcordAction(async (name: string, enabled: boolean) => {
         setMessage("");
         const succeeded = await SolcordRuntime.setCuratedAddonEnabled(name, enabled);
@@ -94,20 +108,23 @@ export function CuratedAddonSet() {
 }
 
 export function CatalogBrowser() {
+    const {records: catalogDetails, error} = useCatalogDetails();
     const [query, setQuery] = useState("");
     const [type, setType] = useState<"all" | "plugin" | "theme">("all");
     const [disposition, setDisposition] = useState("all");
     const integrity = useStateFromStores(SolcordRuntime, () => SolcordRuntime.integrityStatus());
     const matches = useMemo(() => {
         const needle = query.trim().toLocaleLowerCase();
-        return SOLCORD_CATALOG_INDEX.filter(candidate => {
+        return catalogDetails.filter(candidate => {
             if (type !== "all" && candidate.type !== type) return false;
             if (disposition !== "all" && candidate.targetDisposition !== disposition) return false;
             return !needle || `${candidate.name} ${candidate.description} ${candidate.author} ${candidate.tags.join(" ")}`.toLocaleLowerCase().includes(needle);
         });
-    }, [query, type, disposition]);
+    }, [catalogDetails, query, type, disposition]);
     const visible = matches.slice(0, 80);
     return <section className="solcord-section">
+        {error && <p className="solcord-error" role="alert">{error}</p>}
+        {!error && !catalogDetails.length && <p role="status">Loading local catalog…</p>}
         <div className="solcord-section-heading"><h3>Catalog snapshot</h3><p>Reference entries from the BetterDiscord store. Browsing does not download or enable plugins or themes.</p><div className="solcord-actions"><button className="solcord-action" type="button" onClick={() => window.open(OFFICIAL_PLUGIN_STORE, "_blank", "noopener,noreferrer")}>Open official plugin store</button></div></div>
         <dl className="solcord-facts solcord-catalog-facts"><div><dt>Plugins</dt><dd>{SOLCORD_CATALOG_SNAPSHOT.pluginCount} · <code>{SOLCORD_CATALOG_SNAPSHOT.pluginSha256.slice(0, 12)}…</code></dd></div><div><dt>Themes</dt><dd>{SOLCORD_CATALOG_SNAPSHOT.themeCount} · <code>{SOLCORD_CATALOG_SNAPSHOT.themeSha256.slice(0, 12)}…</code></dd></div><div><dt>Review date</dt><dd>{SOLCORD_CATALOG_SNAPSHOT.reviewedAt}</dd></div><div><dt>Installed integrity</dt><dd>{integrity.summary.match} verified · {integrity.summary.missing} missing · {integrity.summary.attention + integrity.summary.unavailable} held</dd></div></dl>
         <div className="solcord-catalog-controls">

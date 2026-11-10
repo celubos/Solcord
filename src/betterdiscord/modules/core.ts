@@ -20,7 +20,6 @@ import Updater from "./updater";
 import AddonStore from "./addonstore";
 
 import Styles from "@styles/index.css";
-import SolcordHankenFont from "@styles/fonts/HankenGrotesk-variable.ttf";
 import Modals from "@ui/modals";
 import FloatingWindows from "@ui/floatingwindows";
 import Toasts from "@ui/toasts";
@@ -32,32 +31,110 @@ import Patcher from "./patcher";
 import SolcordRuntime from "./solcord/runtime";
 import SolcordPanel from "@ui/solcord/panel";
 import {ShieldCheckIcon} from "lucide-react";
+import {DiscordConnectionTimeoutError, observeDiscordConnection, waitForDiscordConnection} from "./connection";
 
 export default new class Core {
     hasStarted = false;
-
-    trustBetterDiscordProtocol() {
-        Patcher.after("BetterDiscordProtocol", getStore("MaskedLinkStore")!, "isTrustedProtocol", (_, [url]: any, ret) => ret || url.startsWith("betterdiscord://"));
+    startupState: "idle" | "starting" | "waiting" | "ready" | "degraded" | "failed" = "idle";
+    private startupPromise?: Promise<void>;
+    private optionalRetryPromise?: Promise<void>;
+    private readonly completedPhases = new Set<string>();
+    private readonly degradedPhases = new Set<string>();
+    private connectionRetry?: AbortController;
+    private async phase(name: string, action: () => unknown, optional = false) {
+        if (this.completedPhases.has(name)) return;
+        try {
+            const result = await action();
+            if (optional && result === false) {
+                this.degradedPhases.add(name);
+                return;
+            }
+            this.completedPhases.add(name);
+            this.degradedPhases.delete(name);
+        }
+        catch (error) {
+            if (!optional) throw error;
+            this.degradedPhases.add(name);
+            Logger.warn("Startup", `Optional integration unavailable: ${name} (${error instanceof Error ? error.name : typeof error}).`);
+        }
     }
 
-    async startup() {
-        if (this.hasStarted) return;
-        this.hasStarted = true;
+    trustBetterDiscordProtocol() {
+        const store = getStore("MaskedLinkStore");
+        if (store && typeof store.isTrustedProtocol === "function") Patcher.after("BetterDiscordProtocol", store, "isTrustedProtocol", (_, [url]: any, ret) => ret || url.startsWith("betterdiscord://"));
+    }
 
-        this.trustBetterDiscordProtocol();
+    startup(): Promise<void> {
+        if (this.startupPromise) return this.startupPromise;
+        if (this.hasStarted) return this.retryOptionalIntegrations();
+        this.connectionRetry?.abort();
+        this.startupState = "starting";
+        this.startupPromise = this.runStartup().then(() => {
+            this.hasStarted = true;
+            this.startupState = this.degradedPhases.size ? "degraded" : "ready";
+        }, error => {
+            if (error instanceof DiscordConnectionTimeoutError) {
+                this.startupState = "waiting";
+                Logger.log("Startup", "Waiting for sign-in; startup will resume when the Discord account is ready.");
+                return;
+            }
+            this.startupState = "failed";
+            Logger.error("Startup", "Solcord startup did not complete; addon activation remains guarded.", error);
+            ToastStore.error("Solcord could not finish startup. Check your connection and restart Discord to retry.", {forceShow: true, timeout: 10_000, group: "solcord-startup-failure"});
+        }).finally(() => {
+            LoadingIcon.hide();
+            this.startupPromise = undefined;
+            if (this.startupState === "waiting") this.resumeAfterSignIn();
+        });
+        return this.startupPromise;
+    }
+
+    private retryOptionalIntegrations(): Promise<void> {
+        if (!this.hasStarted) return Promise.resolve();
+        if (this.optionalRetryPromise) return this.optionalRetryPromise;
+        this.optionalRetryPromise = (async () => {
+            // These integrations own and roll back partial initialization. Retrying
+            // them must not repeat addon activation or required initialization.
+            if (this.degradedPhases.has("settings-renderer")) await this.phase("settings-renderer", () => SettingsRenderer.initialize(), true);
+            if (this.degradedPhases.has("commands")) await this.phase("commands", () => CommandManager.initialize(), true);
+            if (this.degradedPhases.has("toasts")) await this.phase("toasts", () => Toasts.initialize(), true);
+            if (this.degradedPhases.has("floating-windows")) await this.phase("floating-windows", () => FloatingWindows.initialize(), true);
+            this.startupState = this.degradedPhases.size ? "degraded" : "ready";
+        })().finally(() => {this.optionalRetryPromise = undefined;});
+        return this.optionalRetryPromise;
+    }
+
+    private resumeAfterSignIn() {
+        this.connectionRetry?.abort();
+        const owner = new AbortController();
+        this.connectionRetry = owner;
+        const cancel = () => owner.abort();
+        window.addEventListener("beforeunload", cancel, {once: true});
+        owner.signal.addEventListener("abort", () => {
+            window.removeEventListener("beforeunload", cancel);
+            if (this.connectionRetry === owner) this.connectionRetry = undefined;
+        }, {once: true});
+        observeDiscordConnection(() => Stores.UserStore?.getCurrentUser(), () => DiscordModules.Dispatcher, () => {
+            owner.abort();
+            void this.startup();
+        }, owner.signal);
+    }
+
+    private async runStartup() {
+
+        await this.phase("protocol", () => this.trustBetterDiscordProtocol());
 
         // Load css early
         Logger.log("Startup", "Injecting BD Styles");
-        const bundledStyles = Styles.toString().replace("./fonts/HankenGrotesk-variable.ttf", SolcordHankenFont);
-        DOMManager.injectStyle("bd-stylesheet", bundledStyles);
+        DOMManager.injectStyle("bd-stylesheet", Styles.toString());
 
         Logger.log("Startup", "Initializing LocaleManager");
-        LocaleManager.initialize();
+        await this.phase("locale", () => LocaleManager.initialize());
 
         Logger.log("Startup", "Initializing Settings");
-        Settings.initialize();
-        await SolcordRuntime.initialize();
-        SolcordRuntime.attachControlCenter(() => {
+        await this.phase("settings", () => Settings.initialize());
+        await this.phase("runtime", () => SolcordRuntime.initialize());
+        await this.phase("panel", () => SolcordRuntime.attachControlCenter(() => {
             Settings.registerPanel("solcord", "Solcord Suite", {
                 order: 0,
                 icon: ShieldCheckIcon,
@@ -65,36 +142,39 @@ export default new class Core {
                 translateLabel: false,
                 searchable: () => ["Solcord", "Activity Bridge", "Plugin Doctor", "profiles", "privacy", "recovery", "Do Not Track", "Invisible Typing", "Double Click to Reply"]
             });
-        });
-        SettingsRenderer.initialize();
+        }));
+        await this.phase("settings-renderer", () => SettingsRenderer.initialize(), true);
 
         Logger.log("Startup", "Initializing AddonStore");
-        AddonStore.initialize();
-
-        Logger.log("Startup", "Initializing CommandManager");
-        CommandManager.initialize();
-
-        Logger.log("Startup", "Initializing Internal InstallCSS");
-        InstallCSS.initialize();
+        await this.phase("addon-store", () => AddonStore.initialize(), true);
 
         Logger.log("Startup", "Waiting for connection...");
         await this.waitForConnection();
+
+        // Login loads additional host chunks. Retry unavailable optional entries
+        // against that inventory instead of latching an early missing lookup.
+        await this.phase("settings-renderer", () => SettingsRenderer.initialize(), true);
+        Logger.log("Startup", "Initializing CommandManager");
+        await this.phase("commands", () => CommandManager.initialize(), true);
+
+        Logger.log("Startup", "Initializing Internal InstallCSS");
+        await this.phase("css", () => InstallCSS.initialize(), true);
 
         Logger.log("Startup", "Checking first-install setup handoff");
         await SolcordRuntime.openPendingFirstSetup();
 
         Logger.log("Startup", "Initializing FloatingWindows");
-        FloatingWindows.initialize();
+        await this.phase("floating-windows", () => FloatingWindows.initialize(), true);
 
         Logger.log("Startup", "Initializing Toasts");
-        Toasts.initialize();
+        await this.phase("toasts", () => Toasts.initialize(), true);
 
         Logger.log("Startup", "Starting Solcord privacy policy");
         const privacyPolicyReady = await SolcordRuntime.start();
 
         Logger.log("Startup", "Initializing Builtins");
         for (const module in Builtins) {
-            Builtins[module as keyof typeof Builtins].initialize();
+            await this.phase(`builtin:${module}`, () => Builtins[module as keyof typeof Builtins].initialize(), true);
         }
 
         PluginManager.holdAddonActivation();
@@ -103,10 +183,10 @@ export default new class Core {
         ThemeManager.setAddonActivationGuard(theme => SolcordRuntime.canActivateCommunityTheme(theme));
 
         Logger.log("Startup", "Loading Plugins");
-        PluginManager.initialize();
+        await this.phase("plugins", () => PluginManager.initialize());
 
         Logger.log("Startup", "Loading Themes");
-        ThemeManager.initialize();
+        await this.phase("themes", () => ThemeManager.initialize());
 
         Logger.log("Startup", "Validating reviewed addons before activation");
         const addonActivationAllowed = privacyPolicyReady && await SolcordRuntime.enforceAddonIntegrityBeforeStart();
@@ -117,11 +197,12 @@ export default new class Core {
             ThemeManager.startAddons();
         }
         else {
+            this.degradedPhases.add("addon-activation");
             Logger.warn("Startup", "Community addon activation remains held because Solcord privacy or integrity validation did not complete.");
         }
 
         Logger.log("Startup", "Initializing Updater");
-        Updater.initialize();
+        await this.phase("updater", () => Updater.initialize(), true);
 
         Logger.log("Startup", "Removing Loading Icon");
         LoadingIcon.hide();
@@ -132,19 +213,26 @@ export default new class Core {
             group: "solcord-startup-identity"
         });
 
-        const previousVersion = JsonStore.get("misc", "version");
-        if (Config.get("version") !== previousVersion) {
-            Modals.showChangelogModal(Changelog);
-            JsonStore.set("misc", "version", Config.get("version"));
-        }
+        await this.phase("changelog", () => {
+            const previousVersion = JsonStore.get("misc", "version");
+            if (Config.get("version") !== previousVersion) {
+                Modals.showChangelogModal(Changelog);
+                JsonStore.set("misc", "version", Config.get("version"));
+            }
+        }, true);
 
-        if (addonActivationAllowed) allModulesLoaded.then(() => PluginManager.startAddons("idle"));
+        void allModulesLoaded.then(async () => {
+            await this.startupPromise;
+            if (addonActivationAllowed) PluginManager.startAddons("idle");
+            await this.retryOptionalIntegrations();
+        }).catch(() => {Logger.warn("Startup", "Deferred startup integration could not complete.");});
     }
 
-    waitForConnection() {
-        return new Promise<void>(done => {
-            if (Stores.UserStore?.getCurrentUser()) return done();
-            DiscordModules.Dispatcher?.subscribe("CONNECTION_OPEN", done);
-        });
+    async waitForConnection() {
+        const owner = new AbortController();
+        const cancel = () => owner.abort();
+        window.addEventListener("beforeunload", cancel, {once: true});
+        try {await waitForDiscordConnection(() => Stores.UserStore?.getCurrentUser(), () => DiscordModules.Dispatcher, 30_000, 250, owner.signal);}
+        finally {window.removeEventListener("beforeunload", cancel); owner.abort();}
     }
 };

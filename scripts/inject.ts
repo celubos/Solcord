@@ -8,6 +8,7 @@ import doSanityChecks from "./helpers/validate";
 import buildPackage from "./helpers/package";
 import copyFiles from "./helpers/copy";
 import {stageReleaseArtifact} from "./helpers/install";
+import {injectDeveloperLoader, validateDeveloperLayout} from "./helpers/developer-inject";
 import {comparator} from "../src/common/semver";
 
 const useSolcordRelease = args[2] && args[2].toLowerCase() === "release";
@@ -53,6 +54,8 @@ const resources = await (async function () {
     return path.join(basedir, `app-${latest}`, "resources");
 })();
 
+validateDeveloperLayout(resources);
+
 if (useSolcordRelease) {
     if (!fs.existsSync(solcordPath) || !fs.statSync(solcordPath).isFile() || fs.statSync(solcordPath).size === 0) {
         throw new Error(`Solcord release artifact is missing or empty: ${solcordPath}`);
@@ -76,29 +79,6 @@ console.log(`    ✅ Found ${release} in ${resources}`);
 
 const asarDir = path.join(resources, "app");
 
-let appName = "app.asar";
-
-const renamedAppAsarExists = fs.existsSync(path.join(resources, "betterdiscord.app.asar"));
-if (renamedAppAsarExists || fs.existsSync(path.join(resources, "betterdiscord.app"))) {
-    // lazy fix for if app.asar does not exist but app folder does (Why? Better safe than sorry)
-    if (!renamedAppAsarExists) {
-        appName = "app";
-    }
-
-    console.log(`    ✅ ${appName} was previously renamed`);
-}
-else {
-    if (!fs.existsSync(path.join(resources, "app.asar"))) appName = "app";
-
-    console.log(`    ✅ Renaming ${appName} to betterdiscord.${appName}`);
-
-    fs.renameSync(path.join(resources, appName), path.join(resources, `betterdiscord.${appName}`));
-}
-
-fs.mkdirSync(asarDir, {recursive: true});
-
-const indexJs = path.join(asarDir, "index.js");
-
 let requirePath: string;
 if (process.env.WSL_DISTRO_NAME) {
     if (useSolcordRelease) {
@@ -117,20 +97,8 @@ else {
 
 
 // __betterdiscord_inject_meta__ is used so the updater module can use the correct path
-fs.writeFileSync(indexJs, `
-require(${JSON.stringify(requirePath)});
-module.exports = require("../betterdiscord.app.asar");`);
-
-console.log("    ✅ Wrote index.js");
-
-if (!fs.existsSync(path.join(asarDir, "package.json"))) {
-    fs.writeFileSync(path.join(asarDir, "package.json"), JSON.stringify({
-        main: "./index.js",
-        name: "discord"
-    }));
-
-    console.log("    ✅ Wrote package.json");
-}
+injectDeveloperLoader(resources, requirePath);
+console.log("    ✅ Committed the loader and verified packed Discord startup path");
 
 console.log("");
 

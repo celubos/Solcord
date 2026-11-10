@@ -2,6 +2,8 @@ import {memoize} from "@common/utils";
 import type {RemoteModule, UserAgentInfo, Dispatcher, InviteActions, SimpleMarkdown, ReactSpring, MessageUtils, PromptToUpload, DiscordTooltip, SimpleMarkdownWrapper} from "@typed/discord/modules";
 import {Filters, getBulkKeyed, getByKeys, getBySource, getByStrings, getModule} from "@webpack";
 import type React from "react";
+import type {Webpack} from "@typed/discord";
+import {isReactRuntime} from "@common/react-readiness";
 
 interface Modules {
     React: typeof React;
@@ -13,14 +15,14 @@ interface Modules {
     ChannelActions: {selectPrivateChannel(id: string): void; selectVoiceChannel(a: any, b: any): void;};
 }
 
-const SyncModules = getBulkKeyed<Modules>({
+const SyncQueries = {
     React: {
-        filter: Filters.byKeys(["createElement", "cloneElement"]),
+        filter: isReactRuntime,
         firstId: 483362,
         cacheId: "core-React"
     },
     ReactSpring: {
-        filter: Filters.byKeys(["useTransition", "animated"]),
+        filter: m => typeof m?.useTransition === "function" && typeof m.useSpring === "function" && m.animated,
         firstId: 429783,
         cacheId: "core-ReactSpring"
     },
@@ -53,9 +55,10 @@ const SyncModules = getBulkKeyed<Modules>({
         firstId: 287734,
         cacheId: "core-ChannelActions"
     }
-});
+} satisfies Record<keyof Modules, Webpack.BulkQueries>;
 
-SyncModules.Tooltip ??= (props => props.children?.({}) ?? null) as DiscordTooltip;
+const SyncModules = getBulkKeyed<Modules>(SyncQueries);
+const FallbackTooltip = (props => props.children?.({}) ?? null) as DiscordTooltip;
 
 const MemoModules = memoize({
     get InviteActions(): InviteActions | undefined {return getByKeys(["createInvite"], {firstId: 846293, cacheId: "core-InviteActions"});},
@@ -69,7 +72,7 @@ const MemoModules = memoize({
     get NoticesBaseClasses(): {base: string;} | undefined {return getByKeys(["container", "base", "sidebar"], {cacheId: "core-NoticesBaseClasses"});},
     get NoticesPageClasses(): {errorPage: string;} | undefined {return getByKeys(["errorPage"], {cacheId: "core-NoticesPageClasses"});},
     get ViewClasses(): {standardSidebarView: string;} | undefined {return getByKeys(["standardSidebarView"], {cacheId: "core-ViewClasses"});},
-});
+}, {cacheUndefined: false});
 
 /**
  * Upload internals are loaded later than most core modules on some Discord
@@ -84,7 +87,23 @@ export function resolvePromptToUpload(): PromptToUpload | undefined {
     return typeof legacy === "function" ? legacy : undefined;
 }
 
-const DiscordModules = Object.assign(MemoModules, SyncModules) as typeof MemoModules & Modules & {readonly promptToUpload?: PromptToUpload;};
+const DiscordModules = Object.create(null) as typeof MemoModules & Modules & {readonly promptToUpload?: PromptToUpload;};
+for (const key of Object.keys(MemoModules) as Array<keyof typeof MemoModules>) {
+    Object.defineProperty(DiscordModules, key, {enumerable: true, get: () => MemoModules[key]});
+}
+for (const key of Object.keys(SyncQueries) as Array<keyof Modules>) {
+    Object.defineProperty(DiscordModules, key, {
+        enumerable: true,
+        get() {
+            if (SyncModules[key] === undefined) {
+                const query = SyncQueries[key];
+                const found = getModule(query.filter, query);
+                if (found !== undefined) Object.assign(SyncModules, {[key]: found});
+            }
+            return SyncModules[key] ?? (key === "Tooltip" ? FallbackTooltip : undefined);
+        }
+    });
+}
 Object.defineProperty(DiscordModules, "promptToUpload", {
     configurable: false,
     enumerable: true,

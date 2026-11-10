@@ -1,8 +1,10 @@
-import {app} from "electron";
+import {app, session} from "electron";
 
 import ipc from "./modules/ipc";
 import BrowserWindow from "./modules/browserwindow";
 import CSP from "./modules/csp";
+import {registerSolcordLocalAssets} from "./modules/local-assets";
+import {installSessionWebRequestPolicy} from "./modules/web-request-policy";
 
 import "./migrator";
 
@@ -22,6 +24,15 @@ if (process.argv.find(x => x.startsWith("--inspect"))) {
 }
 
 if (!process.argv.includes("--vanilla")) {
+    const ownDefaultSessionHooks = () => installSessionWebRequestPolicy(session.defaultSession);
+    if (app.isReady()) {ownDefaultSessionHooks();}
+    else {
+        // Register before Discord's ready listeners; the Promise also covers a
+        // host whose initialization resumes directly from whenReady().
+        app.once("ready", ownDefaultSessionHooks);
+        void app.whenReady().then(ownDefaultSessionHooks);
+    }
+    registerSolcordLocalAssets();
     // eslint-disable-next-line no-console
     console.log(`Welcome to Solcord ${process.env.__CANDIDATE__} (core ${process.env.__VERSION__}, build ${process.env.__BUILD__}, source ${process.env.__COMMIT__?.slice(0, 7)})`);
 

@@ -1,86 +1,13 @@
 name: Solcord Compatibility CI
 
+# Compatibility/manual entry point. Automatic PR and push work runs once in
+# solcord-ci.yml, which retains the legacy `build` check as a dependent gate.
+on:
+  workflow_dispatch:
+
 permissions:
   contents: read
 
-on:
-  push:
-    branches: ["main", "development"]
-  pull_request:
-    branches: ["main", "development"]
-
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Prepare pinned Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.0
-
-      - name: Install frozen dependencies
-        run: bun install --frozen-lockfile
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-
-      - name: Run tests
-        run: bun run test
-
-      - name: Lint code
-        run: bun run lint
-
-      - name: Check types
-        run: bun run typecheck
-
-      - name: Build ASAR
-        run: bun run dist
-        env:
-          BRANCH_NAME: ${{github.head_ref || github.ref_name}}
-          COMMIT_HASH: ${{github.sha}}
-
-      - name: Upload ASAR artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: ${{github.event_name == 'pull_request'}}
-        with:
-          name: solcord-asar-${{github.sha}}
-          if-no-files-found: error
-          retention-days: 30
-          compression-level: 0
-          path: dist/solcord.asar
-
-      - name: Upload checksum artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: ${{github.event_name == 'pull_request'}}
-        with:
-          name: solcord-checksums-${{github.sha}}
-          if-no-files-found: error
-          retention-days: 30
-          compression-level: 0
-          path: dist/checksums.txt
-
-      # Preserved only for upstream compatibility. This can never publish from the fork.
-      - name: Update upstream canary tag
-        uses: richardsimko/update-tag@v2
-        if: ${{github.event_name == 'push' && github.repository == 'BetterDiscord/BetterDiscord'}}
-        with:
-          tag_name: canary
-        env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
-
-      - name: Update upstream canary release
-        uses: softprops/action-gh-release@v3
-        if: ${{github.event_name == 'push' && github.repository == 'BetterDiscord/BetterDiscord'}}
-        with:
-          prerelease: true
-          name: Upstream BetterDiscord Canary
-          body: Preserved upstream release automation. This job is blocked outside BetterDiscord/BetterDiscord.
-          tag_name: canary
-          fail_on_unmatched_files: true
-          files: |
-            dist/solcord.asar
-            dist/checksums.txt
+    uses: ./.github/workflows/solcord-ci.yml

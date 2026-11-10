@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import fs from "fs";
+import {safeAddonFileName as safeFileName} from "@common/solcord/addon-file-policy";
 import path from "path";
 import {app, net} from "electron";
 
@@ -102,12 +103,7 @@ function digest(value: Buffer | string): string {
     return crypto.createHash("sha256").update(value).digest("hex");
 }
 
-function safeFileName(value: string, kind?: ManagedKind): string {
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9 _&().+—-]{0,180}\.(?:plugin\.js|theme\.css)$/.test(value) || path.basename(value) !== value) throw new TypeError("Unsafe addon filename.");
-    if (kind === "plugin" && !value.endsWith(".plugin.js")) throw new TypeError("Plugin transaction contains a non-plugin filename.");
-    if (kind === "theme" && !value.endsWith(".theme.css")) throw new TypeError("Theme transaction contains a non-theme filename.");
-    return value;
-}
+export {safeAddonFileName as safeFileName} from "@common/solcord/addon-file-policy";
 
 export function isReviewedLegacySolcordTheme(fileName: string, sha256: string): boolean {
     if (!SHA256.test(sha256)) return false;

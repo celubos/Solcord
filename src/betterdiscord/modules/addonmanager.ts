@@ -174,9 +174,16 @@ export default abstract class AddonManager<T extends Addon = Addon> extends Stor
         const files = fs.readdirSync(this.addonFolder);
 
         for (let filename of files) {
+            // Ignore unrelated entries before touching their filesystem metadata.
+            if (!filename.endsWith(this.extension) && !filename.match(this.duplicatePattern)) continue;
+            try {
             const absolutePath = path.resolve(this.addonFolder, filename);
-            const stats = fs.statSync(absolutePath);
-            if (!stats || !stats.isFile()) continue;
+            const stats = fs.lstatSync(absolutePath);
+            if (!stats || !stats.isFile() || stats.isSymbolicLink()) continue;
+            if (stats.size > 16 * 1024 * 1024) {
+                Logger.warn("AddonManager", `Skipping oversized addon: ${filename}`);
+                continue;
+            }
 
             if (!filename.endsWith(this.extension)) {
                 // Lets check to see if this filename has the duplicated file pattern `something(1).ext`
@@ -200,12 +207,17 @@ export default abstract class AddonManager<T extends Addon = Addon> extends Stor
                 }
                 catch (err) {
                     Logger.err("AddonManager", `Could not rename file: ${filename} ${newFilename}`, err);
+                    continue;
                 }
             }
 
             this.timeCache[filename] = stats.mtimeMs;
 
             this.readAddon(filename);
+            }
+            catch (error) {
+                Logger.warn("AddonManager", `Could not read addon: ${filename}`, error);
+            }
         }
 
         this.saveState();

@@ -1,51 +1,51 @@
-# Solcord V2 RC release checklist
+# Solcord release checklist
 
-This checklist governs the owner-ready unsigned candidate. Historical candidates remain immutable. `release-manifest.json` is authoritative for artifact and runtime identities; `SHA256SUMS.txt` is the human-readable checksum list.
+Use this checklist for the GitHub package workflow. The separate [acceptance-evidence assembler](RELEASE_EVIDENCE_ASSEMBLY.md) retains its own archive layout and externally pinned `release-manifest.json` contract; its manifest is not interchangeable with `release-package.json`.
 
-## Source and provenance
+## Source, security and provenance
 
-- [ ] The final source commit is clean, reachable from `main`, pushed, and remote SHA verified. Preserve `development` and upstream history.
-- [ ] The exact source/delivery ZIPs and their SHA-256 values are recorded outside the source archive.
-- [ ] Record the current plugin/theme catalog counts and API hashes, compare them with the last reviewed 209-plugin/114-theme snapshot, and explicitly disposition any drift rather than silently accepting it.
-- [ ] Current raw catalog hashes and generated registry hashes match `PROVENANCE_REGISTRY.md`.
-- [ ] VoiceMessages is identified as GPL-3.0, not AGPL; no GPL or unresolved-license implementation was copied into the Apache-2.0 core.
-- [ ] Every adapted source retains its controlling license, header, authorship, pinned revision, file list, and modification note.
-- [ ] Published historical candidates remain byte-for-byte immutable; the new source, candidate version, and release assets identify the same reviewed build.
+- [ ] The final source is clean, pushed, reachable from `main`, and its remote SHA is verified. Preserve all implementation and upstream history.
+- [ ] Frozen dependencies, complete tests, lint, CSS baseline, types, declarations, reviewed dependency cycles, documentation and repository inventory checks pass.
+- [ ] Review the security-sensitive diff: file boundaries, IPC/preloads, privacy/network behavior, installer ownership/recovery and release publication.
+- [ ] No credentials, real message content, private account identifiers, local owner paths or profile captures appear in outgoing commits or public artifacts.
+- [ ] Original contributor credits, dependency licenses, catalog pins and the provenance registry remain accurate.
+- [ ] Product version, candidate label, package manifests, release notes and download links agree.
+- [ ] The core updater remains fail-closed without Solcord-owned integrity metadata.
 
-## Build and security
+## Runtime qualification
 
-- [ ] Frozen install, full tests, ESLint, focused Solcord CSS/theme lint, typecheck, type generation, circular-dependency measurement, production build, package, audit, and `git diff --check` pass.
-- [ ] A security-diff review covers BrowserWindow/preload, IPC, updater, installer, translation credentials, provider archive/rollback, addon execution, diagnostics, and network calls.
-- [ ] No token, private content, account identifier, denied-user ID, credential, message body, absolute owner path, or secret appears in Git, artifacts, screenshots, logs, or release copy.
-- [ ] Two clean builds produce byte-identical ASARs, or any difference is explained and the release is held.
-- [ ] `SolcordInstaller.exe --self-test` passes for the exact self-contained executable included in the RC directory.
+- [ ] The 30-minute disposable soak completes with bounded caches/samples and no owned listeners, timers, patches, tracks or URLs after teardown.
+- [ ] Compare the hot renderer paths with the prior release; record environment, median/p95, operation counts and exact source hashes.
+- [ ] Repeated settings mount/navigation/unmount checks return subscriptions and callbacks to baseline.
+- [ ] Controlled Chromium scenarios cover themes, short/narrow layouts, modern host colors, keyboard/focus, reduced motion, error states and scaling.
+- [ ] The native installer remains usable while checks run; verify target refresh, stale-result rejection, complete error details and idle/busy close behavior.
+- [ ] Preserve existing Strict Privacy choices. Record native acknowledgement and active adapter coverage without calling it a full network audit.
+- [ ] Record live acceptance separately from fixtures and user-reported acceptance. Do not infer microphone, Mac startup or interactive rollback success from synthetic tests.
 
-## Disposable runtime
+## Windows package
 
-- [ ] Main/settings/popout/editor/plugin/theme/Custom CSS surfaces open without duplicate injection or crash loop.
-- [ ] All eleven themes cover the full shell and pass keyboard, focus, contrast, reduced-motion, and 100%/125%/150%/200% scaling review.
-- [ ] Native Suite replacements report truthful `ready` or `unavailable` state; no visible card is counted as live without its adapter.
-- [ ] Provider preview/apply/rollback proves exact-byte archive, BDFDB-last ordering, preservation of private data, owner-change refusal, and cleanup.
-- [ ] Translation Desk proves endpoint disclosure, confirmation expiry, response bounds, secure-storage persistence, memory fallback, account isolation, and clear.
-- [ ] Audience Guard distinguishes storage availability from policy-loaded state, proves encrypted restart/account isolation when `safeStorage` is available, and remains visibly session-only and fail-closed otherwise.
-- [ ] Friend Watch proves fixture-driven change classification, encrypted restart/account isolation, no-change reconciliation, export, clear, notification, and truthful unknown-cause handling without mutating a real relationship.
-- [ ] Layout Collapse, Embed Controls, Autoscroll, Message Link Preview, and local Media Shelf prove positive, disabled-zero-work, drift, restart, accessibility, and teardown behavior appropriate to each capability.
-- [ ] A 30-minute disposable soak shows bounded samples/caches and owned listeners, timers, patches, media tracks, and object URLs returning to baseline after disable.
+- [ ] Build from the exact clean source with the pinned Bun runtime and .NET SDK.
+- [ ] The self-contained executable's embedded-resource self-test passes in an empty disposable directory.
+- [ ] Install, update, repair, verify, rollback, interrupted recovery, uninstall and explicit launch paths have appropriate disposable coverage.
+- [ ] The six Windows package files match their build receipt and manifests. Preserve the installer's original `SHA256SUMS.txt`.
+- [ ] State the unsigned publisher status and recovery route. Never advise disabling Windows security.
+- [ ] Retain existing profiles, plugins, themes, private stores, recovery material and normal Discord shortcuts.
 
-## Installer and human acceptance
+## macOS preview
 
-- [ ] The assembled release contains root `release-manifest.json`, release-level `SHA256SUMS.txt`, source and delivery ZIPs, hash-bound `evidence/`, and an `installer/` directory containing exactly `SolcordInstaller.exe`, `solcord.asar`, both installer/build manifests, installer-only `SHA256SUMS.txt`, and `solcord-installer-build-receipt.json`.
-- [ ] The installer receipt hash and release-manifest hash are preserved outside their respective directories and standalone validation succeeds with those external pins.
-- [ ] The executable is labeled unsigned and Windows unknown-publisher behavior is stated without advising users to disable security.
-- [ ] Six privacy-clean screenshots come from this exact RC with the documented names: Download/hash, Quit Discord, Install/target review, Verified, First Setup, and Recovery.
-- [ ] The quick guide says “about one minute on a typical Windows PC after download,” not a guarantee.
-- [ ] Install, Update, Repair, Verify, Roll back, Uninstall, and explicit Launch each pass against a disposable target.
-- [ ] Visually review settings, About, Activity Bridge, Audience Guard, Friend Watch, Plugin Doctor, setup/provider migration, themes, diagnostics, and recovery. Record each result.
-- [ ] The owner performs any authenticated Activity, stream, voice-note, translation, notification-read, message, upload, or live-profile action requiring fresh confirmation.
+- [ ] Compile and run the self-contained installer on matching Apple Silicon and Intel macOS runners.
+- [ ] Native compiled self-tests verify copied bundles, signatures, existing entitlements, extended attributes, recovery, and preserved source/profile bytes.
+- [ ] Test the current official Discord bundle in a read-only mounted image and disposable installation, without launching Discord.
+- [ ] The architecture receipt binds the ZIP digest and source SHA, records native validation, and explicitly says preview/not notarized.
+- [ ] Preserve the original Discord bundle and security settings; do not remove quarantine, bypass Gatekeeper or require administrator access.
+- [ ] Keep real Discord startup, microphone, keychain and update acceptance listed as unverified until separately demonstrated on a Mac.
 
-## Release decision
+## Publication and readback
 
-- [ ] The core updater still fails closed without Solcord-owned integrity metadata.
-- [ ] Exact commit, ASAR and installer hashes, runtime nonclaims, backup identity, rollback route, and acceptance receipts are bound by `release-manifest.json`; test and hosted-check receipts are present as hash-bound evidence files.
-- [ ] The tag, GitHub prerelease, documentation, source, installer, ASAR, and installed About surface identify the same final source SHA.
-- [ ] Stable publication remains blocked until authentic signing or an independently authenticated distribution mechanism and a fresh stable decision exist.
+- [ ] A fresh stable decision is supported by recorded qualification and the owner's publication request. Unsigned Windows distribution uses the independently authenticated `celubos/Solcord` GitHub repository, exact-commit Actions builds and downloadable SHA-256 manifests; this is not code signing.
+- [ ] The release workflow's source, Windows and both native Mac jobs all pass.
+- [ ] `prepare-solcord-release.ts` validates all source/version/architecture bindings and produces `release-package.json` plus `RELEASE-SHA256SUMS.txt`.
+- [ ] Review the final release copy and artifact inventory. GitHub's tag source archives identify the same immutable source revision.
+- [ ] Upload to a draft, verify every server-side asset name/size/digest, and validate the exact tag before making the release public.
+- [ ] Resume only an exactly matching draft. Never overwrite an existing published version or mismatched asset.
+- [ ] Read back the public release, tag SHA, notes, CI result, asset inventory and hashes. Preserve older packages unchanged.

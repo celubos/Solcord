@@ -3,13 +3,14 @@
  * @param object Object to memoize
  * @returns The proxy to the object that memoizes properties
  */
-export default function memoizeObject<T extends Record<string | number | symbol, any>>(object: T) {
+export default function memoizeObject<T extends Record<string | number | symbol, any>>(object: T, {cacheUndefined = true} = {}) {
     const proxy = new Proxy(object, {
         get: function (obj, mod) {
             if (typeof (mod) === "symbol") return null;
             if (!Object.prototype.hasOwnProperty.call(obj, mod)) return undefined;
             if (Object.getOwnPropertyDescriptor(obj, mod)?.get) {
                 const value = obj[mod];
+                if (value === undefined && !cacheUndefined) return value;
                 delete obj[mod];
                 obj[mod as keyof typeof obj] = value;
             }

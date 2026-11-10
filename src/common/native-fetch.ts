@@ -58,27 +58,28 @@ export function dryReadableStream(stream: ReadableStream<Uint8Array<ArrayBufferL
     return {
         // Bun hijacks the type
         read: () => reader.read() as Promise<ReadableStreamReadResult<Uint8Array<ArrayBuffer>>>,
-        cancel: () => reader.cancel()
+        cancel: reason => reader.cancel(reason)
     };
 }
 
 export function hydrateReadableStream(stream: DryReadableStream) {
     return new ReadableStream({
-        async start(controller) {
-            while (true) {
+        async pull(controller) {
+            try {
                 const {
                     done, value
                 } = await stream.read();
 
                 if (done) {
                     controller.close();
-                    break;
                 }
                 else {
                     controller.enqueue(value);
                 }
             }
+            catch (error) {controller.error(error);}
         },
+        cancel: reason => stream.cancel(reason),
         type: "bytes"
     }) as ReadableStream<Uint8Array<ArrayBuffer>>;
 }

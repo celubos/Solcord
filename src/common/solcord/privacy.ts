@@ -107,12 +107,12 @@ export function normalizePrivacyPreferences(value: unknown, fallback: SolcordPri
     return {
         profile,
         migrationPending: source.migrationPending === true,
-        telemetry: choice(source.telemetry, ["block", "allow"] as const, strict ? "block" : fallback.telemetry),
-        crashReporting: choice(source.crashReporting, ["block-optional", "allow"] as const, strict ? "block-optional" : fallback.crashReporting),
-        activityDiscovery: choice(source.activityDiscovery, ["block", "allow"] as const, strict ? "block" : fallback.activityDiscovery),
-        updates: choice(source.updates, ["manual", "automatic"] as const, strict ? "manual" : fallback.updates),
-        communityAddons: choice(source.communityAddons, ["declared-local-only", "review-required"] as const, strict ? "declared-local-only" : fallback.communityAddons),
-        externalProviders: choice(source.externalProviders, ["off", "approved-only"] as const, strict ? "off" : fallback.externalProviders),
+        telemetry: strict ? "block" : choice(source.telemetry, ["block", "allow"] as const, fallback.telemetry),
+        crashReporting: strict ? "block-optional" : choice(source.crashReporting, ["block-optional", "allow"] as const, fallback.crashReporting),
+        activityDiscovery: strict ? "block" : choice(source.activityDiscovery, ["block", "allow"] as const, fallback.activityDiscovery),
+        updates: strict ? "manual" : choice(source.updates, ["manual", "automatic"] as const, fallback.updates),
+        communityAddons: strict ? "declared-local-only" : choice(source.communityAddons, ["declared-local-only", "review-required"] as const, fallback.communityAddons),
+        externalProviders: strict ? "off" : choice(source.externalProviders, ["off", "approved-only"] as const, fallback.externalProviders),
         ...(typeof source.migratedAt === "number" && Number.isFinite(source.migratedAt) && source.migratedAt >= 0 ? {migratedAt: source.migratedAt} : {})
     };
 }

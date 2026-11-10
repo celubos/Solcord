@@ -44,3 +44,4 @@ export interface ValidateReleaseResult {
 
 export function assembleRelease(options: AssembleReleaseOptions): AssembleReleaseResult;
 export function validateRelease(options: ValidateReleaseOptions): ValidateReleaseResult;
+export function createDeterministicSourceArchive(repo: string, sourceCommit: string, prefix: string, destination: string): void;

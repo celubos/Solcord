@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {afterEach, describe, expect, test} from "bun:test";
+import {afterEach, describe, expect, spyOn, test} from "bun:test";
 
 import {
     analyzeSolcordVoiceNote,
@@ -100,6 +100,137 @@ afterEach(() => {
 });
 
 describe("Solcord native-suite security boundaries", () => {
+    test("DOM invalidations ignore unrelated churn and scope timestamp discovery to the added subtree", async () => {
+        installVoiceRuntime(async () => testStream().stream);
+        const scope = new SolcordDisposalScope();
+        const controller = new SolcordNativeSuiteController(scope, {CompleteTimestamps: true, CharCounter: true, VoiceMessages: true}, {prepareVoiceNoteUpload: () => {}});
+        controller.start();
+        const searches = spyOn(document, "querySelectorAll");
+        const unrelated = document.createElement("section");
+        const timestamp = document.createElement("time");
+        timestamp.setAttribute("datetime", "2026-11-07T12:00:00.000Z");
+        try {
+            document.body.append(unrelated);
+            await new Promise(resolve => setTimeout(resolve, 35));
+            expect(searches).not.toHaveBeenCalled();
+            unrelated.append(timestamp);
+            await new Promise(resolve => setTimeout(resolve, 35));
+            expect(timestamp.dataset.solcordCompleteTime).toBe("true");
+            expect(searches).not.toHaveBeenCalled();
+            const view = controller.statusView();
+            expect(controller.statusView()).toBe(view);
+            expect(Object.isFrozen(view)).toBeTrue();
+        }
+        finally {searches.mockRestore(); controller.dispose(); scope.dispose(); unrelated.remove();}
+    });
+
+    test("fifty native-suite start/dispose cycles release every owned DOM listener and observer", () => {
+        installVoiceRuntime(async () => testStream().stream);
+        for (let index = 0; index < 50; index++) {
+            const scope = new SolcordDisposalScope();
+            const controller = new SolcordNativeSuiteController(scope, {CharCounter: true, VoiceMessages: true}, {prepareVoiceNoteUpload: () => {}});
+            controller.start();
+            controller.dispose(); scope.dispose();
+            expect(Object.values(scope.counts()).every(count => count === 0)).toBeTrue();
+        }
+    });
+    test("recycled voice rows revalidate their current attachment on the download action", () => {
+        installVoiceRuntime(async () => testStream().stream);
+        const host = document.createElement("div");
+        host.className = "voiceMessage_fixture";
+        host.innerHTML = "<audio src=\"https://cdn.discordapp.com/attachments/1/2/first.ogg?ex=one\"></audio>";
+        document.body.append(host);
+        const controller = startController();
+        const audio = host.querySelector("audio")!;
+        const link = host.querySelector<HTMLAnchorElement>("[data-solcord-voice-download]")!;
+        audio.src = "https://cdn.discordapp.com/attachments/1/3/second.webm?ex=two";
+        link.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true}));
+        expect(link.href).toBe(audio.src);
+        expect(link.download).toBe("voice-message.webm");
+        audio.src = "https://example.com/unsupported.webm";
+        const invalidClick = new MouseEvent("click", {bubbles: true, cancelable: true});
+        link.dispatchEvent(invalidClick);
+        expect(invalidClick.defaultPrevented).toBeTrue();
+        expect(host.querySelector("[data-solcord-voice-download]")).toBeNull();
+        controller.dispose(); host.remove();
+    });
+    test("notification confirmation uses the message boundary captured during review", () => {
+        const scope = new SolcordDisposalScope();
+        let latest = "100";
+        let targets: Readonly<Record<string, string>> | undefined;
+        const controller = new SolcordNativeSuiteController(scope, {ReadAllNotificationsButton: true}, {
+            notificationIds: () => ["200"],
+            notificationMessageId: () => latest,
+            markNotificationsRead: (_kind, _ids, reviewed) => {targets = reviewed;}
+        });
+        controller.start();
+        const preview = controller.previewNotifications("all");
+        latest = "101";
+        controller.applyReviewedNotifications(preview.id);
+        expect(targets).toEqual({200: "100"});
+        controller.dispose(); scope.dispose();
+    });
+
+    test("canceling recording A during decode cannot mutate recording B", async () => {
+        const original = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+        const decode: Array<(value: {duration: number; numberOfChannels: number; getChannelData(): Float32Array;}) => void> = [];
+        Object.defineProperty(globalThis, "AudioContext", {configurable: true,
+value: class {
+            decodeAudioData() {return new Promise(resolve => decode.push(resolve));}
+            close() {return Promise.resolve();}
+        }});
+        const first = testStream();
+        const second = testStream();
+        let calls = 0;
+        installVoiceRuntime(async () => (++calls === 1 ? first : second).stream);
+        const controller = startController();
+        try {
+            await controller.beginVoiceNoteFromUserGesture();
+            TestMediaRecorder.instances.at(-1)!.emitData(new Blob(["A"]));
+            const previewA = controller.stopVoiceNoteForPreview();
+            const rejectedA = previewA.then(() => undefined, error => error as Error);
+            expect(first.track.stopCount).toBe(1);
+            while (!decode.length) await Promise.resolve();
+            controller.cancelVoiceNote();
+            const recordingB = await controller.beginVoiceNoteFromUserGesture();
+            decode[0]({duration: 1, numberOfChannels: 1, getChannelData: () => new Float32Array([0, 1])});
+            expect((await rejectedA)?.message).toContain("canceled");
+            expect(controller.voiceNotePhase()).toBe("recording");
+            expect(second.track.stopCount).toBe(0);
+            TestMediaRecorder.instances.at(-1)!.emitData(new Blob(["B"]));
+            const previewB = controller.stopVoiceNoteForPreview();
+            while (decode.length < 2) await Promise.resolve();
+            decode[1]({duration: 1, numberOfChannels: 1, getChannelData: () => new Float32Array([1, 0])});
+            expect((await previewB).recordingId).toBe(recordingB.recordingId);
+            expect(controller.voiceNotePhase()).toBe("preview-ready");
+            expect(second.track.stopCount).toBe(1);
+        }
+        finally {
+            if (original) Object.defineProperty(globalThis, "AudioContext", original);
+            else Reflect.deleteProperty(globalThis, "AudioContext");
+        }
+    });
+
+    test("waveform sample work is bounded for a ten-minute stereo fixture", async () => {
+        let reads = 0;
+        const channel = new Proxy({length: 28_800_000}, {get(target, key) {
+            if (key === "length") return target.length;
+            reads++; return 0.5;
+        }}) as unknown as Float32Array;
+        const analyzed = await analyzeSolcordVoiceNote(new Blob(["local"]), () => ({
+            decodeAudioData: async () => ({duration: 600, numberOfChannels: 2, getChannelData: () => channel}),
+            close: async () => {}
+        }));
+        expect(analyzed.waveform).toHaveLength(256);
+        expect(reads).toBeLessThanOrEqual(256 * 128 * 2);
+        expect(analyzed.durationMs).toBe(600_000);
+        let decodes = 0;
+        const productionPreview = await analyzeSolcordVoiceNote(new Blob(["local"]), () => {
+            decodes++; throw new Error("Long recordings must not allocate full decoded PCM.");
+        }, 600_000);
+        expect(decodes).toBe(0);
+        expect(productionPreview).toEqual({durationMs: 600_000, waveform: []});
+    });
     test("reads current and legacy relationship-store snapshots without mutating them", () => {
         const immutable = {101: 1};
         const immutableReader = resolveSolcordRelationshipReader({getRelationships: () => immutable});

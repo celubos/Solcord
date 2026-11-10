@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-catalog.generated";
+import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-trust.generated";
 
 
 export type AddonIntegrityKind = "addon" | "dependency" | "theme";
@@ -84,10 +84,6 @@ export function integrityRecordIsAccepted(record: AddonIntegrityRecord, state: I
     return SOLCORD_RUNTIME_THEMES.some(theme => theme.name === record.name && theme.id === state.selectedTheme);
 }
 
-function declaredThemeName(content: string): string | undefined {
-    return /^\s*\*\s*@name\s+(.+?)\s*$/m.exec(content)?.[1]?.trim();
-}
-
 const REVIEWED_PLUGINS: ReviewedExecutionCandidate[] = [...SOLCORD_RUNTIME_ADDONS, ...SOLCORD_RUNTIME_DEPENDENCIES].map(candidate => ({
     fileName: candidate.fileName,
     name: candidate.name,
@@ -98,7 +94,7 @@ const REVIEWED_THEMES: ReviewedExecutionCandidate[] = SOLCORD_RUNTIME_THEMES.map
     fileName: candidate.fileName,
     name: candidate.name,
     sourceSha256: candidate.sourceSha256,
-    declaredNames: [candidate.name, declaredThemeName(candidate.content)].filter((value): value is string => Boolean(value))
+    declaredNames: [...new Set([candidate.name, candidate.declaredName])]
 }));
 
 const EXPECTED: AddonIntegrityRecord[] = [

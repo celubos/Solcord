@@ -125,14 +125,61 @@ class CommandManager {
         isBD?: boolean;
     }>();
 
-    static User = getByStrings<any>(["hasHadPremium(){"], {firstId: 427157, cacheId: "core-commandmanager-user"});
-    static createBotMessage = getByStrings<any>(["username:\"Clyde\""], {searchExports: true, firstId: 963852, cacheId: "core-commandmanager-createBotMessage"});
-    static MessagesModule = getByKeys<any>(["receiveMessage"], {firstId: 843472, cacheId: "core-commandmanager-messages"});
-    static IconsModule = getByKeys<any>(["BOT_AVATARS"], {firstId: 820883, cacheId: "core-commandmanager-icons"});
+    static User: any;
+    static createBotMessage: any;
+    static MessagesModule: any;
+    static IconsModule: any;
     static localBDBot: any;
+    static #initialized = false;
+    static #unpatch: Array<() => void> = [];
+    static #unavailableReason?: string;
+    static get isAvailable() {return this.#initialized;}
 
-    static initialize() {
-        this.#patchCommandSystem();
+    static initialize(): boolean {
+        if (this.#initialized) return true;
+        try {
+            // Discord can load these only after login. Never freeze an absent
+            // import-time result into the lifetime of the renderer module.
+            const User = getByStrings<any>(["hasHadPremium(){"], {firstId: 427157, cacheId: "core-commandmanager-user"});
+            const createBotMessage = getByStrings<any>(["username:\"Clyde\""], {searchExports: true, firstId: 963852, cacheId: "core-commandmanager-createBotMessage"});
+            const messages = getByKeys<any>(["receiveMessage"], {firstId: 843472, cacheId: "core-commandmanager-messages"});
+            const icons = getByKeys<any>(["BOT_AVATARS"], {firstId: 820883, cacheId: "core-commandmanager-icons"});
+            if (typeof User !== "function") throw new Error("User constructor unavailable");
+            // Test constructibility without invoking a discovered Discord class.
+            try {Reflect.construct(Function, [], User);}
+            catch {throw new Error("User export is not constructible");}
+            if (typeof createBotMessage !== "function") throw new Error("Bot message factory unavailable");
+            if (typeof messages?.receiveMessage !== "function") throw new Error("Local message receiver unavailable");
+            if (!icons?.BOT_AVATARS || typeof icons.BOT_AVATARS !== "object" || Array.isArray(icons.BOT_AVATARS)) throw new Error("Bot avatar registry unavailable");
+            this.User = User;
+            this.createBotMessage = createBotMessage;
+            this.MessagesModule = messages;
+            this.IconsModule = icons;
+            this.#patchCommandSystem();
+            this.#initialized = true;
+            this.#unavailableReason = undefined;
+            return true;
+        }
+        catch (error) {
+            for (const cancel of this.#unpatch.splice(0).reverse()) {
+                try {cancel();}
+                catch {Logger.warn("CommandManager", "A failed command adapter could not be fully detached.");}
+            }
+            this.localBDBot = undefined;
+            const reason = (error instanceof Error ? error.message : "Unknown command adapter failure").replace(/[\r\n]+/g, " ").slice(0, 160);
+            if (reason !== this.#unavailableReason) Logger.warn("CommandManager", `Optional command integration is unavailable: ${reason}. Initialization can be retried after Discord finishes loading.`);
+            this.#unavailableReason = reason;
+            return false;
+        }
+    }
+
+    static #trackPatch(cancel: (() => void) | null | undefined) {
+        if (typeof cancel !== "function") throw new Error("Command patch registration failed");
+        this.#unpatch.push(cancel);
+    }
+
+    static #requireMethod(module: any, key: string | undefined, label: string) {
+        if (!module || typeof key !== "string" || typeof module[key] !== "function") throw new Error(`${label} adapter unavailable`);
     }
 
     static #patchCommandSystem() {
@@ -155,8 +202,9 @@ class CommandManager {
 
     static #patchSidebarModule() {
         const SidebarModule = getByStrings<{A(p: {sections: any[];}): void;}>([".BUILT_IN?", "categoryListRef:"], {defaultExport: false});
+        this.#requireMethod(SidebarModule, "A", "Command sidebar");
 
-        Patcher.after("CommandManager", SidebarModule!, "A", (_, [props]: [{sections: any[];}], res: any) => {
+        this.#trackPatch(Patcher.after("CommandManager", SidebarModule!, "A", (_, [props]: [{sections: any[];}], res: any) => {
             if (!this.#sections.size) return;
 
             const child = res.props.children;
@@ -180,13 +228,14 @@ class CommandManager {
                 },
                 __bdPatched: true
             });
-        });
+        }));
     }
 
     static #patchIndexStore() {
         const [mod, key] = getWithKey(Filters.byStrings(".getScoreWithoutLoadingLatest"), {firstId: 264322, cacheId: "core-commandmanager-indexstore"});
+        this.#requireMethod(mod, key, "Command index");
 
-        Patcher.after("CommandManager", mod, key, (_, args: any, res: any) => {
+        this.#trackPatch(Patcher.after("CommandManager", mod, key, (_, args: any, res: any) => {
             if (!args[2].commandTypes.includes(CommandTypes.CHAT_INPUT)) return res;
 
             for (const sectionedCommand of res.sectionedCommands) {
@@ -209,13 +258,14 @@ class CommandManager {
                 }
             }
             return res;
-        });
+        }));
     }
 
     static #patchQuery() {
         const ApplicationCommandIndexStore = getStore("ApplicationCommandIndexStore")! as FluxStore & {query: (a: any, p: {text: string; commandTypes: any;}) => any;};
+        this.#requireMethod(ApplicationCommandIndexStore, "query", "Command query store");
 
-        Patcher.after("CommandManager", ApplicationCommandIndexStore, "query", (_, args: [any, {text: string; commandTypes: any;}], res: any) => {
+        this.#trackPatch(Patcher.after("CommandManager", ApplicationCommandIndexStore, "query", (_, args: [any, {text: string; commandTypes: any;}], res: any) => {
             if (!args[1].commandTypes.includes(CommandTypes.CHAT_INPUT)) return res;
 
             const text = args[1].text || "";
@@ -237,15 +287,16 @@ class CommandManager {
                     res.commands.unshift(...commands);
                 }
             }
-        });
+        }));
     }
 
     static #patchApplicationIcons() {
         const [mod, key] = getWithKey(Filters.byStrings(".type===", ".BUILT_IN?"), {
-            target: getModule((_, m) => modules[m.id].toString().includes("hasSpaceTerminator:"), {firstId: 826298, cacheId: "core-commandmanager-appIcons"})
+            target: getModule((_, m) => typeof modules[m.id] === "function" && modules[m.id].toString().includes("hasSpaceTerminator:"), {firstId: 826298, cacheId: "core-commandmanager-appIcons"})
         });
+        this.#requireMethod(mod, key, "Command application icons");
 
-        Patcher.after("CommandManager", mod as {[key: Extract<keyof typeof mod, string>]: (o: {id: string;}) => any;}, key as Extract<keyof typeof mod, string>, (_, [{id}]: [{id: string;}], res: any) => {
+        this.#trackPatch(Patcher.after("CommandManager", mod as {[key: Extract<keyof typeof mod, string>]: (o: {id: string;}) => any;}, key as Extract<keyof typeof mod, string>, (_, [{id}]: [{id: string;}], res: any) => {
             const getIconUrl = () => {
                 const metadataIcon = pluginmanager.resolveAddon(id)?.icon || pluginmanager.resolveAddon(id)?.instance?.icon || null;
                 const sectionIcon = this.#sections.has(id) ? this.#sections.get(id)?.icon : null;
@@ -309,7 +360,7 @@ class CommandManager {
             };
 
             return this.#sections.has(id) ? Logo : res;
-        });
+        }));
     }
 
     static #patchAuthorizer() {
@@ -317,8 +368,9 @@ class CommandManager {
             firstId: 972995,
             cacheId: "core-commandmanager-authorizer"
         });
+        this.#requireMethod(module, key, "Command authorizer");
 
-        Patcher.instead("CommandManager", module, key, (that, args: any, original) => {
+        this.#trackPatch(Patcher.instead("CommandManager", module, key, (that, args: any, original) => {
             if (this.#sections.has(args[0]?.applicationId)) {
                 return Promise.resolve({
                     isAuthorized: true
@@ -326,7 +378,7 @@ class CommandManager {
             }
 
             return original.apply(that, args);
-        });
+        }));
     }
 
     static registerCommand(caller: string, command: Command) {
@@ -435,6 +487,7 @@ class CommandManager {
     }
 
     static async sendBotMessage(result: any, {channel}: any) {
+        if (!this.#initialized && !this.initialize()) return;
         try {
             result = await result;
         }

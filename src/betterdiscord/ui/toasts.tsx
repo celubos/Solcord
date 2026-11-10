@@ -10,8 +10,6 @@ import clsx from "clsx";
 import type {Root} from "react-dom/client";
 import type {AnimatedProps} from "@react-spring/web";
 
-const ReactSpring = DiscordModules.ReactSpring;
-
 export type ToastType = "default" | "info" | "success" | "warning" | "error";
 
 export interface ToastProps {
@@ -31,6 +29,7 @@ interface ToastItemProps {
 }
 
 export function Toast({content, type, icon, style}: ToastItemProps) {
+    const ReactSpring = DiscordModules.ReactSpring;
     return (
         <ReactSpring.animated.div className={clsx("bd-toast", `toast-${type}`)} style={style}>
             {icon && <ToastIcon type={type} />}
@@ -40,6 +39,7 @@ export function Toast({content, type, icon, style}: ToastItemProps) {
 }
 
 export function ToastContainer() {
+    const ReactSpring = DiscordModules.ReactSpring;
     const toasts = useStateFromStores(ToastStore, () => ToastStore.toasts);
 
     const transition = ReactSpring.useTransition(toasts, {
@@ -60,13 +60,22 @@ export function ToastContainer() {
 }
 
 export default class Toasts {
-    static root: Root;
+    static root?: Root;
 
-    static initialize() {
+    static initialize(): boolean {
+        if (this.root) return true;
+        const spring = DiscordModules.ReactSpring;
+        if (typeof ReactDOM.createRoot !== "function" || typeof spring?.useTransition !== "function" || !spring.animated?.div) return false;
         const container = document.createElement("div");
         container.id = "bd-toasts";
         DOMManager.bdBody.appendChild(container);
-        Toasts.root = ReactDOM.createRoot(container);
-        Toasts.root.render(React.createElement(ToastContainer));
+        try {
+            const root = ReactDOM.createRoot(container);
+            try {root.render(React.createElement(ToastContainer));}
+            catch (error) {root.unmount(); throw error;}
+            this.root = root;
+            return true;
+        }
+        catch (error) {container.remove(); throw error;}
     }
 }

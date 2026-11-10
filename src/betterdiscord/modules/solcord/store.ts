@@ -8,7 +8,7 @@ import {isSolcordBuiltInAddon} from "@common/solcord/builtin-addons";
 import {recommendedSolcordSetupAddons, resolveSolcordSetupPlan, SOLCORD_RECOMMENDED_SETUP_ADDONS} from "@common/solcord/setup-catalog";
 import {normalizeSolcordProductPreferences} from "@common/solcord/product";
 import {SOLCORD_PRODUCT_IDENTITY} from "@common/solcord/product-identity";
-import {legacyPrivacyPreferences} from "@common/solcord/privacy";
+import {defaultStrictPrivacyPreferences} from "@common/solcord/privacy";
 
 import type {
     SolcordAddonMode,
@@ -89,6 +89,14 @@ export const MODULE_DEFAULTS: Record<SolcordModuleId, SolcordModuleSettings> = {
 
 function clone<T>(value: T): T {
     return structuredClone(value);
+}
+
+function freezeSettingsSnapshot<T>(value: T): T {
+    if (value && typeof value === "object") {
+        for (const child of Object.values(value)) freezeSettingsSnapshot(child);
+        Object.freeze(value);
+    }
+    return value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -477,7 +485,9 @@ export function normalizeSolcordDocument(raw: unknown): SolcordSettingsDocument 
 
     const productPreferences = normalizeSolcordProductPreferences(record.productPreferences);
     if (rawSchemaVersion < 4) productPreferences.safety.linkLens = false;
-    if (hasPersistedState && rawSchemaVersion < 7) productPreferences.privacy = legacyPrivacyPreferences();
+    if (hasPersistedState && rawSchemaVersion < 7 && productPreferences.privacy.migratedAt === undefined) {
+        productPreferences.privacy = {...defaultStrictPrivacyPreferences(), migrationPending: true};
+    }
     reconcileModulePreferenceBindings(modules, productPreferences, rawSchemaVersion < 5 ? "preferences" : "modules");
 
     return {
@@ -730,6 +740,12 @@ export function applyModulePreferenceBindings(document: SolcordSettingsDocument)
 
 class SolcordStore extends Store {
     #document = normalizeSolcordDocument(undefined);
+    #slices = new Map<keyof SolcordSettingsDocument, unknown>();
+    #documentView?: SolcordSettingsDocument;
+    #deferred: Array<{mutate: () => unknown; resolve: (value: unknown) => void; reject: (error: unknown) => void;}> = [];
+    #deferredScheduled = false;
+    #collectingDeferred = false;
+    #asyncWriteBusy = false;
 
     initialize(): void {
         let raw: unknown;
@@ -748,6 +764,86 @@ class SolcordStore extends Store {
 
     snapshot(): SolcordSettingsDocument {
         return clone(this.#document);
+    }
+
+    readonlySnapshot(): SolcordSettingsDocument {
+        return this.#documentView ??= freezeSettingsSnapshot(clone(this.#document));
+    }
+
+    setValueAsync(id: SolcordModuleId, key: string, value: unknown): Promise<void> {
+        return this.#defer(() => this.setValue(id, key, value));
+    }
+
+    setProductPreferencesAsync(value: unknown): Promise<SolcordSnapshot | undefined> {
+        return this.#defer(() => this.setProductPreferences(value));
+    }
+
+    setTimelinePolicyAsync(value: unknown): Promise<void> {
+        return this.#defer(() => this.setTimelinePolicy(value));
+    }
+
+    #defer<T>(mutate: () => T): Promise<T> {
+        const result = new Promise<T>((resolve, reject) => this.#deferred.push({mutate, resolve: value => resolve(value as T), reject}));
+        this.#scheduleDeferred();
+        return result;
+    }
+
+    #scheduleDeferred(): void {
+        if (this.#deferredScheduled || this.#asyncWriteBusy || !this.#deferred.length) return;
+        this.#deferredScheduled = true;
+        setTimeout(() => {this.#deferredScheduled = false; void this.#flushDeferred();}, 0);
+    }
+
+    async #flushDeferred(): Promise<void> {
+        if (this.#asyncWriteBusy || !this.#deferred.length) return;
+        const batch = this.#deferred.splice(0);
+        const results: unknown[] = [];
+        let before: SolcordSettingsDocument | undefined;
+        let temporary: string | undefined;
+        let staged = false;
+        this.#asyncWriteBusy = true;
+        try {
+            before = clone(this.#document);
+            const target = this.#filePath();
+            temporary = `${target}.${crypto.randomBytes(12).toString("hex")}.tmp`;
+            const ownedStage = temporary;
+            this.#collectingDeferred = true;
+            try {for (const entry of batch) results.push(entry.mutate());}
+            finally {this.#collectingDeferred = false;}
+            // One serialization and atomic write acknowledge the whole revision.
+            // No renderer-thread filesystem operation is used on this path.
+            await new Promise<void>((resolve, reject) => fs.mkdir(path.dirname(target), {recursive: true}, error => error ? reject(error) : resolve()));
+            const serialized = `${JSON.stringify(this.#document)}\n`;
+            await new Promise<void>((resolve, reject) => fs.writeFile(ownedStage, serialized, {flag: "wx", originalFs: false}, error => error ? reject(error) : resolve()));
+            staged = true;
+            await new Promise<void>((resolve, reject) => fs.rename(ownedStage, target, error => error ? reject(error) : resolve()));
+            this.#slices.clear();
+            this.#documentView = undefined;
+            for (const [index, entry] of batch.entries()) entry.resolve(results[index]);
+            try {this.emitChange();}
+            catch {/* The revision is durable; an observer cannot roll it back. */}
+        }
+        catch (error) {
+            if (before) this.#document = before;
+            this.#slices.clear();
+            this.#documentView = undefined;
+            // A failed exclusive open may refer to an existing file we do not
+            // own. Remove only a stage whose creation/write was acknowledged.
+            if (staged && temporary) {
+                const ownedStage = temporary;
+                await new Promise<void>(resolve => fs.unlink(ownedStage, () => resolve()));
+            }
+            for (const entry of batch) entry.reject(error);
+        }
+        finally {this.#asyncWriteBusy = false; this.#scheduleDeferred();}
+    }
+
+    /** Stable immutable selector snapshots. Full mutable exports still use snapshot(). */
+    slice<K extends keyof SolcordSettingsDocument>(key: K): SolcordSettingsDocument[K] {
+        if (!this.#slices.has(key)) {
+            this.#slices.set(key, freezeSettingsSnapshot(clone(this.#document[key])));
+        }
+        return this.#slices.get(key) as SolcordSettingsDocument[K];
     }
 
     module(id: SolcordModuleId): SolcordModuleSettings {
@@ -1060,6 +1156,10 @@ class SolcordStore extends Store {
     }
 
     #commit<T>(mutate: () => T): T {
+        if (this.#collectingDeferred) return mutate();
+        // Critical synchronous setup/recovery transactions must never race an
+        // async rename and overwrite a newer acknowledged revision.
+        if (this.#asyncWriteBusy) throw new Error("A settings revision is being saved. Retry after it finishes.");
         const before = clone(this.#document);
         try {
             const result = mutate();
@@ -1077,7 +1177,7 @@ class SolcordStore extends Store {
         const temporary = `${target}.${Date.now().toString(36)}.tmp`;
         fs.mkdirSync(path.dirname(target), {recursive: true});
         try {
-            fs.writeFileSync(temporary, `${JSON.stringify(clone(this.#document), null, 4)}\n`);
+            fs.writeFileSync(temporary, `${JSON.stringify(this.#document)}\n`);
             fs.renameSync(temporary, target);
         }
         catch (error) {
@@ -1087,6 +1187,8 @@ class SolcordStore extends Store {
             catch {/* cleanup already best-effort */}
             throw error;
         }
+        this.#slices.clear();
+        this.#documentView = undefined;
         try {this.emitChange();}
         catch {/* settings are already durable; isolate observer failures */}
     }

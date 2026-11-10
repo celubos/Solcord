@@ -2,9 +2,6 @@ import clsx from "clsx";
 import React, {type MouseEvent} from "react";
 import DiscordModules from "@modules/discordmodules";
 
-const Spring = DiscordModules.ReactSpring;
-
-
 export interface BackdropProps {
     isVisible: boolean;
     className?: string;
@@ -12,6 +9,14 @@ export interface BackdropProps {
 }
 
 export default function Backdrop({isVisible, className, onClick}: BackdropProps) {
+    const Spring = DiscordModules.ReactSpring;
+    if (typeof Spring?.useTransition !== "function" || !Spring.animated?.div) {
+        return isVisible ? <div className={clsx("bd-modal-backdrop", className)} style={{opacity: 0.85, background: "var(--black-500, #000)"}} onClick={onClick} /> : null;
+    }
+    return <AnimatedBackdrop Spring={Spring} isVisible={isVisible} className={className} onClick={onClick} />;
+}
+
+function AnimatedBackdrop({Spring, isVisible, className, onClick}: BackdropProps & {Spring: NonNullable<typeof DiscordModules.ReactSpring>;}) {
     const transition = Spring.useTransition(isVisible, {
         keys: e => e ? "backdrop" : "empty",
         config: {duration: 300},

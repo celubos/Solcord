@@ -41,17 +41,20 @@ export default class Modals {
     static get hasModalOpen() {return !!document.getElementsByClassName("bd-modal").length;}
     static get ModalQueue() {return queue;}
 
-    static _ModalActions: ModalActions;
-    static get ModalActions() {
+    static _ModalActions: ModalActions | undefined;
+    static get ModalActions(): ModalActions | undefined {
         // currently the module is unmangled, but keeping this incase it gets mangled again
-        return this._ModalActions ??= getMangled("?.stackNextByDefault", {
+        if (this._ModalActions) return this._ModalActions;
+        const actions = getMangled("?.stackNextByDefault", {
             openModal: Filters.byStrings("?.stackNextByDefault"),
             closeModal: Filters.byStrings(".setState", ".getState()["),
             closeAllModals: Filters.byStrings(".getState();for")
         }, {
             firstId: 192308,
             cacheId: "betterdiscord-modals"
-        }) as ModalActions;
+        }) as Partial<ModalActions>;
+        if (typeof actions?.openModal !== "function" || typeof actions.closeModal !== "function" || typeof actions.closeAllModals !== "function") return;
+        return this._ModalActions = actions as ModalActions;
     }
 
     static default(title: string, content: string | ReactElement | readonly ReactElement[] | HTMLElement | ReadonlyArray<string | ReactElement>, buttons: Array<{danger?: boolean; label: string; action: (e?: MouseEvent) => void;}> = []) {
@@ -175,7 +178,7 @@ export default class Modals {
             return React.createElement(ErrorBoundary, {
                 onError: () => {
                     setTimeout(() => {
-                        this.ModalActions.closeModal(modalKey);
+                        this.ModalActions?.closeModal(modalKey);
                         this.default(title, contentArray, [
                             confirmText && {label: confirmText, action: onConfirm},
                             cancelText && {label: cancelText, action: onCancel, danger}
@@ -217,7 +220,7 @@ export default class Modals {
             size = Root.Sizes.SMALL
         } = options;
 
-        let actions: ModalActions;
+        let actions: ModalActions | undefined;
         try {actions = this.ModalActions;}
         catch {return;}
         if (typeof actions?.openModal !== "function" || typeof actions.closeModal !== "function") return;
@@ -268,7 +271,7 @@ export default class Modals {
         if (this.addonErrorsOpen) return;
         this.addonErrorsOpen = true;
 
-        this.ModalActions.openModal((props: any) => {
+        this.openModal((props: any) => {
             return React.createElement(
                 ErrorBoundary,
                 {id: "showAddonErrors", name: "Modals"},
@@ -370,23 +373,57 @@ export default class Modals {
     }
 
     static hasInitialized = false;
+    static stackReady = false;
+    static pendingModals: Array<{render: (props?: unknown) => ReactNode; options: {modalKey?: string | number; onClose?(): void;};}> = [];
     static makeStack() {
+        if (this.hasInitialized) return;
         const div = DOMManager.parseHTML(`<div id="bd-modal-container">`) as HTMLElement;
-        DOMManager.bdBody.append(div);
-        const root = ReactDOM.createRoot(div);
-        root.render(
-            [React.createElement(ErrorBoundary, {id: "makeStack", name: "Modals", hideError: true}, React.createElement(ModalStack))]
-        );
-        this.hasInitialized = true;
+        let root: ReturnType<typeof ReactDOM.createRoot> | undefined;
+        let renderFailure: Error | undefined;
+        let cleaned = false;
+        const cleanup = () => {
+            if (cleaned) return;
+            cleaned = true;
+            this.stackReady = false;
+            this.hasInitialized = false;
+            this.pendingModals.length = 0;
+            try {root?.unmount();}
+            catch {/* Preserve the original rendering failure. */}
+            finally {div.remove();}
+        };
+        try {
+            if (typeof ReactDOM.createRoot !== "function" || typeof ReactDOM.flushSync !== "function") throw new Error("Local modal renderer is not ready.");
+            DOMManager.bdBody.append(div);
+            root = ReactDOM.createRoot(div);
+            this.hasInitialized = true;
+            ReactDOM.flushSync(() => root!.render(
+                React.createElement(ErrorBoundary, {id: "makeStack",
+name: "Modals",
+hideError: true,
+onError: error => {
+                    renderFailure = error;
+                    queueMicrotask(cleanup);
+                }}, React.createElement(ModalStack, {onReady: () => {
+                    this.stackReady = true;
+                    for (const pending of this.pendingModals.splice(0)) Events.emit("open-modal", pending.render, pending.options);
+                }}))
+            ));
+            if (renderFailure) throw renderFailure;
+            if (!this.stackReady) throw new Error("Local modal stack did not become ready.");
+        }
+        catch (error) {
+            cleanup();
+            throw error;
+        }
     }
 
-    static openModal(render: (props?: unknown) => ReactNode, options: {modalKey?: string | number;} = {}) {
-        if (typeof (this.ModalActions.openModal) === "function") return this.ModalActions.openModal(render);
+    static openModal(render: (props?: unknown) => ReactNode, options: {modalKey?: string | number; onClose?(): void; onCloseCallback?(): void;} = {}) {
+        const actions = this.ModalActions;
+        if (actions) return actions.openModal(render, options);
+        const localOptions = {...options, onClose: options.onClose ?? options.onCloseCallback, modalKey: generateKey(options.modalKey)};
+        if (this.stackReady) Events.emit("open-modal", render, localOptions);
+        else this.pendingModals.push({render, options: localOptions});
         if (!this.hasInitialized) this.makeStack();
-        options.modalKey = generateKey(options.modalKey);
-        Events.emit("open-modal", render, options);
-        return options.modalKey;
+        return localOptions.modalKey;
     }
 }
-
-Modals.makeStack();

@@ -9,6 +9,9 @@ import {isSolcordAcceptanceMode} from "@common/solcord/acceptance-mode";
 import ActivityCompatibility from "./activity-compatibility";
 import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
 import {RendererDocumentInjectionGuard} from "./renderer-document-guard";
+import {normalizeClientModCompatibilityConfig, type ClientModCompatibilityConfig} from "./client-mod-config";
+import {isTrustedSolcordIpcUrl} from "./solcord-ipc-authority";
+import {RendererStartupWatchdog, rendererStartupFailureScript} from "./renderer-startup-health";
 
 // Build info file only exists for non-linux (for current injection)
 const appPath = electron.app.getAppPath();
@@ -29,6 +32,8 @@ export default class BetterDiscord {
     static _settings: Record<string, Record<string, any>>;
     private static initializedWindows = new WeakSet<BrowserWindow>();
     private static rendererDocuments = new RendererDocumentInjectionGuard<Electron.WebContents>();
+    private static rendererHealth = new RendererStartupWatchdog<Electron.WebContents>();
+    private static startupPrerequisiteFailure = false;
     private static protocolListenersRegistered = false;
 
     static getDiscordTrustRoot(): string {
@@ -54,7 +59,7 @@ export default class BetterDiscord {
     }
 
     static clientModCompatibility = class ClientModCompatibility {
-        private static _settings: Record<string, any> | undefined = undefined;
+        private static _settings: ClientModCompatibilityConfig | undefined = undefined;
 
         private static getJSON() {
             if (this._settings) return this._settings;
@@ -64,10 +69,10 @@ export default class BetterDiscord {
                 const buildInfo = require(buildInfoFile);
                 const settingsFile = path.resolve(bdFolder, "data", buildInfo.releaseChannel, "clientModCompatibility.json");
 
-                return this._settings = JSON.parse(fs.readFileSync(settingsFile, "utf-8"));
+                return this._settings = normalizeClientModCompatibilityConfig(JSON.parse(fs.readFileSync(settingsFile, "utf-8")));
             }
             catch {
-                return this._settings = {};
+                return this._settings = normalizeClientModCompatibilityConfig(undefined);
             }
         }
 
@@ -96,21 +101,29 @@ export default class BetterDiscord {
         }
 
         public static setAllowPreloadOverride(allowPreloadOverride: boolean = false) {
-            this.getJSON().allowPreloadOverride = allowPreloadOverride;
+            this.getJSON().allowPreloadOverride = allowPreloadOverride === true;
             this.writeJSON();
         }
     };
 
     static ensureDirectories() {
-        const dataFolder = path.join(bdFolder, "data");
-        if (!fs.existsSync(bdFolder)) fs.mkdirSync(bdFolder);
-        if (!fs.existsSync(dataFolder)) fs.mkdirSync(dataFolder);
-        if (!fs.existsSync(path.join(dataFolder, "stable"))) fs.mkdirSync(path.join(dataFolder, "stable"));
-        if (!fs.existsSync(path.join(dataFolder, "canary"))) fs.mkdirSync(path.join(dataFolder, "canary"));
-        if (!fs.existsSync(path.join(dataFolder, "ptb"))) fs.mkdirSync(path.join(dataFolder, "ptb"));
-        if (!fs.existsSync(path.join(dataFolder, "development"))) fs.mkdirSync(path.join(dataFolder, "development"));
-        if (!fs.existsSync(path.join(bdFolder, "plugins"))) fs.mkdirSync(path.join(bdFolder, "plugins"));
-        if (!fs.existsSync(path.join(bdFolder, "themes"))) fs.mkdirSync(path.join(bdFolder, "themes"));
+        try {
+            const dataFolder = path.join(bdFolder, "data");
+            for (const directory of [bdFolder, dataFolder, ...["stable", "canary", "ptb", "development"].map(channel => path.join(dataFolder, channel)), path.join(bdFolder, "plugins"), path.join(bdFolder, "themes")]) {
+                fs.mkdirSync(directory, {recursive: true});
+                if (!fs.statSync(directory).isDirectory()) throw new TypeError("Solcord storage directory is unavailable.");
+            }
+            this.startupPrerequisiteFailure = false;
+            return true;
+        }
+        catch (error) {
+            // Do not strand the original Discord startup or activate addons
+            // without their required storage. The native strict guard remains.
+            this.startupPrerequisiteFailure = true;
+            // eslint-disable-next-line no-console
+            console.error(`[Solcord] Storage prerequisites unavailable (${error instanceof Error ? error.name : typeof error}); addon activation is disabled until repair.`);
+            return false;
+        }
     }
 
     static async injectRenderer(browserWindow: BrowserWindow, frame: WebFrameMain) {
@@ -137,10 +150,19 @@ export default class BetterDiscord {
             throw new Error("Solcord renderer frame could not be validated.");
         }
 
+        if (this.startupPrerequisiteFailure) {
+            this.rendererDocuments.fail(webContents, documentToken);
+            this.rendererHealth.cancel(webContents);
+            await frame.executeJavaScript(rendererStartupFailureScript());
+            return;
+        }
+
         const location = path.join(__dirname, "solcord.js");
         if (!fs.existsSync(location)) {
             this.rendererDocuments.fail(webContents, documentToken);
-            return; // TODO: cut a fatal log
+            this.rendererHealth.cancel(webContents);
+            await frame.executeJavaScript(rendererStartupFailureScript());
+            throw new Error("Solcord renderer bundle is missing; repair the installation.");
         }
         const content = fs.readFileSync(location).toString();
         let success = false;
@@ -151,7 +173,8 @@ export default class BetterDiscord {
                         ${content}
                         return true;
                     } catch(error) {
-                        console.error(error);
+                        console.error("[Solcord] Renderer initialization failed", error);
+                        ${rendererStartupFailureScript()}
                         return false;
                     }
                 })();
@@ -165,9 +188,11 @@ export default class BetterDiscord {
 
         if (!success) {
             this.rendererDocuments.fail(webContents, documentToken);
-            return; // TODO: cut a fatal log
+            this.rendererHealth.cancel(webContents);
+            return;
         }
         if (!this.rendererDocuments.complete(webContents, documentToken)) return;
+        this.rendererHealth.cancel(webContents);
         // @ts-expect-error Solcord adds an internal non-enumerable window token.
         ActivityCompatibility.injection(browserWindow.__solcordWindowToken);
     }
@@ -192,11 +217,25 @@ export default class BetterDiscord {
         if (this.initializedWindows.has(browserWindow)) return;
         this.initializedWindows.add(browserWindow);
         const rendererOwner = browserWindow.webContents;
-        const beginRendererDocument = () => this.rendererDocuments.beginDocument(rendererOwner);
+        const beginRendererDocument = (_event: Electron.Event, url: string) => {
+            this.rendererDocuments.beginDocument(rendererOwner);
+            this.rendererHealth.cancel(rendererOwner);
+            if (!isTrustedSolcordIpcUrl(url)) return;
+            this.rendererHealth.begin(rendererOwner, () => {
+                try {
+                    if (rendererOwner.isDestroyed() || !isTrustedSolcordIpcUrl(rendererOwner.getURL())) return;
+                    void rendererOwner.mainFrame.executeJavaScript(rendererStartupFailureScript()).catch(() => {
+                        // A replaced document owns its next timer.
+                    });
+                }
+                catch {/* Native objects can be destroyed synchronously during navigation. */}
+            });
+        };
         rendererOwner.on("did-navigate", beginRendererDocument);
         browserWindow.once("closed", () => {
             rendererOwner.off("did-navigate", beginRendererDocument);
             this.rendererDocuments.release(rendererOwner);
+            this.rendererHealth.cancel(rendererOwner);
         });
 
         // Setup some useful vars to avoid blocking IPC calls
@@ -299,7 +338,10 @@ export default class BetterDiscord {
     static disableMediaKeys() {
         if (!BetterDiscord.getSetting("general", "mediaKeys")) return;
         const originalDisable = electron.app.commandLine.getSwitchValue("disable-features") || "";
-        electron.app.commandLine.appendSwitch("disable-features", `${originalDisable ? "," : ""}HardwareMediaKeyHandling,MediaSessionService`);
+        const features = new Set(originalDisable.split(",").map(feature => feature.trim()).filter(Boolean));
+        features.add("HardwareMediaKeyHandling");
+        features.add("MediaSessionService");
+        electron.app.commandLine.appendSwitch("disable-features", [...features].join(","));
     }
 }
 

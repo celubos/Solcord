@@ -5,6 +5,7 @@ import {getAllModules, webpackRequire} from "@webpack";
 import Patcher from "./patcher";
 
 import type Monaco from "monaco-editor";
+import {createLocalMonacoWorker} from "@common/monaco-worker";
 
 // List of all global classNames (from the app helmet stuff)
 const knownGlobalClasses = [
@@ -59,29 +60,26 @@ interface BrowserClipboardServiceType {
     };
 }
 
-export default new class Editor {
+export class Editor {
     initPromise: Promise<void> | null = null;
     failedToLoad = false;
 
     async initialize() {
         if (this.initPromise) return this.initPromise;
 
-        this.initPromise = this.loadMonaco();
+        this.failedToLoad = false;
+        this.initPromise = this.loadMonaco().finally(() => {if (this.failedToLoad) this.initPromise = null;});
         return this.initPromise;
     }
 
     async loadMonaco() {
         Logger.log("Editor", "Loading Monaco Editor");
-        const baseUrl = `https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/${process.env.__MONACO_VERSION__}/min`;
+        const baseUrl = "solcord://editor/monaco";
 
         Object.defineProperty(window, "MonacoEnvironment", {
+            configurable: true,
             value: {
-                getWorker: (workerId, label) => new Worker(`data:text/javascript;charset=utf-8,${encodeURIComponent(`
-                    self.MonacoEnvironment = {
-                        baseUrl: '${baseUrl}'
-                    };
-                    importScripts('${baseUrl}/vs/base/worker/${workerId}');`
-                )}`, {type: "classic", name: label})
+                getWorker: createLocalMonacoWorker
             } as typeof window.MonacoEnvironment
         });
 
@@ -89,22 +87,22 @@ export default new class Editor {
         // @ts-expect-error Ts thinks this is bad
         delete window.module; // Make monaco think this isn't a local node script or else it freaks out
 
-        DOMManager.linkStyle("monaco-style", `${baseUrl}/vs/editor/editor.main.min.css`, {documentHead: true});
+        DOMManager.linkStyle("monaco-style", `${baseUrl}/vs/editor/editor.main.css`, {documentHead: true});
 
         try {
-            // For some reason only version 0.20.0 of this works here
-            await DOMManager.injectScript("monaco-script", "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.20.0/min/vs/loader.min.js");
+            await this.withDeadline(DOMManager.injectScript("monaco-script", `${baseUrl}/vs/loader.js`));
 
-            const amdLoader = window.require as unknown as ((modulesIds: string[], callback: (...modules: any[]) => void) => void) & {
+            const amdLoader = window.require as unknown as ((modulesIds: string[], callback: (...modules: any[]) => void, error?: (error: Error) => void) => void) & {
                 config: (config: any) => void;
             }; // Grab Monaco's amd loader
             window.require = commonjsLoader; // Revert to commonjs
 
             // Configure Monaco's AMD loader
             amdLoader.config({paths: {vs: `${baseUrl}/vs`}});
-            const monaco = await new Promise<typeof Monaco>((res) => {
-                amdLoader(["vs/editor/editor.main"], res);
-            });
+            const monaco = await this.withDeadline(new Promise<typeof Monaco>((resolve, reject) => {
+                amdLoader(["vs/editor/editor.main"], resolve, reject);
+            }));
+            window.monaco = monaco;
             const seenIds: Record<PropertyKey, boolean> = {};
             let size = 0;
 
@@ -203,6 +201,16 @@ export default new class Editor {
         finally {
             // Revert the global require to CommonJS
             window.require = commonjsLoader;
+            DOMManager.removeScript("monaco-script");
         }
     }
-};
+
+    private withDeadline<T>(promise: Promise<T>, timeoutMs = 10_000): Promise<T> {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error("Local editor load timed out.")), timeoutMs);
+            promise.then(resolve, reject).finally(() => clearTimeout(timer));
+        });
+    }
+}
+
+export default new Editor();

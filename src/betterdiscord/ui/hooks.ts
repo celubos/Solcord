@@ -12,6 +12,10 @@ export function useStateFromStores<T>(stores: StoreType | StoreType[], factory: 
 
     const compareStates = useRef(null as unknown as (oldState: T, newState: T) => boolean);
     compareStates.current = isStateEqual === true ? shallowEqual : isStateEqual;
+    const currentStores = Array.isArray(stores) ? stores : [stores];
+    const storesRef = useRef(currentStores);
+    const storesChanged = storesRef.current.length !== currentStores.length || storesRef.current.some((store, index) => store !== currentStores[index]);
+    if (storesChanged) storesRef.current = currentStores;
 
     if (factoryRef.current === undefined) {
         factoryRef.current = factory;
@@ -43,12 +47,19 @@ export function useStateFromStores<T>(stores: StoreType | StoreType[], factory: 
     else {
         // If no deps update factory always
         factoryRef.current = factory;
+        const newState = factory();
+        if (!compareStates.current(state.current, newState)) state.current = newState;
     }
 
     prevDeps.current = deps;
 
+    if (storesChanged) {
+        factoryRef.current = factory;
+        const newState = factory();
+        if (!compareStates.current(state.current, newState)) state.current = newState;
+    }
+    const $stores = storesRef.current;
     useInsertionEffect(() => {
-        const $stores = Array.isArray(stores) ? stores : [stores];
         function listener() {
             const newState = factoryRef.current();
             if (!compareStates.current(state.current, newState)) {
@@ -66,7 +77,7 @@ export function useStateFromStores<T>(stores: StoreType | StoreType[], factory: 
                 store.removeChangeListener(listener);
             }
         };
-    }, []);
+    }, [$stores]);
 
     return state.current;
 }

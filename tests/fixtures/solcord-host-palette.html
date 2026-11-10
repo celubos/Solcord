@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en" data-solcord-mode="follow-discord" data-solcord-accent="system">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Solcord host palette compatibility</title>
+    <style>
+        html, body { margin: 0; min-height: 100%; }
+        body { color: #111111; background: var(--host-background); font: 14px Arial, sans-serif; --font-primary: Arial, sans-serif; }
+        button, input, select { font: inherit; }
+        .solcord-control-center-dialog { display: flex; flex-direction: column; margin: 40px auto; }
+    </style>
+    <link rel="stylesheet" href="../../src/betterdiscord/styles/solcord.css">
+</head>
+<body>
+    <div role="dialog" aria-label="Solcord Control Center" class="solcord-control-center-dialog">
+        <header class="solcord-control-center-dialog-header"><h2 data-measure="dialog-title">Solcord Control Center</h2><button data-measure="close" type="button">Close</button></header>
+        <div class="solcord-control-center-dialog-content">
+            <main class="solcord-panel solcord-density-comfortable">
+                <header class="solcord-header"><div class="solcord-mark" aria-hidden="true"><img src="../../assets/branding/solcord-mark.svg" alt=""></div><div class="solcord-header-copy"><h1 data-measure="product-title">Solcord</h1><p>Control Center</p></div></header>
+                <div class="solcord-control-center">
+                    <nav class="solcord-workspace-nav" aria-label="Solcord settings"><label class="solcord-workspace-search"><input data-measure="search" type="search" aria-label="Find a setting" value="Find a setting"></label><div class="solcord-workspace-nav-list"><section><p data-measure="group-label">Start</p><button data-measure="selected-navigation" type="button" aria-current="page"><strong>Overview</strong></button></section><section><p>Personalize</p><button data-measure="navigation" type="button"><strong>Appearance &amp; Accessibility</strong></button></section></div></nav>
+                    <div class="solcord-workspace">
+                        <header class="solcord-workspace-heading"><h2 data-measure="workspace-title" tabindex="-1">Overview</h2><p data-measure="description">Current state and the next useful action.</p></header>
+                        <div class="solcord-wizard"><header class="solcord-wizard-title"><div><h2 data-measure="setup-title">First Setup</h2><p data-measure="setup-description">Five quick steps. Nothing changes until Apply.</p></div></header><ol class="solcord-wizard-steps"><li><button data-measure="current-step" type="button" aria-current="step">Welcome</button></li><li><button data-measure="next-step" type="button">Privacy</button></li></ol><div class="solcord-wizard-body"><h3 data-measure="section-title">Welcome</h3><p data-measure="body-copy">Choose the tools you want. Your settings remain local.</p><div class="solcord-actions"><button class="solcord-action solcord-action-accent" data-measure="primary-action" type="button">Continue</button></div></div></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+    <script>
+        (async () => {
+            try {
+                const params = new URLSearchParams(location.search);
+                const tokens = params.get("tokens") || "modern";
+                const light = params.get("host") === "light";
+                const mode = params.get("mode") || "follow-discord";
+                document.documentElement.dataset.solcordMode = mode;
+                const colors = light ? {base: "#ffffff", raised: "#f2f3f5", input: "#e3e5e8", text: "#313338", strong: "#060607", muted: "#4e5058", hover: "rgb(0 0 0 / 6%)"} : {base: "#323339", raised: "#2b2d31", input: "#1e1f22", text: "#dbdee1", strong: "#f2f3f5", muted: "#b5bac1", hover: "rgb(255 255 255 / 6%)"};
+                const values = {"--host-background": colors.base, "--text-muted": colors.muted, "--border-subtle": light ? "#c8ccd1" : "#555963", "--brand-500": "#5865f2", "--button-filled-brand-background": "#5865f2", "--button-filled-brand-text": "#ffffff"};
+                Object.assign(values, tokens === "modern" ? {
+                    "--text-default": colors.text, "--text-strong": colors.strong,
+                    "--background-base-low": colors.base, "--background-surface-high": colors.raised, "--background-surface-higher": colors.input,
+                    "--interactive-text-default": colors.text, "--interactive-text-hover": colors.strong, "--interactive-text-active": colors.strong,
+                    "--interactive-background-hover": colors.hover, "--interactive-background-active": colors.hover, "--input-background-default": colors.input
+                } : {
+                    "--text-normal": colors.text, "--header-primary": colors.strong,
+                    "--background-primary": colors.base, "--background-secondary": colors.raised, "--background-tertiary": colors.input,
+                    "--interactive-normal": colors.text, "--interactive-hover": colors.strong, "--interactive-active": colors.strong,
+                    "--background-modifier-hover": colors.hover, "--background-modifier-active": colors.hover, "--input-background": colors.input
+                });
+                const hostStyle = document.createElement("style");
+                hostStyle.textContent = `html { color-scheme: ${light ? "light" : "dark"}; } body { ${Object.entries(values).map(([name, value]) => `${name}:${value};`).join(" ")} }`;
+                document.head.appendChild(hostStyle);
+                await document.fonts.ready;
+                await new Promise(resolve => setTimeout(resolve, 0));
+                const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1;
+                const context = canvas.getContext("2d", {willReadFrequently: true});
+                const rgba = color => {context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); const pixel = context.getImageData(0, 0, 1, 1).data; return [pixel[0], pixel[1], pixel[2], pixel[3] / 255];};
+                const blend = (front, back) => front.slice(0, 3).map((value, index) => value * front[3] + back[index] * (1 - front[3]));
+                const background = element => {const layers = []; for (let node = element; node; node = node.parentElement) layers.unshift(rgba(getComputedStyle(node).backgroundColor)); return layers.reduce((back, front) => blend(front, back), [255, 255, 255]);};
+                const luminance = rgb => rgb.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+                const readings = [...document.querySelectorAll("[data-measure]")].map(element => {
+                    const style = getComputedStyle(element); const surface = background(element); const ink = blend(rgba(style.color), surface);
+                    const lightness = [luminance(ink), luminance(surface)].sort((a, b) => a - b);
+                    return {target: element.dataset.measure, color: style.color, surface: surface.map(Math.round), contrast: Number(((lightness[1] + 0.05) / (lightness[0] + 0.05)).toFixed(2)), visible: element.getClientRects().length > 0};
+                });
+                const dialog = document.querySelector(".solcord-control-center-dialog"); const panel = document.querySelector(".solcord-panel");
+                const geometry = {dialogOverflow: dialog.scrollWidth - dialog.clientWidth, panelOverflow: panel.scrollWidth - panel.clientWidth, documentOverflow: document.documentElement.scrollWidth - innerWidth};
+                const opaque = {dialog: rgba(getComputedStyle(dialog).backgroundColor)[3] === 1, panel: rgba(getComputedStyle(panel).backgroundColor)[3] === 1};
+                const result = {tokens, host: light ? "light" : "dark", mode, readings, geometry, opaque, pass: readings.every(item => item.visible && item.contrast >= 4.5) && Object.values(geometry).every(value => value <= 1) && opaque.dialog && opaque.panel};
+                document.documentElement.dataset.fixtureResult = btoa(JSON.stringify(result));
+            }
+            catch (error) {document.documentElement.dataset.fixtureError = btoa(String(error?.stack || error));}
+        })();
+    </script>
+</body>
+</html>

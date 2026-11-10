@@ -9,6 +9,7 @@ import {runInNewContext} from "vm";
 import asar from "@electron/asar";
 import {afterEach, beforeEach, describe, expect, test} from "bun:test";
 import {finishSolcordAsar} from "../../scripts/helpers/finish-asar";
+import {solcordLocalAssets} from "../../scripts/helpers/local-assets";
 
 import {
     createDisposableAcceptanceManifest,
@@ -60,6 +61,7 @@ function executeShim(environment: Record<string, string>, dirname: string): {
     let buildInfo: Record<string, unknown> | null = null;
     let userData: string | null = null;
     const app = {
+        on(_event: string, _listener: (...args: unknown[]) => void) {},
         setPath(name: string, value: string) {
             if (name === "userData") userData = value;
         },
@@ -69,6 +71,7 @@ function executeShim(environment: Record<string, string>, dirname: string): {
         if (request === "node:fs") return fs;
         if (request === "node:path") return path;
         if (request === "node:module") return moduleApi;
+        if (request === "node:child_process") return {};
         if (request === "electron") return {app};
         if (path.basename(request) === "build_info.json") {
             buildInfo = JSON.parse(fs.readFileSync(request, "utf8")) as Record<string, unknown>;
@@ -178,7 +181,9 @@ async function packageSolcord(fixtureValue: Fixture): Promise<void> {
 }
 
 async function createFixture(): Promise<Fixture> {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "solcord-disposable-test-"));
+    // Bun's non-native realpath preserves Windows 8.3 TEMP aliases. Production
+    // uses the native physical path, so fault injections must use it as well.
+    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "solcord-disposable-test-")));
     temporaryRoots.push(root);
     const sourceApp = path.join(root, "source", "app-1.0.9999");
     const solcordAsar = path.join(root, "artifacts", "solcord.asar");
@@ -230,7 +235,7 @@ beforeEach(async () => {
 afterEach(() => {
     for (const root of temporaryRoots.splice(0)) {
         const resolved = path.resolve(root);
-        const temporary = `${path.resolve(os.tmpdir())}${path.sep}`.toLowerCase();
+        const temporary = `${fs.realpathSync.native(os.tmpdir())}${path.sep}`.toLowerCase();
         if (!resolved.toLowerCase().startsWith(temporary) || !path.basename(resolved).startsWith("solcord-disposable-test-")) {
             throw new Error(`Refusing unsafe test cleanup target: ${resolved}`);
         }
@@ -239,6 +244,32 @@ afterEach(() => {
 });
 
 windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
+    test("accepts the exact pinned offline editor/catalog assets and rejects rehashed asset drift", async () => {
+        for (const asset of solcordLocalAssets(path.resolve(import.meta.dir, "../.."))) {
+            const destination = path.join(fixture.solcordSource, asset.target);
+            fs.mkdirSync(path.dirname(destination), {recursive: true});
+            fs.copyFileSync(asset.source, destination);
+        }
+        await packageSolcord(fixture);
+        expect(prepareSolcordDisposableAcceptance({
+            sourceDiscordAppDir: fixture.sourceApp,
+solcordAsar: fixture.solcordAsar,
+destinationRoot: fixture.destination,
+            expectedSolcordSha256: fixture.expectedHash,
+expectedSolcordSourceCommit: fixture.expectedSourceCommit,
+dryRun: true
+        }).dryRun).toBe(true);
+        fs.appendFileSync(path.join(fixture.solcordSource, "editor/monaco/vs/loader.js"), "\n// fixture drift\n");
+        await packageSolcord(fixture);
+        expect(() => prepareSolcordDisposableAcceptance({
+            sourceDiscordAppDir: fixture.sourceApp,
+solcordAsar: fixture.solcordAsar,
+destinationRoot: fixture.destination,
+            expectedSolcordSha256: fixture.expectedHash,
+expectedSolcordSourceCommit: fixture.expectedSourceCommit,
+dryRun: true
+        })).toThrow("pinned source");
+    }, 30_000);
     test("dry-run validates everything while performing zero writes", () => {
         const before = snapshotTree(fixture.sourceApp);
         const result = prepareSolcordDisposableAcceptance({
@@ -354,6 +385,7 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
         expect(runtimeLedger.map(entry => entry.stage)).toEqual([
             "shim-begin",
             "environment-validated",
+            "os-shell-policy-installed",
             "native-module-policy-installed",
             "solcord-require-begin",
             "solcord-require-complete",
@@ -663,8 +695,10 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
 
     test("rejects a physical destination-parent alias into the source tree", () => {
         const originalNativeRealpath = fs.realpathSync.native;
+        let injected = 0;
         fs.realpathSync.native = ((target, options) => {
             if (path.resolve(String(target)).toLocaleLowerCase("en-US") === path.resolve(fixture.root).toLocaleLowerCase("en-US")) {
+                injected++;
                 return fixture.sourceApp;
             }
             return originalNativeRealpath(target, options as never);
@@ -683,6 +717,7 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
         finally {
             fs.realpathSync.native = originalNativeRealpath;
         }
+        expect(injected).toBeGreaterThan(0);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
     });
 
@@ -899,9 +934,11 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
 
     test("rejects and removes a runtime when the copied BetterDiscord ASAR changes during copy", () => {
         const originalCopyFileSync = fs.copyFileSync;
+        let corruptions = 0;
         fs.copyFileSync = ((source, destination, mode) => {
             originalCopyFileSync(source, destination, mode);
             if (path.basename(String(destination)) === "betterdiscord.app.asar") {
+                corruptions++;
                 fs.appendFileSync(destination, "changed-after-source-hash");
             }
         }) as typeof fs.copyFileSync;
@@ -919,6 +956,7 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
             fs.copyFileSync = originalCopyFileSync;
         }
 
+        expect(corruptions).toBe(1);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
     });
 
@@ -1015,9 +1053,11 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
     test("rejects corruption in a copied non-ASAR runtime file through whole-tree verification", () => {
         const originalCopyFileSync = fs.copyFileSync;
         const mutableSource = path.join(fixture.sourceApp, "runtime-payload.bin");
+        let corruptions = 0;
         fs.copyFileSync = ((source, destination, mode) => {
             originalCopyFileSync(source, destination, mode);
             if (path.resolve(String(source)) === path.resolve(mutableSource)) {
+                corruptions++;
                 fs.appendFileSync(destination, "corrupt-copy-only");
             }
         }) as typeof fs.copyFileSync;
@@ -1035,6 +1075,7 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
             fs.copyFileSync = originalCopyFileSync;
         }
 
+        expect(corruptions).toBe(1);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
         expect(fs.readFileSync(mutableSource)).toEqual(Buffer.from([0, 1, 2, 3, 254, 255]));
     });
@@ -1044,10 +1085,12 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
         const originalRenameSync = fs.renameSync;
         let replacementRoot = "";
         let displacedOwnedRoot = "";
+        let replacements = 0;
         fs.copyFileSync = ((source, destination, mode) => {
             const destinationPath = path.resolve(String(destination));
             const firstSegment = path.relative(fixture.root, destinationPath).split(path.sep)[0];
             if (!replacementRoot && firstSegment.startsWith(".solcord-acceptance-stage-")) {
+                replacements++;
                 replacementRoot = path.join(fixture.root, firstSegment);
                 displacedOwnedRoot = `${replacementRoot}.displaced`;
                 originalRenameSync(replacementRoot, displacedOwnedRoot);
@@ -1070,6 +1113,7 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
             fs.copyFileSync = originalCopyFileSync;
         }
 
+        expect(replacements).toBe(1);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
         expect(fs.readFileSync(path.join(replacementRoot, "attacker-marker.txt"), "utf8")).toBe("preserve-replacement");
         expect(fs.existsSync(displacedOwnedRoot)).toBeTrue();
@@ -1077,8 +1121,12 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
 
     test("cleans only owned staging after a late manifest-write failure", () => {
         const originalWriteFileSync = fs.writeFileSync;
+        let injected = 0;
         fs.writeFileSync = ((file, data, options) => {
-            if (path.basename(String(file)) === "acceptance-manifest.json") throw new Error("synthetic late manifest failure");
+            if (path.basename(String(file)) === "acceptance-manifest.json") {
+                injected++;
+                throw new Error("synthetic late manifest failure");
+            }
             return originalWriteFileSync(file, data, options as never);
         }) as typeof fs.writeFileSync;
 
@@ -1095,6 +1143,7 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
             fs.writeFileSync = originalWriteFileSync;
         }
 
+        expect(injected).toBe(1);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
         expect(stagingRoots(fixture.root)).toEqual([]);
     });
@@ -1126,6 +1175,7 @@ windowsDescribe("Solcord disposable Windows acceptance preparation", () => {
             fs.renameSync = originalRenameSync;
         }
 
+        expect(injected).toBeTrue();
         expect(fs.readFileSync(competingMarker, "utf8")).toBe("preserve-me");
         expect(stagingRoots(fixture.root)).toEqual([]);
     });

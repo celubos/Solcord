@@ -123,23 +123,25 @@ export async function getLazy<T>(filter: Webpack.ModuleFilter, options: Webpack.
     filter = wrapModuleFilter(filter);
 
     return new Promise((resolve, reject) => {
-        const cancel = () => void lazyListeners.delete(listener);
+        let settled = false;
+        const finish = (value?: T, error?: Error) => {
+            if (settled) return;
+            settled = true;
+            lazyListeners.delete(listener);
+            abortSignal?.removeEventListener("abort", onAbort);
+            if (error) reject(error);
+            else resolve(value);
+        };
 
         const onAbort = () => {
-            cancel();
-            abortSignal?.removeEventListener("abort", onAbort);
-            if (fatal) reject(makeException());
-            else resolve(undefined);
+            finish(undefined, fatal ? makeException() : undefined);
         };
 
         const listener: Webpack.ModuleFilter = (_, module) => {
             if (shouldSkipModule(module.exports)) return;
 
             if (filter(module.exports, module, module.id)) {
-                if (declarationFilter) resolve(getDeclaration(module, declarationFilter));
-                else resolve(raw ? module : module.exports);
-
-                cancel();
+                finish(declarationFilter ? getDeclaration(module, declarationFilter) : raw ? module : module.exports);
                 return;
             }
 
@@ -158,23 +160,21 @@ export async function getLazy<T>(filter: Webpack.ModuleFilter, options: Webpack.
 
                 if (filter(exported, module, module.id)) {
                     if (!defaultExport && defaultKey === key) {
-                        if (declarationFilter) resolve(getDeclaration(module, declarationFilter));
-                        else resolve(raw ? module : module.exports);
-
-                        cancel();
+                        finish(declarationFilter ? getDeclaration(module, declarationFilter) : raw ? module : module.exports);
                         return;
                     }
 
-                    if (declarationFilter) resolve(getDeclaration(module, declarationFilter));
-                    else resolve(raw ? module : exported);
-
-                    cancel();
+                    finish(declarationFilter ? getDeclaration(module, declarationFilter) : raw ? module : exported);
+                    return;
                 }
             }
         };
 
         lazyListeners.add(listener);
         abortSignal?.addEventListener("abort", onAbort);
+        // The initial queued lookup yields. An abort during that transition is
+        // otherwise missed because AbortSignal does not replay the event.
+        if (abortSignal?.aborted) onAbort();
     });
 }
 

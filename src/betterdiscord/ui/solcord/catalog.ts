@@ -103,18 +103,3 @@ export const SOLCORD_POWER_LAB = [
     {id: "fake-mute", name: "Fake Mute", summary: "Account-risk local experiment. Unavailable in the V2 release candidate."},
     {id: "stream-rtc", name: "Stream / RTC overrides", summary: "Volatile RTC experiment. Unavailable in the V2 release candidate."}
 ] as const;
-
-export const SOLCORD_OPTIONAL_ADDONS = [
-    {label: "Channel Tabs", catalogName: "ChannelTabs"},
-    {label: "User Notes", catalogName: "UserNotes"},
-    {label: "Timezones", catalogName: "Timezones"},
-    {label: "Role Explorer", catalogName: "RoleExplorer"},
-    {label: "Favorite Media", catalogName: "FavoriteMedia"},
-    {label: "Uncompressed Images", catalogName: "Uncompressed Images"},
-    {label: "Game Activity Toggle", catalogName: "GameActivityToggle"},
-    {label: "In My Voice", catalogName: "InMyVoice"},
-    {label: "Show Ping", catalogName: "ShowPing"},
-    {label: "Voice Hub", catalogName: "VoiceHub"},
-    {label: "Better Media Player", catalogName: "BetterMediaPlayer"},
-    {label: "Channels Preview", catalogName: "ChannelsPreview"}
-] as const;

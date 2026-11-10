@@ -14,6 +14,7 @@ import CloseButton from "./close";
 import SimpleMarkdownExt from "@structs/markdown";
 import {GithubIcon} from "lucide-react";
 import {getByKeys} from "@webpack";
+import Video from "./changelog-video";
 
 const {useMemo} = React;
 
@@ -24,31 +25,16 @@ const AnchorClasses: {anchor: string; anchorUnderlineOnHover: string;} = getByKe
 }) || {anchor: "anchor-3Z-8Bb", anchorUnderlineOnHover: "anchorUnderlineOnHover-2ESHQB"};
 
 const defaultFooter = <Text>
-    <a className={`${AnchorClasses.anchor} ${AnchorClasses.anchorUnderlineOnHover}`} href="https://github.com/slaveofsolace/Solcord/issues" rel="noopener noreferrer" target="_blank">Solcord issues</a>
+    <a className={`${AnchorClasses.anchor} ${AnchorClasses.anchorUnderlineOnHover}`} href="https://github.com/celubos/Solcord/issues" rel="noopener noreferrer" target="_blank">Solcord issues</a>
     {" · "}
     <a className={`${AnchorClasses.anchor} ${AnchorClasses.anchorUnderlineOnHover}`} href="https://github.com/BetterDiscord/BetterDiscord" rel="noopener noreferrer" target="_blank">Based on BetterDiscord</a>
 </Text>;
 
 const github = <DiscordModules.Tooltip color="primary" position="top" text={t("Socials.github")}>
-    {p => <a {...p} className="bd-social" href="https://github.com/slaveofsolace/Solcord" rel="noopener noreferrer" target="_blank">
+    {p => <a {...p} className="bd-social" href="https://github.com/celubos/Solcord" rel="noopener noreferrer" target="_blank">
         <GithubIcon size="18px" />
     </a>}
 </DiscordModules.Tooltip>;
-
-function YoutubeEmbed({src}: {src: string;}) {
-    return <iframe
-        src={src}
-        title="YouTube video player"
-        frameBorder="0"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-        allowFullScreen
-    />;
-}
-
-function Video({src, poster}: {src: string; poster?: string;}) {
-    if (src.toLowerCase().includes("youtube.com")) return <YoutubeEmbed src={src} />;
-    return <video src={src} poster={poster} controls={true} className="bd-changelog-poster" />;
-}
 
 export type ChangelogEntryType = "progress" | "fixed" | "added" | "improved";
 export interface ChangelogEntry {

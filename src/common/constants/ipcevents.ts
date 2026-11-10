@@ -66,3 +66,6 @@ export const LOCAL_IDENTITY_NOTES_READ = "sc-local-identity-notes-read";
 export const LOCAL_IDENTITY_NOTES_WRITE = "sc-local-identity-notes-write";
 export const LOCAL_IDENTITY_NOTES_REMOVE = "sc-local-identity-notes-remove";
 export const LOCAL_IDENTITY_NOTES_CLEAR = "sc-local-identity-notes-clear";
+export const EDITOR_SESSION = "sc-editor-session";
+export const ADDON_FILE_WRITE = "sc-addon-file-write";
+export const PRIVACY_POLICY_UPDATE = "sc-privacy-policy-update";

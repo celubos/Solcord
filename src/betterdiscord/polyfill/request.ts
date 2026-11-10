@@ -70,13 +70,8 @@ function fixBuffer(options: RequestOptions & {formData?: Buffer | string;}, call
             }
         }
         catch (err) {
-            Logger.debug("BetterDiscordPreload", "Failed to convert response body to buffer", {
-                catchError: err,
-                options,
-                error,
-                res,
-                body
-            });
+            // Request headers, URLs and response bodies can contain credentials or private text.
+            Logger.debug("BetterDiscordPreload", "Failed to convert response body to buffer", {errorName: err instanceof Error ? err.name : "Error"});
         }
         finally {
             callback(error, res, body);

@@ -1,6 +1,6 @@
 # Solcord quick start
 
-Use this guide for the **Solcord 2.0 — Signal** Windows installer.
+Use this guide for the **Solcord 2.0.1** Windows installer. Mac users should read the separate [macOS preview guide](MACOS.md).
 
 Allow about one minute on a typical PC **after download**. Windows prompts, Discord shutdown, or recovery can take longer.
 
@@ -12,14 +12,14 @@ Allow about one minute on a typical PC **after download**. Windows prompts, Disc
 - Save unfinished drafts and leave voice/video calls before continuing.
 
 > [!WARNING]
-> This build is unsigned. Windows may show an unknown-publisher warning. Download only from `slaveofsolace/Solcord`, compare the hash below, and do not disable Windows security to install it.
+> This build is unsigned. Windows may show an unknown-publisher warning. Download only from `celubos/Solcord`, compare the hash below, and do not disable Windows security to install it.
 
 ## 1. Download
 
 Download both files into the same folder:
 
-- [SolcordInstaller.exe](https://github.com/slaveofsolace/Solcord/releases/download/v2.0.0/SolcordInstaller.exe)
-- [SHA256SUMS.txt](https://github.com/slaveofsolace/Solcord/releases/download/v2.0.0/SHA256SUMS.txt)
+- [SolcordInstaller.exe](https://github.com/celubos/Solcord/releases/download/v2.0.1/SolcordInstaller.exe)
+- [SHA256SUMS.txt](https://github.com/celubos/Solcord/releases/download/v2.0.1/SHA256SUMS.txt)
 
 ### Check the download
 
@@ -29,7 +29,7 @@ Open PowerShell in your download folder and run:
 Get-FileHash .\SolcordInstaller.exe -Algorithm SHA256
 ```
 
-Compare the result with the `installer/SolcordInstaller.exe` line in **SHA256SUMS.txt**. The extra `installer/` folder in that line is normal; it refers to the same executable. Do not run a file whose hash differs.
+Compare the result with the `SolcordInstaller.exe` line in **SHA256SUMS.txt** from the same release. Do not run a file whose hash differs. **RELEASE-SHA256SUMS.txt** additionally covers every Windows and Mac release attachment.
 
 ## 2. Save anything in progress
 
@@ -37,7 +37,7 @@ Solcord's core is shared by Discord Stable, PTB, and Canary. When changing that 
 
 ## 3. Install
 
-Open **SolcordInstaller.exe**. In **Version**, choose the Discord installation you use. The version is detected from your PC, not fixed by this guide.
+Open **SolcordInstaller.exe**. In **Discord app**, choose the Discord installation you use. The version is detected from your PC, not fixed by this guide. Choose **Refresh** or press **F5** after installing or updating Discord. Actions stay disabled while Setup checks the selected app.
 
 Choose the large recommended action. It will say **Install Solcord**, **Update Solcord**, or **Repair Solcord** according to the files on your PC. Wait for the verified success status. Do not move or delete recovery files while an action is running.
 
@@ -48,6 +48,8 @@ Select **Verify files**. When the installed files match the package, choose **Op
 ## 5. Complete First Setup
 
 A fresh installation opens **Solcord Suite** at **Welcome** once Discord is ready. Follow Welcome, Privacy, Appearance, Features, and Review and Apply.
+
+To open settings later, open Discord **User Settings**, scroll to the bottom of the sidebar, and click **Open Solcord Suite**. This entry opens an independent Control Center even when Discord changes its own settings layout.
 
 **Back** keeps the draft. **Finish later** saves your place without applying the proposed choices. Existing completed profiles do not reopen setup after an update or repair. To reopen it manually, open **Solcord Suite**, choose **Recovery**, then choose **First Setup**.
 
@@ -68,9 +70,10 @@ Download the new release's installer and checksum file, verify the download, and
 
 | Problem | Next step |
 | --- | --- |
-| Discord does not appear in Version | Open the official desktop app once, quit it, then reopen the installer. |
+| Discord does not appear in Discord app | Open the official desktop app once, quit it, then choose **Refresh** in Setup. |
 | Discord cannot close | Quit it from the Windows system tray, then retry. The installer will not guess at an unverified process. |
 | Files are missing or damaged | Run the same package and choose **Repair**. |
+| Setup reports an error | Choose **Error details** for the complete local error and recovery path. Nothing is uploaded automatically. |
 | Discord updated and Solcord disappeared | Open the newest installer. Choose **Update Solcord**, or **Repair Solcord** if that exact release is already recorded. |
 | The new core will not start | Use **Roll back** to restore the verified pre-change backup. |
 | A feature says Unavailable | Check Plugin Doctor; the current Discord build may not support that adapter. |

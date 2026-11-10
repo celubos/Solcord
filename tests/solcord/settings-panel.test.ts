@@ -343,12 +343,13 @@ describe("Solcord Control Center clarity", () => {
     });
 
     test("leads Privacy with the explicit profile and content-free capability report", () => {
+        const privacy = readFileSync(resolve(import.meta.dir, "../../src/betterdiscord/ui/solcord/privacy.tsx"), "utf8");
         expect(panel).toContain("<PrivacyProtectionPanel /><BuiltInFeatureSwitches scope=\"privacy\" /><StreamShieldControls />");
-        expect(panel).toContain("Use Strict Privacy");
-        expect(panel).toContain("Check for updates");
-        expect(panel).toContain("privacyCapabilityStateLabel(capability.state)");
-        expect(panel).toMatch(/solcord-privacy-state-\$\{capability\.state\.toLowerCase\(\)\}/);
-        expect(panel).toContain("never URLs, payloads, account IDs, messages, attachments, or file paths");
+        expect(privacy).toContain("Use Strict Privacy");
+        expect(privacy).toContain("Check for updates");
+        expect(privacy).toContain("privacyCapabilityStateLabel(capability.state)");
+        expect(privacy).toMatch(/solcord-privacy-state-\$\{capability\.state\.toLowerCase\(\)\}/);
+        expect(privacy).toContain("never URLs, payloads, account IDs, messages, attachments, or file paths");
     });
 
     test("reports each built-in from its actual adapter result and explains every family state", () => {

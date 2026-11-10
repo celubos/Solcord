@@ -91,7 +91,10 @@ function normalizeSourceLanguage(value: string): string {
 }
 
 function samePrimaryLanguage(sourceLanguage: string, targetLanguage: string): boolean {
-    return sourceLanguage.split("-", 1)[0].toLocaleLowerCase() === targetLanguage.split("-", 1)[0].toLocaleLowerCase();
+    // Script and region subtags can require a real conversion (zh-Hans/zh-Hant).
+    // Canonicalization also handles harmless case differences and legacy aliases.
+    try {return Intl.getCanonicalLocales(sourceLanguage)[0] === Intl.getCanonicalLocales(targetLanguage)[0];}
+    catch {return false;}
 }
 
 function boundedText(value: string): string {

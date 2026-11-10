@@ -182,7 +182,7 @@ describe("Solcord theme presentation", () => {
         expect(css).toContain("--sc-font-display: var(--font-display, var(--font-primary, \"gg sans\"");
         expect(css).toContain("--sc-font-editorial: var(--font-primary, \"gg sans\"");
         expect(css).toContain("--sc-font-code: \"Cascadia Code\"");
-        expect(css).toContain("url(\"./fonts/HankenGrotesk-variable.ttf\")");
+        expect(css).toContain("url(\"solcord://fonts/HankenGrotesk-variable.ttf\")");
         expect(css).not.toContain("font-family: \"Solcord Anybody\"");
         expect(css).not.toContain("url(\"./fonts/Anybody-variable.ttf\")");
         expect(css).toContain("--sc-field-grain: url(\"data:image/svg+xml");

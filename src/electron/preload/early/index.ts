@@ -1,6 +1,7 @@
 import Logger from "@common/logger";
 import type {RawModule} from "../../../betterdiscord/types/discord/webpack";
 import parseDeclarations from "@common/parseDeclarations";
+import {isReactRuntime} from "@common/react-readiness";
 
 const getPrefix = /^(.*?)\(/;
 // Functions like ones from objects ({ a() {} }) will throw so we replace 'a' with 'function'
@@ -14,14 +15,17 @@ function toStringFunction(stringed: string): string {
     return stringed.replace(match[1], "function");
 }
 
-(window.webpackChunkdiscord_app ??= [])
+(window.rspackChunkdiscord_app ??= window.webpackChunkdiscord_app ??= [])
     .push([[Symbol()], {}, (require: any) => {
         if (!require.b) return;
+        let rendererScheduled = false;
 
-        require.d = (target: object, exports: any) => {
+        // Rspack can supply direct values separately from getter exports. The
+        // third argument must survive our patchability wrapper (e.g. Logger.A).
+        require.d = (target: object, exports: Record<string, () => unknown> | undefined, values?: Record<string, unknown>) => {
             for (const key in exports) {
-                if (!Reflect.has(exports, key)) continue;
-                if (Reflect.has(target, key)) continue;
+                if (!Object.hasOwn(exports, key)) continue;
+                if (Object.hasOwn(target, key)) continue;
 
                 try {
                     Object.defineProperty(target, key, {
@@ -36,9 +40,13 @@ function toStringFunction(stringed: string): string {
                     console.error(error);
                 }
             }
+            for (const key in values) {
+                if (!Object.hasOwn(values, key) || Object.hasOwn(target, key)) continue;
+                Object.defineProperty(target, key, {value: values[key], writable: true, enumerable: true, configurable: true});
+            }
         };
 
-        const IS_CLASSNAME_MODULE = /^\d+(?:e\d+)?\((.{1,3}),.{1,3},.{1,3}\){("use strict";)?\1.exports={.+}}$/;
+        const IS_CLASSNAME_MODULE = /^\d+(?:e\d+)?\((.{1,3})(?:,.{1,3},.{1,3})?\){(?:"use strict";)?\1\.exports={.+}}$/;
         const EXTRACT_CLASS = /^(.+?)_/;
 
         const USES_STEMMER = /\((\d+)\)\.newStemmer\("[^"]+"\);/;
@@ -97,6 +105,7 @@ function toStringFunction(stringed: string): string {
             // const usesStemmerMatch = originalStr.match(USES_STEMMER);
 
             function newModule(this: any, module: any, exports: any, webpackRequire: any) {
+                module.id = String(id);
                 try {
                     if (useStemmerMatch) {
                         const stemmerId = useStemmerMatch[1];
@@ -161,16 +170,11 @@ function toStringFunction(stringed: string): string {
                     }
 
                     try {
-                        if (
-                            typeof module.exports === "object"
-                            && module.exports !== null
-                            && module.exports.createElement
-                        ) {
+                        if (!rendererScheduled && isReactRuntime(module.exports)) {
+                            rendererScheduled = true;
                             requestIdleCallback(() => {
                                 window.BetterDiscordRunRenderer();
                             });
-
-                            // setTimeout(() => window.BetterDiscordRunRenderer(), 1000);
                         }
                     }
                     catch {/* empty */}

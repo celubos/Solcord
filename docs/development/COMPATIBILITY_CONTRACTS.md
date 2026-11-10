@@ -1,0 +1,11 @@
+# Compatibility contracts and maintenance gates
+
+The Solcord maintainer owns the intentionally retained pure contracts in `src/common/activity-handshake.ts` and `src/common/solcord/baseline-capabilities.ts`. Their synthetic tests establish model and descriptor behavior. Neither module is imported by the current production entry graph, so those tests do not prove that a Discord Activity or a live adapter used that logic. Keep these contracts for compatibility design and review; any runtime claim needs a test through the actual shipped adapter and exact-client acceptance.
+
+Confirmed private unused sidebar UI, its orphan heading style, the unused official-addon predicate, and duplicate optional-addon metadata were removed during audit remediation. Shared sidebar styles still used by the active title provider and public BdApi contracts remain. No installed-download saving is attributed to removing code that was already outside the bundle.
+
+`bun run circulars` compares current normalized cyclic edges with the reviewed eleven-group inherited baseline in `scripts/baselines/circular-dependencies.json`. New edges fail the gate; removing a baseline edge is reported for review. Do not regenerate the baseline merely to make an introduced cycle pass.
+
+`bun run lint-css:solcord` remains strict for the maintained Solcord shell styles. `bun run lint-css:baseline` scans every nested stylesheet and fails on diagnostic counts above the reviewed inherited baseline in `scripts/baselines/stylelint.json`. That baseline records maintenance debt, not a claim that the underlying styles are ideal or that warnings are visible product defects. `bun run lint-css` still exposes the complete unfiltered diagnostics. A new stylesheet receives no grandfathered diagnostics.
+
+Automatic Linux checks and packaging run once in the V2 workflow. Its dependent `build` job retains the compatibility check name and fails if source verification fails. Legacy ASAR/checksum artifact names and the Windows policy/installer jobs are preserved. The old compatibility workflow is a manual wrapper around the same workflow. Actual runner-minute savings require measurement on hosted runs; local source changes alone do not establish a billing or timing result.

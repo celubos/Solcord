@@ -46,7 +46,7 @@ Windows encryption is unavailable for that store. Solcord does not substitute pl
 
 ## Report a bug
 
-[Open a bug report](https://github.com/slaveofsolace/Solcord/issues/new?template=BUG-REPORT.yml) with:
+[Open a bug report](https://github.com/celubos/Solcord/issues/new?template=BUG-REPORT.yml) with:
 
 - Solcord candidate and source commit;
 - Discord Stable, PTB, or Canary and its app version;

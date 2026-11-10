@@ -64,7 +64,7 @@ Uninstall is not a private-data wipe. The installer does not erase addon configu
 
 ## Acceptance and limitations
 
-The current installer is [RC39](https://github.com/slaveofsolace/Solcord/releases/tag/v2.0.0-rc.39). New source changes need their own package and acceptance evidence; see [Release status](STATUS.md).
+The current installer is [RC39](https://github.com/celubos/Solcord/releases/tag/v2.0.0-rc.39). New source changes need their own package and acceptance evidence; see [Release status](STATUS.md).
 
 The core and injector are separate files. Their verified replacements are recoverable through receipts, not one atomic filesystem operation. Keep backups through a successful restart.
 

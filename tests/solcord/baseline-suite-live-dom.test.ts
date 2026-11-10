@@ -16,6 +16,33 @@ async function waitForMutationResult(predicate: () => boolean, describeState: ()
 }
 
 describe("Solcord baseline exact-client DOM adapters", () => {
+    test("resolves 1000 sibling embeds without pairwise containment checks", () => {
+        document.body.innerHTML = `<div id="chat-messages-scaling">${Array.from({length: 1000}, (_, index) => `<article class="embed_fixture" id="embed-${index}"><a href="https://example.test/${index}">Media</a></article>`).join("")}</div>`;
+        const contains = Node.prototype.contains;
+        let containmentChecks = 0;
+        Node.prototype.contains = function (node) {containmentChecks++; return contains.call(this, node);};
+        try {
+            expect(resolveSolcordEmbedTargets(document)).toHaveLength(1000);
+            expect(containmentChecks).toBe(0);
+        }
+        finally {Node.prototype.contains = contains;}
+    });
+
+    test("unrelated DOM mutations do not rescan the document for embeds", async () => {
+        document.body.innerHTML = "<div id=\"chat-messages-fixture\"><article class=\"embed_fixture\"><a href=\"https://example.test/media\">Media</a></article></div><aside id=\"unrelated\"></aside>";
+        const suite = new SolcordBaselineSuite({});
+        suite.start({...defaultSolcordProductPreferences().baseline, embedControls: true});
+        await new Promise(resolve => setTimeout(resolve, 30));
+        const query = document.querySelectorAll.bind(document);
+        let wholeDocumentQueries = 0;
+        document.querySelectorAll = ((selector: string) => {wholeDocumentQueries++; return query(selector);}) as typeof document.querySelectorAll;
+        try {
+            document.getElementById("unrelated")!.append(document.createElement("p"));
+            await new Promise(resolve => setTimeout(resolve, 30));
+            expect(wholeDocumentQueries).toBe(0);
+        }
+        finally {document.querySelectorAll = query; suite.stop();}
+    });
     beforeEach(() => {
         document.head.innerHTML = "";
         document.body.innerHTML = "";

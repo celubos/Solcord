@@ -4,6 +4,7 @@ import path from "path";
 
 import BetterDiscord from "./betterdiscord";
 import Editor from "./editor";
+import {installNativePrivacyGuard} from "./privacy-network";
 import ActivityCompatibility from "./activity-compatibility";
 import {OriginalPreloadRegistry} from "./original-preload-registry";
 import {installPreloadAssignmentPolicy, preloadTrustRoot} from "./preload-policy";
@@ -122,6 +123,7 @@ class BrowserWindow extends electron.BrowserWindow {
         this.webContents.on("preload-error", (_, __, error) => ActivityCompatibility.preloadError(windowToken, error));
         this.once("closed", () => ActivityCompatibility.destroyed(windowToken, webContentsId));
         BetterDiscord.setup(this);
+        installNativePrivacyGuard(this.webContents.session);
         Editor.initialize(this);
 
         // eslint-disable-next-line @typescript-eslint/no-this-alias

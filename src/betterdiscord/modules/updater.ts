@@ -1,5 +1,8 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
+import Remote from "@polyfill/remote";
+import {parseJsDoc} from "@common/utils";
 
 import Logger from "@common/logger";
 
@@ -26,7 +29,7 @@ import {RefreshCcwIcon} from "lucide-react";
 import type {AddonType} from "@typed/addon";
 import {fetch} from "./net";
 import AddonStore from "./addonstore";
-import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-catalog.generated";
+import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-trust.generated";
 import {classifySolcordUpdateOwnership, solcordUpdateRequiresReview} from "./solcord/updater-ownership";
 import {isSolcordAcceptanceMode} from "@common/solcord/acceptance-mode";
 import {onSolcordUpdatePolicyChange, solcordAutomaticUpdatesAllowed} from "./solcord/privacy-runtime-state";
@@ -142,6 +145,7 @@ export class AddonUpdater {
     manager: AddonManager;
     type: AddonType;
     pending: string[];
+    private readonly inFlight = new Map<string, Promise<void>>();
 
     constructor(type: AddonType) {
         this.manager = type === "plugin" ? PluginManager : ThemeManager;
@@ -194,13 +198,30 @@ export class AddonUpdater {
         this.pending.push(filename);
     }
 
-    async updateAddon(filename: string) {
+    updateAddon(filename: string): Promise<void> {
+        const existing = this.inFlight.get(filename);
+        if (existing) return existing;
+        const operation = this.commitAddonUpdate(filename).catch(error => {
+            Logger.error("AddonUpdater", "Addon update stayed unchanged.", error);
+            Toasts.error(t("Updater.addonUpdateFailed", {name: filename, version: ""}));
+        }).finally(() => this.inFlight.delete(filename));
+        this.inFlight.set(filename, operation);
+        return operation;
+    }
+
+    private async commitAddonUpdate(filename: string) {
         if (isSolcordAcceptanceMode()) {
             Logger.warn("Solcord Acceptance", ACCEPTANCE_UPDATE_HOLD);
             Toasts.error(ACCEPTANCE_UPDATE_HOLD);
             return;
         }
         const basename = path.basename(filename);
+        const suffix = this.type === "plugin" ? ".plugin.js" : ".theme.css";
+        if (basename !== filename || !filename.endsWith(suffix)) throw new Error("Invalid addon update filename.");
+        const installed = this.manager.addonList.find(addon => addon.filename === filename);
+        if (!installed) return;
+        const file = path.join(path.resolve(this.manager.addonFolder), filename);
+        const expectedSha256 = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
         const reviewed = acceptedSolcordArtifact(this.type, basename);
         const ownership = reviewed && classifySolcordUpdateOwnership({
             accepted: true,
@@ -219,7 +240,7 @@ export class AddonUpdater {
         }
         const info = AddonStore.getAddon(filename);
 
-        if (!info) return;
+        if (!info || info.filename !== filename || info.type !== this.type) return;
 
         const request = await fetch(Web.redirects.github(info.id.toString()));
 
@@ -229,11 +250,39 @@ export class AddonUpdater {
             return;
         }
 
-        const file = path.join(path.resolve(this.manager.addonFolder), filename);
-        fs.writeFileSync(file, await request.text());
+        const reader = request.body?.getReader();
+        if (!reader) throw new Error("Addon update has no body.");
+        const chunks: Uint8Array[] = [];
+        let bytes = 0;
+        try {
+            while (true) {
+                const chunk = await reader.read();
+                if (chunk.done) break;
+                bytes += chunk.value.byteLength;
+                if (bytes > 8 * 1024 * 1024) throw new Error("Addon update exceeds its file limit.");
+                chunks.push(chunk.value);
+            }
+        }
+        catch (error) {await reader.cancel(error); throw error;}
+        finally {reader.releaseLock();}
+        const content = new TextDecoder("utf-8", {fatal: true}).decode(Buffer.concat(chunks));
+        const metadata = parseJsDoc(content);
+        if (metadata.name !== installed.name || metadata.version !== info.version) throw new Error("Addon update metadata does not match the installed addon and reviewed version.");
+        // Re-check ownership after the network wait. Native replacement also
+        // compares the exact previous bytes and rejects links and path escapes.
+        if (!this.manager.addonList.includes(installed)) throw new Error("Addon ownership changed during download.");
+        const currentReviewed = acceptedSolcordArtifact(this.type, basename);
+        if (currentReviewed && solcordUpdateRequiresReview(classifySolcordUpdateOwnership({accepted: true, addonFolder: this.manager.addonFolder, fileName: currentReviewed.fileName, kind: this.type, reviewedSha256: currentReviewed.reviewedSha256}))) throw new Error("The addon now requires a reviewed update.");
+        await Remote.filesystem.writeAddonFile(this.type, filename, content, expectedSha256);
 
         Toasts.success(t("Updater.addonUpdated", {name: info.name, version: info.version}));
-        this.pending.splice(this.pending.indexOf(filename), 1);
+        const pendingIndex = this.pending.indexOf(filename);
+        if (pendingIndex !== -1) this.pending.splice(pendingIndex, 1);
+    }
+
+    async updateAll(): Promise<void> {
+        const pending = [...this.pending];
+        for (let offset = 0; offset < pending.length; offset += 3) await Promise.all(pending.slice(offset, offset + 3).map(filename => this.updateAddon(filename)));
     }
 
     showUpdateNotice() {
@@ -271,11 +320,7 @@ export class AddonUpdater {
                 },
                 {
                     label: t("Updater.updateAll"),
-                    onClick: () => {
-                        for (const filename of this.pending) {
-                            this.updateAddon(filename);
-                        }
-                    }
+                    onClick: () => this.updateAll()
                 }
             ]
         });

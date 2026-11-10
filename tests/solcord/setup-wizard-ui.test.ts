@@ -3,6 +3,9 @@
 import {describe, expect, test} from "bun:test";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
+import {panelHandlerFixture, runtimeMethodFixture} from "../fixtures/solcord-method-fixture";
+import {normalizeSolcordProductPreferences} from "../../src/common/solcord/product";
+import {planSolcordPreferenceEffects} from "../../src/common/solcord/preference-effects";
 
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, "../..");
@@ -296,11 +299,42 @@ describe("Solcord beginner-first setup UI", () => {
         expect(WIZARD_CSS).toContain(".solcord-call-badge");
     });
 
-    test("keeps baseline adapter settings and runtime status synchronized", () => {
-        expect(PANEL_SOURCE).toContain("const current = SolcordSettings.snapshot().productPreferences;");
-        expect(PANEL_SOURCE).toContain("baseline: {...current.baseline, ...patch}");
-        expect(PANEL_SOURCE).not.toContain("update({...baseline, embedControls:");
-        expect(RUNTIME_SOURCE).toContain("if (effects.baseline) this.#synchronizeBaselineSuite();");
-        expect(RUNTIME_SOURCE).toContain("if (effects.features.length) await this.#synchronizeFeatures(effects.features);");
+    test("keeps baseline adapter settings and runtime status synchronized after durable acknowledgment", async () => {
+        let preferences = normalizeSolcordProductPreferences(undefined);
+        const events: string[] = [];
+        let releaseSave!: () => void;
+        const save = new Promise<void>(resolveSave => {releaseSave = resolveSave;});
+        const settings = {
+            slice: () => preferences,
+            async setProductPreferencesAsync(value: unknown) {
+                await save;
+                preferences = normalizeSolcordProductPreferences(value);
+                events.push("saved");
+                return undefined;
+            }
+        };
+        let activeBaseline = preferences.baseline.embedControls;
+        const owner = {
+            started: true,
+recoveryMode: false,
+            emitChange: () => {},
+            synchronizeBaselineSuite() {activeBaseline = preferences.baseline.embedControls; events.push("baseline");},
+            synchronizeFeatures: () => {throw new Error("A baseline-only edit must not restart unrelated features.");}
+        };
+        const apply = runtimeMethodFixture("setProductPreferences", {SolcordSettings: settings, planSolcordPreferenceEffects});
+        const update = panelHandlerFixture("BaselineToolsPanel", "update", {SolcordSettings: settings, SolcordRuntime: {setProductPreferences: (value: unknown) => apply.call(owner, value)}});
+        // A preference changed after the panel rendered. The action must merge
+        // its patch with the current immutable snapshot, preserving that change.
+        preferences = normalizeSolcordProductPreferences({...preferences, performanceProfile: "lean", baseline: {...preferences.baseline, collapsedRegions: ["members"]}});
+        const target = !preferences.baseline.embedControls;
+        const pending = update({embedControls: target}) as Promise<void>;
+        expect(events).toEqual([]);
+        expect(activeBaseline).not.toBe(target);
+        releaseSave(); await pending;
+        expect(preferences.baseline.embedControls).toBe(target);
+        expect(preferences.baseline.collapsedRegions).toEqual(["members"]);
+        expect(preferences.performanceProfile).toBe("lean");
+        expect(activeBaseline).toBe(target);
+        expect(events).toEqual(["saved", "baseline"]);
     });
 });

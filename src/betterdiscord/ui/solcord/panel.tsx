@@ -10,19 +10,18 @@ import SolcordSettings, {SOLCORD_PRESET_ADDONS} from "@modules/solcord/store";
 import PluginDoctor from "@modules/solcord/doctor";
 import type {SolcordLocalTranslationAvailability} from "@modules/solcord/local-translation";
 import type {SolcordVoiceNotePhase} from "@modules/solcord/native-suite";
-import {CoreUpdater, PluginUpdater, ThemeUpdater} from "@modules/updater";
 import type {SolcordModuleId, SolcordSetupDraft} from "@modules/solcord/contracts";
 import type {LinkInspection} from "@modules/solcord/link-lens";
 
 import SetupWizard from "./setup-wizard";
 import MessageTimelinePanel from "./timeline";
+import PrivacyProtectionPanel from "./privacy";
 import {CatalogBrowser, CuratedAddonSet} from "./addon-catalog";
 import {SOLCORD_ADDON_PRESENTATION, SOLCORD_POWER_LAB} from "./catalog";
 import {findSolcordWorkspaces, isSolcordTranslationLanguage, normalizeSolcordMediaShelfUrl, normalizeSolcordTranslationEndpoint, prioritizeSolcordPulse, resolveSolcordPerformancePolicy, SOLCORD_PERFORMANCE_POLICIES, SOLCORD_WORKSPACES, type SolcordAppearancePreferences, type SolcordMediaKind, type SolcordPerformanceProfile, type SolcordProductPreferences, type SolcordWorkspaceId} from "@common/solcord/product";
 import {isSolcordBuiltInAddon, SOLCORD_CLEAN_ROOM_BUILTIN_ADDONS, solcordBuiltInCapability, solcordNativeSuiteFeatureForAddon, type SolcordProviderMigrationPlan} from "@common/solcord/builtin-addons";
 import {SOLCORD_V2_REPLACEMENT_MANIFEST} from "@common/solcord/v2-replacement-manifest";
 import {presentSolcordChannelGlance, type SolcordChannelGlancePresentation} from "@common/solcord/chat-output";
-import {privacyCapabilityStateLabel} from "@common/solcord/privacy";
 import {scrollSolcordSettingsTarget} from "./scroll-owner";
 import SolcordSwitch from "./switch";
 import PreferenceSlider from "./slider";
@@ -93,7 +92,7 @@ function ActivityBridge() {
 }
 
 function PluginRecovery() {
-    const state = useStateFromStores([PluginDoctor, SolcordRuntime, SolcordSettings], () => ({records: PluginDoctor.snapshot(), integrity: SolcordRuntime.integrityStatus(), curated: SolcordSettings.snapshot().curatedAddons, adapters: SolcordRuntime.curatedAdapterStatus()}));
+    const state = useStateFromStores([PluginDoctor, SolcordRuntime, SolcordSettings], () => ({records: PluginDoctor.snapshot(), integrity: SolcordRuntime.integrityStatus(), curated: SolcordSettings.slice("curatedAddons"), adapters: SolcordRuntime.curatedAdapterStatus()}));
     const [retrying, setRetrying] = useState<string>();
     const [retryStatus, setRetryStatus] = useState("");
     const archivedProviders = state.records.filter(record => {
@@ -141,7 +140,7 @@ function PluginRecovery() {
 }
 
 function ProfilesAndHistory() {
-    const document = useStateFromStores(SolcordSettings, () => SolcordSettings.snapshot());
+    const document = useStateFromStores(SolcordSettings, () => SolcordSettings.readonlySnapshot());
     const [profileId, setProfileId] = useState(document.profiles[0]?.id ?? "");
     const [newName, setNewName] = useState("");
     const [includeThirdParty, setIncludeThirdParty] = useState(false);
@@ -260,46 +259,8 @@ function ProfilesAndHistory() {
     </Section>;
 }
 
-function PrivacyProtectionPanel() {
-    const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({
-        preferences: SolcordSettings.snapshot().productPreferences.privacy,
-        capabilities: SolcordRuntime.privacyCapabilities(),
-        receipts: SolcordRuntime.privacyDecisionReceipts(),
-        receiptStorage: SolcordRuntime.privacyReceiptStorage()
-    }));
-    const [status, setStatus] = useState("");
-    const applyProfile = async (profile: "strict" | "standard") => {
-        if (profile === state.preferences.profile && !state.preferences.migrationPending) return;
-        if (profile === "strict" && !window.confirm("Apply Strict Privacy? Solcord will capture a rollback snapshot, block verified optional reporting and activity discovery, make update checks manual, and disable enabled community addons whose exact reviewed bytes do not declare local-only behavior. Core chat, calls, media, moderation, safety, sign-in, and Discord security updates remain available.")) return;
-        try {
-            await SolcordRuntime.setPrivacyProfile(profile);
-            setStatus(profile === "strict" ? "Strict Privacy applied with a rollback snapshot." : "Standard privacy applied with a rollback snapshot.");
-        }
-        catch (error) {setStatus(error instanceof Error ? error.message : "The privacy change failed closed. Open Recovery to verify the rollback snapshot.");}
-    };
-    const checkUpdates = async () => {
-        setStatus("Checking reviewed addon and theme sources…");
-        try {
-            await Promise.all([CoreUpdater.checkForUpdate(false), PluginUpdater.checkAll(false), ThemeUpdater.checkAll(false)]);
-            setStatus("Manual update check finished. Solcord core remains pinned until an owner-controlled integrity feed is available.");
-        }
-        catch {setStatus("The manual update check did not complete. Existing files were not changed.");}
-    };
-    return <Section title="Privacy protection" summary="Optional data collection is controlled without intercepting Discord's essential traffic.">
-        <div className="solcord-privacy-command">
-            <div><p className="solcord-eyebrow">Current profile</p><strong>{state.preferences.profile === "strict" ? "Strict Privacy" : state.preferences.profile === "standard" ? "Standard" : "Custom"}</strong><p>{state.preferences.profile === "strict" ? "Verified optional reporting is blocked; unsupported categories stay visible; updates are manual." : "Some optional Discord reporting may remain available."}</p></div>
-            {state.preferences.migrationPending && <span className="solcord-status solcord-status-starting">Needs review</span>}
-        </div>
-        <div className="solcord-actions"><ActionButton tone="accent" disabled={state.preferences.profile === "strict" && !state.preferences.migrationPending} onClick={() => applyProfile("strict")}>{state.preferences.profile === "strict" && !state.preferences.migrationPending ? "Strict Privacy on" : "Use Strict Privacy"}</ActionButton><ActionButton disabled={state.preferences.profile === "standard" && !state.preferences.migrationPending} onClick={() => applyProfile("standard")}>{state.preferences.profile === "standard" && !state.preferences.migrationPending ? "Standard on" : "Use Standard"}</ActionButton><ActionButton onClick={() => checkUpdates()}>Check for updates</ActionButton></div>
-        <div className="solcord-privacy-capabilities" role="list" aria-label="Privacy capability status">{state.capabilities.map(capability => <div key={capability.dataClass} role="listitem"><span><strong>{capability.dataClass.replaceAll("-", " ")}</strong><small>{capability.summary}</small></span><span className={`solcord-privacy-state solcord-privacy-state-${capability.state.toLowerCase()}`}>{privacyCapabilityStateLabel(capability.state)}</span></div>)}</div>
-        <p className="solcord-key-hint">Discord account privacy settings are separate. Solcord reports unsupported or drifting protection honestly and never claims zero tracking without an exact-build network audit.</p>
-        {status && <p role="status" className="solcord-import-status">{status}</p>}
-        <details className="solcord-secondary-tools"><summary>Technical details</summary>{state.receiptStorage === "session-only" && <p role="status">Diagnostics are session-only because local storage is unavailable. Privacy protection is still active.</p>}<p>{state.receipts.length} content-free local decision receipt(s). Receipts contain only category, decision, coarse time, and result—never URLs, payloads, account IDs, messages, attachments, or file paths.</p></details>
-    </Section>;
-}
-
 function StreamShieldControls() {
-    const document = useStateFromStores(SolcordSettings, () => SolcordSettings.snapshot());
+    const document = useStateFromStores(SolcordSettings, () => SolcordSettings.readonlySnapshot());
     const shield = document.modules["stream-shield"].values;
     const setting = useSolcordWrite((id: SolcordModuleId, key: string, value: unknown) => SolcordRuntime.setValue(id, key, value));
     return <Section title="Privacy Mode" summary="Preview local redaction before sharing your screen.">
@@ -419,7 +380,7 @@ const BUILTIN_FEATURES_BY_WORKSPACE = Object.freeze({
 
 function BuiltInFeatureSwitches({scope}: {scope: BuiltInWorkspaceScope;}) {
     const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => {
-        const settings = SolcordSettings.snapshot();
+        const settings = SolcordSettings.readonlySnapshot();
         return {addons: settings.curatedAddons, backgroundOn: settings.productPreferences.nativeSuite.motion.effect !== "off", adapters: SolcordRuntime.curatedAdapterStatus()};
     });
     const [message, setMessage] = useState("");
@@ -460,10 +421,10 @@ function BuiltInFeatureSwitches({scope}: {scope: BuiltInWorkspaceScope;}) {
     </Section>;
 }
 
-const readNativeSuitePanelState = () => ({statuses: SolcordRuntime.nativeSuiteStatus(), preferences: SolcordSettings.snapshot().productPreferences, accountGeneration: SolcordRuntime.privateAccountGeneration()});
+const readNativeSuitePanelState = () => ({statuses: SolcordRuntime.nativeSuiteView(), preferences: SolcordSettings.slice("productPreferences"), accountGeneration: SolcordRuntime.privateAccountGeneration()});
 
 function NativeSuitePanel({scope}: {scope: NativeSuiteScope;}) {
-    const state = useStateFromStores([SolcordRuntime, SolcordSettings], readNativeSuitePanelState);
+    const state = useStateFromStores([SolcordRuntime, SolcordSettings], readNativeSuitePanelState, undefined, true);
     return <NativeSuiteAccountPanel key={state.accountGeneration} scope={scope} state={state} />;
 }
 
@@ -587,9 +548,9 @@ function NativeSuiteAccountPanel({scope, state}: {scope: NativeSuiteScope; state
                                 ? "Available on device. Text stays on this device."
                                 : "Automatic detection and the exact language pair are checked locally when you translate.";
     const localPairBlocked = localPairAvailability === "checking" || localPairAvailability === "unavailable" || localPairAvailability === "failed" || localTranslationState?.phase === "unsupported";
-    const updateNativePreferences = useSolcordWrite((next: typeof nativePreferences) => SolcordRuntime.setProductPreferences({...SolcordSettings.snapshot().productPreferences, nativeSuite: next}));
+    const updateNativePreferences = useSolcordWrite((next: typeof nativePreferences) => SolcordRuntime.setProductPreferences({...SolcordSettings.slice("productPreferences"), nativeSuite: next}));
     const updateTranslationPreferences = useSolcordWrite((patch: Partial<typeof nativePreferences.translation>) => {
-        const current = SolcordSettings.snapshot().productPreferences;
+        const current = SolcordSettings.slice("productPreferences");
         return SolcordRuntime.setProductPreferences({...current, nativeSuite: {...current.nativeSuite, translation: {...current.nativeSuite.translation, ...patch}}});
     });
     const changeTranslationProvider = async (provider: typeof nativePreferences.translation.provider) => {
@@ -650,7 +611,7 @@ function NativeSuiteAccountPanel({scope, state}: {scope: NativeSuiteScope; state
         try {
             const activeController = requireController();
             const preview = activeController.previewLocalVolume(audioUserId.trim(), 100, audioPercent);
-            if (!window.confirm(`Set local playback for user •${preview.userId.slice(-4)} from ${preview.currentPercent}% to ${preview.targetPercent}%? This changes only what you hear.`)) return;
+            if (!window.confirm(`Set local playback for user •${preview.userId.slice(-4)} to ${preview.targetPercent}%? This changes only what you hear.`)) return;
             activeController.applyReviewedLocalVolume();
             setActionStatus("Reviewed local playback volume applied.");
         }
@@ -963,11 +924,11 @@ function AccessibilityControls() {
 }
 
 function PerformanceProfileControls() {
-    const preferences = useStateFromStores(SolcordSettings, () => SolcordSettings.snapshot().productPreferences);
+    const preferences = useStateFromStores(SolcordSettings, () => SolcordSettings.slice("productPreferences"));
     const profile = preferences.performanceProfile;
     const reducedByOs = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
     const policy = resolveSolcordPerformancePolicy(profile, preferences.appearance.motion, reducedByOs);
-    const setProfile = useSolcordWrite((performanceProfile: SolcordPerformanceProfile) => SolcordRuntime.setProductPreferences({...SolcordSettings.snapshot().productPreferences, performanceProfile}));
+    const setProfile = useSolcordWrite((performanceProfile: SolcordPerformanceProfile) => SolcordRuntime.setProductPreferences({...SolcordSettings.slice("productPreferences"), performanceProfile}));
     return <Section title="Performance profile" summary="Choose how much background work and motion Solcord may use.">
         <div className="solcord-segmented" role="radiogroup" aria-label="Solcord performance profile">
             {(Object.keys(SOLCORD_PERFORMANCE_POLICIES) as SolcordPerformanceProfile[]).map(id => <button key={id} type="button" role="radio" aria-checked={profile === id} onClick={() => setProfile(id)}><strong>{id[0].toUpperCase() + id.slice(1)}</strong><small>{SOLCORD_PERFORMANCE_POLICIES[id].description}</small></button>)}
@@ -977,25 +938,25 @@ function PerformanceProfileControls() {
 }
 
 function BaselineToolsPanel() {
-    const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({preferences: SolcordSettings.snapshot().productPreferences, runtime: SolcordRuntime.baselineSuiteStatus()}));
+    const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({preferences: SolcordSettings.slice("productPreferences"), runtime: SolcordRuntime.baselineSuiteStatus()}));
     const baseline = state.preferences.baseline;
     const [mediaLabel, setMediaLabel] = useState("");
     const [mediaUrl, setMediaUrl] = useState("");
     const [mediaKind, setMediaKind] = useState<SolcordMediaKind>("gif");
     const [status, setStatus] = useState("");
     const update = (patch: Partial<typeof baseline>) => {
-        const current = SolcordSettings.snapshot().productPreferences;
+        const current = SolcordSettings.slice("productPreferences");
         return SolcordRuntime.setProductPreferences({...current, baseline: {...current.baseline, ...patch}});
     };
     const toggleRegion = (region: "guilds" | "channels" | "members", hidden: boolean) => {
-        const collapsedRegions = SolcordSettings.snapshot().productPreferences.baseline.collapsedRegions;
+        const collapsedRegions = SolcordSettings.slice("productPreferences").baseline.collapsedRegions;
         return update({collapsedRegions: hidden ? [...new Set([...collapsedRegions, region])] : collapsedRegions.filter(item => item !== region)});
     };
     const addMedia = async () => {
         const url = normalizeSolcordMediaShelfUrl(mediaUrl.trim());
         try {
             if (!url) throw new Error();
-            const mediaShelf = SolcordSettings.snapshot().productPreferences.baseline.mediaShelf;
+            const mediaShelf = SolcordSettings.slice("productPreferences").baseline.mediaShelf;
             await update({mediaShelf: [...mediaShelf, {id: globalThis.crypto?.randomUUID?.() ?? `media-${Date.now().toString(36)}`, label: mediaLabel.trim() || "Saved media", url, kind: mediaKind}].slice(-200)});
             setMediaLabel(current => current === mediaLabel ? "" : current);
             setMediaUrl(current => current === mediaUrl ? "" : current);
@@ -1012,7 +973,7 @@ function BaselineToolsPanel() {
             <label><span><strong>Message Link Preview</strong><small>Preview Discord message links only when the exact message is already loaded. No history fetch.</small></span><SolcordSwitch label="Enable Message Link Preview" checked={baseline.messageLinkPreview} onChange={value => update({messageLinkPreview: value})} /></label>
         </div>
         <details className="solcord-media-shelf"><summary>Media Shelf <small>{baseline.mediaShelf.length} saved reference(s)</small></summary><p>Keep bounded labels for Discord CDN GIF, sticker, or emoji links. Files are never downloaded in the background.</p><div className="solcord-catalog-tools"><label>Label<input value={mediaLabel} maxLength={64} onChange={event => setMediaLabel(event.currentTarget.value)} /></label><label>Kind<select value={mediaKind} onChange={event => setMediaKind(event.currentTarget.value as SolcordMediaKind)}><option value="gif">GIF</option><option value="sticker">Sticker</option><option value="emoji">Emoji</option></select></label><label>Discord CDN URL<input type="url" value={mediaUrl} onChange={event => setMediaUrl(event.currentTarget.value)} /></label></div><div className="solcord-actions"><ActionButton disabled={!mediaUrl.trim()} onClick={addMedia}>Save local reference</ActionButton></div>{baseline.mediaShelf.length > 0 && <div className="solcord-media-list">{baseline.mediaShelf.map(item => <div key={item.id}><span><strong>{item.label}</strong><small>{item.kind} · {new URL(item.url).hostname}</small></span><ActionButton onClick={() => navigator.clipboard?.writeText(item.url)}>Copy URL</ActionButton><ActionButton tone="danger" onClick={() => {
-                const mediaShelf = SolcordSettings.snapshot().productPreferences.baseline.mediaShelf;
+                const mediaShelf = SolcordSettings.slice("productPreferences").baseline.mediaShelf;
                 return update({mediaShelf: mediaShelf.filter(candidate => candidate.id !== item.id)});
             }}>Remove</ActionButton></div>)}</div>}</details>
         <p className="solcord-key-hint">Runtime: {state.runtime.active ? `${state.runtime.enabled.join(", ")} active · ${Object.values(state.runtime.resources).reduce((sum, value) => sum + value, 0)} owned resources.` : "all adapters idle."} Media Shelf keeps {baseline.mediaShelf.length} local reference(s) and runs no Discord adapter. {state.runtime.unavailable.join(" ")}</p>
@@ -1282,7 +1243,7 @@ function AboutSolcord() {
 
 function SessionPulse({openWorkspace, openSetup}: {openWorkspace(workspace: SolcordWorkspaceId): void; openSetup(): void;}) {
     const state = useStateFromStores([SolcordSettings, SolcordRuntime, PluginDoctor, PluginManager], () => ({
-        document: SolcordSettings.snapshot(),
+        document: SolcordSettings.readonlySnapshot(),
         health: SolcordRuntime.health(),
         recovery: SolcordRuntime.recoveryMode,
         quarantines: PluginDoctor.snapshot(),
@@ -1306,18 +1267,18 @@ function SessionPulse({openWorkspace, openSetup}: {openWorkspace(workspace: Solc
         ...(state.activity?.status === "attention" ? [{id: "activity", priority: 85, tone: "attention" as const, label: "Activity Bridge needs review", detail: "The bounded compatibility ledger reported attention.", action: "Inspect Activity Bridge"}] : []),
         ...(drift?.status === "failed" || drift?.status === "quarantined" ? [{id: "drift", priority: 80, tone: "attention" as const, label: "Discord adapter drift", detail: drift.detail, action: "Open diagnostics"}] : []),
         ...(state.document.onboarding.status === "pending" ? [{id: "setup", priority: 75, tone: "attention" as const, label: "Finish setup", detail: "Your saved setup is ready to continue. Nothing has changed yet.", action: "Continue"}] : []),
-        ...(state.dueReminders ? [{id: "return-later", priority: 65, tone: "attention" as const, label: "Return Later is due", detail: `${state.dueReminders} local reminder(s) are ready.`, action: "Open People"}] : []),
+        ...(state.dueReminders ? [{id: "return-later", priority: 65, tone: "attention" as const, label: "Return Later is due", detail: `${state.dueReminders} local reminder(s) are ready.`, action: "Review reminders"}] : []),
         ...(state.relationshipChanges ? [{id: "friend-watch", priority: 60, tone: "ok" as const, label: "Relationship history updated", detail: `${state.relationshipChanges} local change(s)`, action: "Open People"}] : [])
     ]);
     const signals = attentionSignals.length ? attentionSignals : [{id: "healthy", priority: 1, tone: "ok" as const, label: "All clear", detail: "No Solcord action needs attention."}];
     return <Section title="Right now">
-        <div className="solcord-pulse-list">{signals.map(signal => <article key={signal.id} className={`solcord-pulse solcord-pulse-${signal.tone}`}><div><strong>{signal.label}</strong><p>{signal.detail}</p></div>{signal.action && <ActionButton onClick={() => signal.id === "setup" ? openSetup() : openWorkspace(signal.id === "activity" ? "voice" : signal.id === "return-later" || signal.id === "friend-watch" ? "friends" : "recovery")}>{signal.action}</ActionButton>}</article>)}</div>
+        <div className="solcord-pulse-list">{signals.map(signal => <article key={signal.id} className={`solcord-pulse solcord-pulse-${signal.tone}`}><div><strong>{signal.label}</strong><p>{signal.detail}</p></div>{signal.action && <ActionButton onClick={() => signal.id === "setup" ? openSetup() : openWorkspace(signal.id === "activity" ? "voice" : signal.id === "return-later" ? "chat" : signal.id === "friend-watch" ? "friends" : "recovery")}>{signal.action}</ActionButton>}</article>)}</div>
     </Section>;
 }
 
 function ProviderMigrationStatus() {
     const state = useStateFromStores([PluginManager, SolcordSettings], () => {
-        const document = SolcordSettings.snapshot();
+        const document = SolcordSettings.readonlySnapshot();
         const installed = SOLCORD_V2_REPLACEMENT_MANIFEST.entries.flatMap(entry => {
             const addon = PluginManager.resolveAddon(entry.fileName);
             return addon ? [{...entry, enabled: PluginManager.isEnabled(addon.filename) === true}] : [];
@@ -1393,7 +1354,7 @@ const SOLCORD_EFFECT_COLORS = Object.freeze([
 ] as const);
 
 function AppearanceWorkspace() {
-    const preferences = useStateFromStores(SolcordSettings, () => SolcordSettings.snapshot().productPreferences);
+    const preferences = useStateFromStores(SolcordSettings, () => SolcordSettings.slice("productPreferences"));
     const appearance = preferences.appearance;
     const [saveStatus, setSaveStatus] = useState("");
     const persist = useSolcordWrite(async (next: SolcordProductPreferences) => {
@@ -1401,9 +1362,9 @@ function AppearanceWorkspace() {
         await SolcordRuntime.setProductPreferences(next);
         setSaveStatus("Saved");
     }, () => setSaveStatus("Not saved. Previous setting restored."));
-    const update = (next: SolcordAppearancePreferences) => persist({...SolcordSettings.snapshot().productPreferences, appearance: next});
+    const update = (next: SolcordAppearancePreferences) => persist({...SolcordSettings.slice("productPreferences"), appearance: next});
     const updateMotionEffect = (next: Partial<typeof preferences.nativeSuite.motion>) => {
-        const current = SolcordSettings.snapshot().productPreferences;
+        const current = SolcordSettings.slice("productPreferences");
         return persist({...current, nativeSuite: {...current.nativeSuite, motion: {...current.nativeSuite.motion, ...next}}});
     };
     const updateAnimatedBackground = (effect: typeof preferences.nativeSuite.motion.effect) => {
@@ -1443,7 +1404,7 @@ function AppearanceWorkspace() {
 }
 
 function FriendWatchPanel() {
-    const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({preferences: SolcordSettings.snapshot().productPreferences, events: SolcordRuntime.friendWatchEvents(), persistent: SolcordRuntime.friendWatchPersistent()}));
+    const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({preferences: SolcordSettings.slice("productPreferences"), events: SolcordRuntime.friendWatchEvents(), persistent: SolcordRuntime.friendWatchPersistent()}));
     const policy = state.preferences.friendWatch;
     const storageDescription = !policy.enabled
         ? "Off. No relationship history is stored."
@@ -1451,7 +1412,7 @@ function FriendWatchPanel() {
             ? "On. History is encrypted, local, and isolated to this account."
             : "On for this session only. Persistent storage is unavailable.";
     const update = useSolcordWrite((next: Partial<typeof policy>) => {
-        const current = SolcordSettings.snapshot().productPreferences;
+        const current = SolcordSettings.slice("productPreferences");
         return SolcordRuntime.setProductPreferences({...current, friendWatch: {...current.friendWatch, ...next}});
     });
     return <Section title="Friend Watch" summary="Optional local history for relationship changes already seen by Discord.">
@@ -1494,7 +1455,7 @@ function ReturnLaterPanel() {
 }
 
 function SetupManagement({openSetup}: {openSetup: () => void}) {
-    const document = useStateFromStores(SolcordSettings, () => SolcordSettings.snapshot());
+    const document = useStateFromStores(SolcordSettings, () => SolcordSettings.readonlySnapshot());
     const [status, setStatus] = useState("");
     if (document.onboarding.status === "pending") return null;
     return <section className="solcord-setup-management" aria-label="Solcord setup management">
@@ -1525,26 +1486,47 @@ function SetupManagement({openSetup}: {openSetup: () => void}) {
 
 function FakeDeafenControls() {
     const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({
-        consent: SolcordSettings.snapshot().powerLab["fake-deafen"],
+        consent: SolcordSettings.slice("powerLab")["fake-deafen"],
         status: SolcordRuntime.fakeDeafenStatus(),
-        provider: SolcordRuntime.fakeDeafenProvider()
+        provider: SolcordRuntime.fakeDeafenProvider(),
+        accountGeneration: SolcordRuntime.privateAccountGeneration()
     }));
-    const [actionStatus, setActionStatus] = useState("");
-    const toggleFakeDeafen = (enabled: boolean) => {
-        return SolcordRuntime.setPowerExperiment("fake-deafen", enabled, enabled).then(succeeded => {
+    const [actionResult, setActionResult] = useState<"runtime" | {error: string;}>();
+    const actionStatus = actionResult === "runtime" ? state.status.detail || "The selection was saved; runtime readiness is not confirmed." : actionResult?.error ?? "";
+    const communityProvider = state.provider === "community";
+    const results = useSolcordResultScope(String(state.accountGeneration), () => SolcordRuntime.privateAccountGeneration() === state.accountGeneration && SolcordRuntime.fakeDeafenProvider() !== "community");
+    useEffect(() => setActionResult(undefined), [state.accountGeneration, communityProvider]);
+    const toggleFakeDeafen = async (enabled: boolean) => {
+        const isCurrent = results.begin();
+        if (!isCurrent()) return false;
+        setActionResult(undefined);
+        try {
+            const succeeded = await SolcordRuntime.setPowerExperiment("fake-deafen", enabled, enabled);
+            if (!isCurrent()) return false;
             const status = SolcordRuntime.fakeDeafenStatus();
-            setActionStatus(status.phase === "attention"
-                ? status.detail
-                : succeeded
-                    ? (enabled ? "Direct voice control is ready." : "Adapter is idle. The adjacent button will load it again when clicked.")
-                    : "The adapter failed closed.");
-        });
+            setActionResult(!succeeded && status.phase !== "attention"
+                ? {error: "The adapter change did not finish. Check the saved selection, then retry."}
+                : "runtime");
+            return succeeded;
+        }
+        catch {
+            if (isCurrent()) setActionResult({error: "The adapter change did not finish. Check the saved selection, then retry."});
+            return false;
+        }
     };
     const experiment = SOLCORD_POWER_LAB.find(candidate => candidate.id === "fake-deafen")!;
-    const communityProvider = state.provider === "community";
+    const adapterWaiting = state.status.phase !== "attention" && (state.status.pending === true || (state.status.phase === "ready" && !state.status.accountBound));
     return <Section title="Fake Deafen" summary="A direct built-in control beside Discord's normal Deafen button.">
-        <div className="solcord-power-control"><div><span className={`solcord-status solcord-status-${communityProvider || state.status.phase === "armed" ? "active" : state.status.phase === "attention" ? "failed" : "starting"}`}>{communityProvider ? "community plugin active" : state.status.phase}</span><p>{communityProvider ? "Solcord leaves the separate plugin untouched and does not stack a second gateway patch." : state.status.detail}</p></div><SolcordSwitch label="Keep Fake Deafen adapter ready" checked={state.consent.enabled} disabled={communityProvider} onChange={toggleFakeDeafen} /></div>
+        <div className="solcord-power-control"><div><span className={`solcord-status solcord-status-${communityProvider || (!adapterWaiting && state.status.phase === "armed") ? "active" : state.status.phase === "attention" ? "failed" : "starting"}`}>{communityProvider ? "community plugin active" : adapterWaiting ? "waiting" : state.status.phase}</span><p>{communityProvider ? "Solcord leaves the separate plugin untouched and does not stack a second gateway patch." : state.status.detail}</p></div><SolcordSwitch label="Keep Fake Deafen adapter ready" checked={state.consent.enabled} disabled={communityProvider} onChange={toggleFakeDeafen} /></div>
         <p className="solcord-key-hint">In a voice call, use the <strong>F</strong>-badged button immediately beside normal Deafen. One click turns Fake Deafen on; the next click restores normal voice state. There is no per-call confirmation.</p>
+        <dl className="solcord-facts" aria-label="Your voice state">
+            <div><dt>Your deafened icon</dt><dd>{state.status.ownRowIndicator ? "Ready" : "Not available yet"}</dd></div>
+            <div><dt>Local deafen</dt><dd>{typeof state.status.voice?.localSelfDeaf === "boolean" ? state.status.voice.localSelfDeaf ? "On" : "Off" : "Unknown"}</dd></div>
+            <div><dt>Discord self-deafen</dt><dd>{typeof state.status.voice?.serverSelfDeaf === "boolean" ? state.status.voice.serverSelfDeaf ? "On" : "Off" : "Unknown"}</dd></div>
+            <div><dt>Server deafen</dt><dd>{typeof state.status.voice?.serverDeaf === "boolean" ? state.status.voice.serverDeaf ? "On (server enforced)" : "Off" : "Unknown"}</dd></div>
+        </dl>
+        <p className="solcord-key-hint">Discord values are the latest observed state for your current call. They do not confirm a fresh Discord response or audio playback.</p>
+        <p className="solcord-key-hint">While Fake Deafen is on, your voice-row icon follows the deafened state received from Discord. Local audio stays undeafened.</p>
         <details className="solcord-secondary-tools"><summary>Behavior and automatic cleanup</summary><p>{experiment.summary} This changes only the voice-state information your client sends; it does not grant permissions or affect other accounts. Solcord restores or disarms on disconnect, channel change, account change, adapter drift, recovery mode, or module disable.</p></details>
         {actionStatus && <p role="status" className="solcord-import-status">{actionStatus}</p>}
     </Section>;
@@ -1552,8 +1534,8 @@ function FakeDeafenControls() {
 
 export default function SolcordPanel() {
     const recoveryMode = useStateFromStores(SolcordRuntime, () => SolcordRuntime.recoveryMode);
-    const onboarding = useStateFromStores(SolcordSettings, () => SolcordSettings.snapshot().onboarding);
-    const productPreferences = useStateFromStores(SolcordSettings, () => SolcordSettings.snapshot().productPreferences);
+    const onboarding = useStateFromStores(SolcordSettings, () => SolcordSettings.slice("onboarding"));
+    const productPreferences = useStateFromStores(SolcordSettings, () => SolcordSettings.slice("productPreferences"));
     const appearance = productPreferences.appearance;
     const [workspace, setWorkspace] = useState<SolcordWorkspaceId>("overview");
     const [workspaceQuery, setWorkspaceQuery] = useState("");
@@ -1592,7 +1574,7 @@ export default function SolcordPanel() {
         return () => cancelAnimationFrame(frame);
     }, [onboarding.status, workspace]);
     const openSetup = () => {
-        if (SolcordSettings.snapshot().onboarding.status !== "pending") SolcordSettings.reopenOnboarding();
+        if (SolcordSettings.slice("onboarding").status !== "pending") SolcordSettings.reopenOnboarding();
         setWorkspaceFocus("setup");
         setWorkspace("overview");
     };
