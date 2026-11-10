@@ -100,28 +100,69 @@ afterEach(() => {
 });
 
 describe("Solcord native-suite security boundaries", () => {
-    test("DOM invalidations ignore unrelated churn and scope timestamp discovery to the added subtree", async () => {
+    test("DOM invalidations ignore unrelated churn and scope timestamp discovery to the added subtree", () => {
         installVoiceRuntime(async () => testStream().stream);
+        const originalObserver = globalThis.MutationObserver;
+        const originalFrame = globalThis.requestAnimationFrame;
+        const originalCancelFrame = globalThis.cancelAnimationFrame;
+        const observers: Array<{observer: MutationObserver; callback: MutationCallback;}> = [];
+        const frames = new Map<number, FrameRequestCallback>();
+        let frameId = 0;
+        globalThis.MutationObserver = class extends originalObserver {
+            constructor(callback: MutationCallback) {
+                super(callback);
+                observers.push({observer: this, callback});
+            }
+        };
+        globalThis.requestAnimationFrame = callback => {frames.set(++frameId, callback); return frameId;};
+        globalThis.cancelAnimationFrame = id => {frames.delete(id);};
+        const drainMutations = () => {
+            let count = 0;
+            for (const {observer, callback} of observers) {
+                const records = observer.takeRecords();
+                count += records.length;
+                if (records.length) callback(records, observer);
+            }
+            return count;
+        };
         const scope = new SolcordDisposalScope();
         const controller = new SolcordNativeSuiteController(scope, {CompleteTimestamps: true, CharCounter: true, VoiceMessages: true}, {prepareVoiceNoteUpload: () => {}});
-        controller.start();
-        const searches = spyOn(document, "querySelectorAll");
         const unrelated = document.createElement("section");
         const timestamp = document.createElement("time");
         timestamp.setAttribute("datetime", "2026-11-07T12:00:00.000Z");
         try {
-            document.body.append(unrelated);
-            await new Promise(resolve => setTimeout(resolve, 35));
-            expect(searches).not.toHaveBeenCalled();
-            unrelated.append(timestamp);
-            await new Promise(resolve => setTimeout(resolve, 35));
-            expect(timestamp.dataset.solcordCompleteTime).toBe("true");
-            expect(searches).not.toHaveBeenCalled();
-            const view = controller.statusView();
-            expect(controller.statusView()).toBe(view);
-            expect(Object.isFrozen(view)).toBeTrue();
+            controller.start();
+            const searches = spyOn(document, "querySelectorAll");
+            try {
+                document.body.append(unrelated);
+                expect(drainMutations()).toBeGreaterThan(0);
+                expect(frames.size).toBe(0);
+                expect(searches).not.toHaveBeenCalled();
+                unrelated.append(timestamp);
+                expect(drainMutations()).toBeGreaterThan(0);
+                expect(frames.size).toBe(1);
+                // Hold the queued frame deliberately: wall-clock sleeps cannot
+                // establish that an observer's later animation frame has run.
+                expect(timestamp.dataset.solcordCompleteTime).toBeUndefined();
+                const [pendingId, render] = [...frames][0];
+                frames.delete(pendingId);
+                render(0);
+                expect(timestamp.dataset.solcordCompleteTime).toBe("true");
+                expect(searches).not.toHaveBeenCalled();
+                const view = controller.statusView();
+                expect(controller.statusView()).toBe(view);
+                expect(Object.isFrozen(view)).toBeTrue();
+            }
+            finally {searches.mockRestore();}
         }
-        finally {searches.mockRestore(); controller.dispose(); scope.dispose(); unrelated.remove();}
+        finally {
+            try {controller.dispose(); scope.dispose(); unrelated.remove();}
+            finally {
+                globalThis.MutationObserver = originalObserver;
+                globalThis.requestAnimationFrame = originalFrame;
+                globalThis.cancelAnimationFrame = originalCancelFrame;
+            }
+        }
     });
 
     test("fifty native-suite start/dispose cycles release every owned DOM listener and observer", () => {
