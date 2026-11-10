@@ -1,0 +1,17 @@
+name: Check Apple Silicon runner availability
+on: create
+permissions:
+  contents: read
+jobs:
+  native-runner:
+    if: github.repository == 'celubos/Solcord' && github.event.ref_type == 'branch' && github.event.ref == 'delivery/solcord-macos-runner-check-20261109'
+    runs-on: macos-26
+    timeout-minutes: 5
+    steps:
+      - name: Check native signing tools
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          sw_vers
+          command -v codesign
+          command -v ditto
