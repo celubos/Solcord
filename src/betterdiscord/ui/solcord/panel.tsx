@@ -1519,6 +1519,12 @@ function FakeDeafenControls() {
     return <Section title="Fake Deafen" summary="A direct built-in control beside Discord's normal Deafen button.">
         <div className="solcord-power-control"><div><span className={`solcord-status solcord-status-${communityProvider || (!adapterWaiting && state.status.phase === "armed") ? "active" : state.status.phase === "attention" ? "failed" : "starting"}`}>{communityProvider ? "community plugin active" : adapterWaiting ? "waiting" : state.status.phase}</span><p>{communityProvider ? "Solcord leaves the separate plugin untouched and does not stack a second gateway patch." : state.status.detail}</p></div><SolcordSwitch label="Keep Fake Deafen adapter ready" checked={state.consent.enabled} disabled={communityProvider} onChange={toggleFakeDeafen} /></div>
         <p className="solcord-key-hint">In a voice call, use the <strong>F</strong>-badged button immediately beside normal Deafen. One click turns Fake Deafen on; the next click restores normal voice state. There is no per-call confirmation.</p>
+        <dl className="solcord-facts" aria-label="Your voice state">
+            <div><dt>Local deafen</dt><dd>{typeof state.status.voice?.localSelfDeaf === "boolean" ? state.status.voice.localSelfDeaf ? "On" : "Off" : "Unknown"}</dd></div>
+            <div><dt>Discord self-deafen</dt><dd>{typeof state.status.voice?.serverSelfDeaf === "boolean" ? state.status.voice.serverSelfDeaf ? "On" : "Off" : "Unknown"}</dd></div>
+            <div><dt>Server deafen</dt><dd>{typeof state.status.voice?.serverDeaf === "boolean" ? state.status.voice.serverDeaf ? "On (server enforced)" : "Off" : "Unknown"}</dd></div>
+        </dl>
+        <p className="solcord-key-hint">Discord values are the latest observed state for your current call. They do not confirm a fresh Discord response or audio playback.</p>
         <details className="solcord-secondary-tools"><summary>Behavior and automatic cleanup</summary><p>{experiment.summary} This changes only the voice-state information your client sends; it does not grant permissions or affect other accounts. Solcord restores or disarms on disconnect, channel change, account change, adapter drift, recovery mode, or module disable.</p></details>
         {actionStatus && <p role="status" className="solcord-import-status">{actionStatus}</p>}
     </Section>;

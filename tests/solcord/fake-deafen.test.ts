@@ -198,7 +198,10 @@ toggle: () => true});
 
     test("pending activation is observable and settles only after a matching native update arms it", async () => {
         const state = harness(); state.locallyDeafened = false;
-        state.dependencies.toggleLocalDeafen = () => {state.locallyDeafened = !state.locallyDeafened;};
+        state.dependencies.toggleLocalDeafen = () => {
+            state.locallyDeafened = !state.locallyDeafened;
+            if (!state.locallyDeafened) state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, {...deafenedPayload(), self_deaf: false});
+        };
         const controller = new SolcordFakeDeafenController(state.dependencies); controller.start();
         expect(controller.toggleDirect()).toBeTrue();
         expect(controller.snapshot()).toMatchObject({pending: true, armed: false});
@@ -210,6 +213,138 @@ toggle: () => true});
         expect(controller.snapshot()).toMatchObject({pending: false, armed: true});
         expect(state.locallyDeafened).toBeFalse();
         controller.stop();
+    });
+
+    test("arming waits for the actual local restore packet instead of accepting a queued native action", async () => {
+        const state = harness();
+        const native: Array<() => void> = [];
+        state.dependencies.toggleLocalDeafen = () => native.push(() => {
+            state.locallyDeafened = !state.locallyDeafened;
+            state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, {...deafenedPayload(), self_deaf: state.locallyDeafened});
+        });
+        const controller = new SolcordFakeDeafenController(state.dependencies); controller.start();
+        state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, deafenedPayload());
+        expect(controller.arm()).toBeTrue();
+        const result = controller.waitForActivation();
+        let settled = false; void result.then(() => {settled = true;});
+        await Promise.resolve();
+        expect(settled).toBeFalse();
+        expect(controller.snapshot()).toMatchObject({armed: false, pending: true});
+        expect(state.locallyDeafened).toBeTrue();
+        native.shift()!();
+        expect(await result).toBeTrue();
+        expect(controller.snapshot()).toMatchObject({armed: true, pending: false});
+        expect(state.locallyDeafened).toBeFalse();
+        expect((state.sent.at(-1)?.payload as SolcordVoiceStatePayload).self_deaf).toBeTrue();
+        controller.stop();
+    });
+
+    test("a silent native local-restore action times out without reporting armed", async () => {
+        let expire!: () => void;
+        const timer = spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void) => {expire = callback; return {};}) as never);
+        const clear = spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
+        const state = harness(); state.dependencies.toggleLocalDeafen = () => {};
+        const controller = new SolcordFakeDeafenController(state.dependencies);
+        try {
+            controller.start(); state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, deafenedPayload());
+            expect(controller.arm()).toBeTrue();
+            const result = controller.waitForActivation();
+            expect(controller.snapshot()).toMatchObject({pending: true, armed: false});
+            expire();
+            expect(await result).toBeFalse();
+            expect(controller.snapshot()).toMatchObject({phase: "attention", armed: false, pending: false});
+            expect(state.locallyDeafened).toBeTrue();
+        }
+        finally {controller.stop(); timer.mockRestore(); clear.mockRestore();}
+    });
+
+    test("a reentrant stop while local restoration is announced prevents the native action", () => {
+        const state = harness(); let actions = 0;
+        state.dependencies.toggleLocalDeafen = () => {actions++;};
+        const controller = new SolcordFakeDeafenController(state.dependencies); controller.start();
+        state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, deafenedPayload());
+        let stopped = false;
+        state.dependencies.onStatus = status => {if (status.pending && !stopped) {stopped = true; controller.stop();}};
+        expect(controller.arm()).toBeFalse();
+        expect(actions).toBe(0);
+        expect(controller.snapshot()).toMatchObject({armed: false, pending: false});
+        expect(state.unpatched).toBeTrue();
+    });
+
+    test("a reentrant stop while direct activation is announced cannot queue its first native action", () => {
+        const state = harness(); state.locallyDeafened = false;
+        let actions = 0; state.dependencies.toggleLocalDeafen = () => {actions++;};
+        const controller = new SolcordFakeDeafenController(state.dependencies); controller.start();
+        let stopped = false;
+        state.dependencies.onStatus = status => {if (status.pending && !stopped) {stopped = true; controller.stop();}};
+        expect(controller.toggleDirect()).toBeFalse();
+        expect(actions).toBe(0);
+        expect(controller.snapshot()).toMatchObject({armed: false, pending: false});
+        expect(state.unpatched).toBeTrue();
+    });
+
+    test("a reentrant stop during confirmed activation leaves no stale rewritten packet after restoration", () => {
+        const state = harness();
+        const controller = new SolcordFakeDeafenController(state.dependencies); controller.start();
+        state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, deafenedPayload());
+        let stopped = false;
+        state.dependencies.onStatus = status => {if (status.armed && !stopped) {stopped = true; controller.stop();}};
+        expect(controller.arm()).toBeFalse();
+        expect(controller.snapshot()).toMatchObject({armed: false, pending: false});
+        expect(state.locallyDeafened).toBeFalse();
+        expect((state.sent.at(-1)?.payload as SolcordVoiceStatePayload).self_deaf).toBeFalse();
+        expect(state.unpatched).toBeTrue();
+    });
+
+    test("a reentrant stop during an armed update cannot send an older forced state after its restoration", () => {
+        const state = harness();
+        const controller = new SolcordFakeDeafenController(state.dependencies); controller.start();
+        state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, deafenedPayload()); controller.arm();
+        let stopped = false;
+        state.dependencies.onStatus = status => {if (status.armed && !stopped) {stopped = true; controller.stop();}};
+        state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, {...deafenedPayload(), self_deaf: false});
+        expect(controller.snapshot()).toMatchObject({armed: false, pending: false});
+        expect((state.sent.at(-1)?.payload as SolcordVoiceStatePayload).self_deaf).toBeFalse();
+        expect(state.unpatched).toBeTrue();
+    });
+
+    test("a throwing confirmation observer cannot leave a promise pending when the host patcher catches its error", async () => {
+        const state = harness();
+        state.dependencies.patchSend = (target, observe) => {
+            const original = target.send;
+            target.send = function (...args: [number, unknown, ...unknown[]]) {
+                try {observe(args);}
+                catch {/* The shipping Patcher isolates child callback errors. */}
+                return original.apply(this, args);
+            };
+            return () => {target.send = original;};
+        };
+        state.dependencies.onStatus = status => {if (status.armed) throw Error("Confirmation observer failed");};
+        const controller = new SolcordFakeDeafenController(state.dependencies); controller.start();
+        state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, deafenedPayload());
+        expect(controller.arm()).toBeFalse();
+        expect(await controller.waitForActivation()).toBeFalse();
+        expect(controller.snapshot()).toMatchObject({phase: "attention", armed: false, pending: false});
+        expect((state.sent.at(-1)?.payload as SolcordVoiceStatePayload).self_deaf).toBeFalse();
+        controller.stop();
+    });
+
+    test("stopping while a native action is queued reports that normal Deafen may still need resynchronization", async () => {
+        const state = harness(); state.locallyDeafened = false;
+        const native: Array<() => void> = [];
+        state.dependencies.toggleLocalDeafen = () => native.push(() => {
+            state.locallyDeafened = true;
+            state.socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, deafenedPayload());
+        });
+        const controller = new SolcordFakeDeafenController(state.dependencies); controller.start(); controller.toggleDirect();
+        const result = controller.waitForActivation();
+        expect(controller.stop()).toBeFalse(); expect(await result).toBeFalse();
+        expect(controller.snapshot()).toMatchObject({phase: "attention", armed: false, pending: false});
+        expect(controller.snapshot().detail).toContain("may still complete");
+        native.shift()!();
+        expect(state.locallyDeafened).toBeTrue();
+        expect(controller.snapshot().detail).toContain("normal Deafen control");
+        expect(state.unpatched).toBeTrue();
     });
 
     test("activation timeout fails closed and late native updates cannot rearm it", async () => {

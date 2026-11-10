@@ -4,6 +4,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import {SolcordFakeDeafenController, applySolcordFakeDeafenConsentTransition} from "../../src/betterdiscord/modules/solcord/fake-deafen";
 import {discoverSolcordFakeDeafenCapabilities, isSolcordFakeDeafenGateway, isSolcordFakeDeafenMediaActions} from "../../src/betterdiscord/modules/solcord/fake-deafen-capabilities";
+import {readSolcordOwnVoiceDeafenState} from "../../src/betterdiscord/modules/solcord/fake-deafen-voice-state";
 import {SolcordDisposalScope} from "../../src/betterdiscord/modules/solcord/disposal";
 
 // Execute the shipping Runtime methods with controlled host dependencies. No
@@ -35,6 +36,18 @@ function harness() {
     let failGateway = false;
     let throwOnReady = false;
     let stopOnReady = false;
+    let notifications = 0;
+    let serverSelfDeaf = false;
+    let beforeRegister: (() => void) | undefined;
+    const listeners = new Set<() => void>();
+    let listenerCount = 0;
+    const observable = () => {
+        const registered = new Set<() => void>();
+        return {
+            addChangeListener(listener: () => void) {beforeRegister?.(); registered.add(listener); listeners.add(listener); listenerCount++;},
+            removeChangeListener(listener: () => void) {listeners.delete(listener); if (registered.delete(listener)) listenerCount--;}
+        };
+    };
     const pendingNative: Array<() => void> = [];
     const toasts: Array<{kind: string; detail: string;}> = [];
     const signals: AbortSignal[] = [];
@@ -50,12 +63,14 @@ toggleSelfDeaf() {
     }};
     const stores: Record<string, unknown> = {
         UserStore: {getCurrentUser: () => ({id: accountId})},
-        SelectedChannelStore: {getVoiceChannelId: () => channelId},
+        SelectedChannelStore: {...observable(), getVoiceChannelId: () => channelId},
         // Server deafening must not be mistaken for the local control state.
-        MediaEngineStore: {isSelfDeaf: () => localDeafened, isDeaf: () => true}
+        MediaEngineStore: {...observable(), isSelfDeaf: () => localDeafened, isDeaf: () => true},
+        VoiceStateStore: {...observable(), getVoiceStateForChannel: (channel: string, user: string) => channel === channelId && user === accountId ? {userId: accountId, channelId, selfDeaf: serverSelfDeaf, deaf: false} : undefined}
     };
     const dependencies = {
         SolcordDisposalScope,
+        readSolcordOwnVoiceDeafenState,
 SolcordFakeDeafenController,
 applySolcordFakeDeafenConsentTransition,
         isSolcordFakeDeafenGateway,
@@ -73,6 +88,7 @@ isSolcordFakeDeafenMediaActions,
         Logger: {warn() {}},
         errorName: () => "Error",
         notify: (candidate: {fakeDeafenStatus(): {accountBound: boolean;}; stop(): void;}) => {
+            notifications++;
             if (!candidate.fakeDeafenStatus().accountBound) return;
             if (throwOnReady) throw new Error("observer failed");
             if (stopOnReady) {stopOnReady = false; candidate.stop();}
@@ -100,6 +116,12 @@ isSolcordFakeDeafenMediaActions,
         toasts,
         signals,
         pendingNative,
+        get notifications() {return notifications;},
+        get listenerCount() {return listenerCount;},
+        get serverSelfDeaf() {return serverSelfDeaf;},
+        set serverSelfDeaf(value: boolean) {serverSelfDeaf = value;},
+        emitVoiceChange() {for (const listener of listeners) listener();},
+        stopBeforeListenerRegisters() {beforeRegister = () => {beforeRegister = undefined; runtime.stop();};},
         get patches() {return patches;},
         get livePatches() {return livePatches;},
         get channelId() {return channelId;},
@@ -188,7 +210,8 @@ describe("Fake Deafen runtime handoff", () => {
         h.pendingNative.shift()!();
         await Promise.resolve();
         expect(h.livePatches).toBe(0);
-        expect(h.runtime.fakeDeafenStatus()).toMatchObject({phase: "off", armed: false});
+        expect(h.runtime.fakeDeafenStatus()).toMatchObject({phase: "attention", armed: false});
+        expect(h.runtime.fakeDeafenStatus().detail).toContain("resync");
         expect(h.toasts).toHaveLength(0);
     });
 
@@ -228,5 +251,54 @@ describe("Fake Deafen runtime handoff", () => {
         expect(h.livePatches).toBe(0);
         expect(h.toasts).toHaveLength(0);
         expect(h.runtime.fakeDeafenStatus().phase).toBe("off");
+    });
+
+    test("own voice observations update without retaining identity or changing Strict privacy", async () => {
+        const h = harness(); h.channelId = "333333333333333333";
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeTrue();
+        expect(h.listenerCount).toBe(3);
+        expect(h.runtime.fakeDeafenStatus().voice).toEqual({localSelfDeaf: false, serverSelfDeaf: false, serverDeaf: false});
+        const before = h.notifications;
+        h.emitVoiceChange(); await Promise.resolve();
+        expect(h.notifications).toBe(before);
+        h.serverSelfDeaf = true;
+        h.emitVoiceChange(); h.emitVoiceChange(); await Promise.resolve();
+        expect(h.notifications).toBe(before + 1);
+        const voice = h.runtime.fakeDeafenStatus().voice;
+        expect(voice).toEqual({localSelfDeaf: false, serverSelfDeaf: true, serverDeaf: false});
+        expect(JSON.stringify(voice)).not.toContain(h.accountId);
+        expect(JSON.stringify(voice)).not.toContain(h.channelId!);
+        expect(h.settings.privacy.profile).toBe("strict");
+        h.emitVoiceChange(); h.runtime.stop();
+        const stopped = h.notifications;
+        await Promise.resolve();
+        expect(h.notifications).toBe(stopped);
+        expect(h.listenerCount).toBe(0);
+    });
+
+    test("a queued voice update cannot retain an adapter after account drift", async () => {
+        const h = harness(); h.channelId = "333333333333333333";
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeTrue();
+        h.accountId = "222222222222222222";
+        h.emitVoiceChange(); await Promise.resolve();
+        expect(h.livePatches).toBe(0);
+        expect(h.runtime.fakeDeafenStatus()).toMatchObject({armed: false, phase: "attention"});
+        h.runtime.stop();
+        expect(h.listenerCount).toBe(0);
+    });
+
+    test("a host registration that reenters stop cannot leave a late listener or republish readiness", async () => {
+        const h = harness(); h.stopBeforeListenerRegisters();
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeFalse();
+        expect(h.livePatches).toBe(0);
+        expect(h.listenerCount).toBe(0);
+        expect(h.runtime.fakeDeafenStatus()).toMatchObject({armed: false, phase: "off"});
+        const before = h.notifications;
+        h.emitVoiceChange(); await Promise.resolve();
+        expect(h.notifications).toBe(before);
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeTrue();
+        expect(h.listenerCount).toBe(3);
+        h.runtime.stop();
+        expect(h.listenerCount).toBe(0);
     });
 });

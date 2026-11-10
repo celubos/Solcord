@@ -338,6 +338,31 @@ describe("production Solcord Control Center React tree with controlled host inte
         expect(controls.feedback()).toBe("Ready. Scoped gateway and native voice controls validated.");
     });
 
+    test("Fake Deafen voice observations remain unknown until the host supplies each boolean", async () => {
+        fakeStatus = {...idleFakeStatus(), phase: "armed", armed: true};
+        const host = await mount(); await navigate(host, "Voice & Activities");
+        const facts = fakeControls(host).section.querySelector("dl[aria-label='Your voice state']")!;
+        expect([...facts.querySelectorAll("dt")].map(item => item.textContent)).toEqual(["Local deafen", "Discord self-deafen", "Server deafen"]);
+        expect([...facts.querySelectorAll("dd")].map(item => item.textContent)).toEqual(["Unknown", "Unknown", "Unknown"]);
+        expect(fakeControls(host).section.textContent).toContain("latest observed state for your current call");
+        expect(fakeControls(host).section.textContent).toContain("do not confirm a fresh Discord response or audio playback");
+        expect(writes).toEqual([]); expect(powerCalls).toEqual([]);
+    });
+
+    test("Fake Deafen shows separate local and observed Discord values and updates without a control action", async () => {
+        fakeStatus = {...idleFakeStatus(), phase: "armed", armed: true, voice: {localSelfDeaf: false, serverSelfDeaf: true, serverDeaf: false}};
+        const host = await mount(); await navigate(host, "Voice & Activities");
+        const values = () => [...fakeControls(host).section.querySelectorAll("dl[aria-label='Your voice state'] dd")].map(item => item.textContent);
+        expect(values()).toEqual(["Off", "On", "Off"]);
+        await act(async () => {fakeStatus = {...fakeStatus, voice: {localSelfDeaf: true, serverSelfDeaf: false, serverDeaf: true}}; emit();});
+        expect(values()).toEqual(["On", "Off", "On (server enforced)"]);
+        await act(async () => {fakeStatus = {...fakeStatus, voice: {localSelfDeaf: false}}; emit();});
+        expect(values()).toEqual(["Off", "Unknown", "Unknown"]);
+        await act(async () => {accountGeneration++; fakeStatus = idleFakeStatus(); emit();});
+        expect(values()).toEqual(["Unknown", "Unknown", "Unknown"]);
+        expect(writes).toEqual([]); expect(powerCalls).toEqual([]);
+    });
+
     test("the real ready toggle and adjacent controller button activate and restore a controlled voice state", async () => {
         const nativeHost = document.createElement("div"); nativeHost.id = "app-mount";
         nativeHost.innerHTML = "<section aria-label=\"User area\"><button type=\"button\" aria-label=\"Deafen\">Native deafen</button></section>";
