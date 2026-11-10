@@ -49,6 +49,7 @@ test("release assembly preserves Windows receipts and binds both native Mac arch
         expect(fs.readdirSync(output)).toHaveLength(14);
         expect(fs.readFileSync(path.join(output, "SHA256SUMS.txt"), "utf8")).toBe("fixture checksums");
         expect(fs.readFileSync(path.join(output, "release-notes.md"), "utf8")).toContain(`/blob/${fixture.commit}/docs/MACOS.md`);
+        expect(fs.readFileSync(path.join(output, "release-notes.md"), "utf8")).toContain(`/blob/${fixture.commit}/docs/releases/2.0.1-performance.json`);
         expect(() => prepareRelease(fixture.root, output, fixture.commit)).toThrow("new directory");
     }
     finally {fs.rmSync(fixture.root, {recursive: true, force: true});}

@@ -181,7 +181,9 @@ async function packageSolcord(fixtureValue: Fixture): Promise<void> {
 }
 
 async function createFixture(): Promise<Fixture> {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "solcord-disposable-test-"));
+    // Bun's non-native realpath preserves Windows 8.3 TEMP aliases. Production
+    // uses the native physical path, so fault injections must use it as well.
+    const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "solcord-disposable-test-")));
     temporaryRoots.push(root);
     const sourceApp = path.join(root, "source", "app-1.0.9999");
     const solcordAsar = path.join(root, "artifacts", "solcord.asar");
@@ -233,7 +235,7 @@ beforeEach(async () => {
 afterEach(() => {
     for (const root of temporaryRoots.splice(0)) {
         const resolved = path.resolve(root);
-        const temporary = `${path.resolve(os.tmpdir())}${path.sep}`.toLowerCase();
+        const temporary = `${fs.realpathSync.native(os.tmpdir())}${path.sep}`.toLowerCase();
         if (!resolved.toLowerCase().startsWith(temporary) || !path.basename(resolved).startsWith("solcord-disposable-test-")) {
             throw new Error(`Refusing unsafe test cleanup target: ${resolved}`);
         }
@@ -693,8 +695,10 @@ dryRun: true
 
     test("rejects a physical destination-parent alias into the source tree", () => {
         const originalNativeRealpath = fs.realpathSync.native;
+        let injected = 0;
         fs.realpathSync.native = ((target, options) => {
             if (path.resolve(String(target)).toLocaleLowerCase("en-US") === path.resolve(fixture.root).toLocaleLowerCase("en-US")) {
+                injected++;
                 return fixture.sourceApp;
             }
             return originalNativeRealpath(target, options as never);
@@ -713,6 +717,7 @@ dryRun: true
         finally {
             fs.realpathSync.native = originalNativeRealpath;
         }
+        expect(injected).toBeGreaterThan(0);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
     });
 
@@ -929,9 +934,11 @@ dryRun: true
 
     test("rejects and removes a runtime when the copied BetterDiscord ASAR changes during copy", () => {
         const originalCopyFileSync = fs.copyFileSync;
+        let corruptions = 0;
         fs.copyFileSync = ((source, destination, mode) => {
             originalCopyFileSync(source, destination, mode);
             if (path.basename(String(destination)) === "betterdiscord.app.asar") {
+                corruptions++;
                 fs.appendFileSync(destination, "changed-after-source-hash");
             }
         }) as typeof fs.copyFileSync;
@@ -949,6 +956,7 @@ dryRun: true
             fs.copyFileSync = originalCopyFileSync;
         }
 
+        expect(corruptions).toBe(1);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
     });
 
@@ -1045,9 +1053,11 @@ dryRun: true
     test("rejects corruption in a copied non-ASAR runtime file through whole-tree verification", () => {
         const originalCopyFileSync = fs.copyFileSync;
         const mutableSource = path.join(fixture.sourceApp, "runtime-payload.bin");
+        let corruptions = 0;
         fs.copyFileSync = ((source, destination, mode) => {
             originalCopyFileSync(source, destination, mode);
             if (path.resolve(String(source)) === path.resolve(mutableSource)) {
+                corruptions++;
                 fs.appendFileSync(destination, "corrupt-copy-only");
             }
         }) as typeof fs.copyFileSync;
@@ -1065,6 +1075,7 @@ dryRun: true
             fs.copyFileSync = originalCopyFileSync;
         }
 
+        expect(corruptions).toBe(1);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
         expect(fs.readFileSync(mutableSource)).toEqual(Buffer.from([0, 1, 2, 3, 254, 255]));
     });
@@ -1074,10 +1085,12 @@ dryRun: true
         const originalRenameSync = fs.renameSync;
         let replacementRoot = "";
         let displacedOwnedRoot = "";
+        let replacements = 0;
         fs.copyFileSync = ((source, destination, mode) => {
             const destinationPath = path.resolve(String(destination));
             const firstSegment = path.relative(fixture.root, destinationPath).split(path.sep)[0];
             if (!replacementRoot && firstSegment.startsWith(".solcord-acceptance-stage-")) {
+                replacements++;
                 replacementRoot = path.join(fixture.root, firstSegment);
                 displacedOwnedRoot = `${replacementRoot}.displaced`;
                 originalRenameSync(replacementRoot, displacedOwnedRoot);
@@ -1100,6 +1113,7 @@ dryRun: true
             fs.copyFileSync = originalCopyFileSync;
         }
 
+        expect(replacements).toBe(1);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
         expect(fs.readFileSync(path.join(replacementRoot, "attacker-marker.txt"), "utf8")).toBe("preserve-replacement");
         expect(fs.existsSync(displacedOwnedRoot)).toBeTrue();
@@ -1107,8 +1121,12 @@ dryRun: true
 
     test("cleans only owned staging after a late manifest-write failure", () => {
         const originalWriteFileSync = fs.writeFileSync;
+        let injected = 0;
         fs.writeFileSync = ((file, data, options) => {
-            if (path.basename(String(file)) === "acceptance-manifest.json") throw new Error("synthetic late manifest failure");
+            if (path.basename(String(file)) === "acceptance-manifest.json") {
+                injected++;
+                throw new Error("synthetic late manifest failure");
+            }
             return originalWriteFileSync(file, data, options as never);
         }) as typeof fs.writeFileSync;
 
@@ -1125,6 +1143,7 @@ dryRun: true
             fs.writeFileSync = originalWriteFileSync;
         }
 
+        expect(injected).toBe(1);
         expect(fs.existsSync(fixture.destination)).toBeFalse();
         expect(stagingRoots(fixture.root)).toEqual([]);
     });
@@ -1156,6 +1175,7 @@ dryRun: true
             fs.renameSync = originalRenameSync;
         }
 
+        expect(injected).toBeTrue();
         expect(fs.readFileSync(competingMarker, "utf8")).toBe("preserve-me");
         expect(stagingRoots(fixture.root)).toEqual([]);
     });

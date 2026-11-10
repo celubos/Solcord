@@ -12,6 +12,7 @@ type Manifest = {sourceCommit: string; candidateLabel: string; files: Array<{nam
 
 export function validateUploadedAssets(expected: Manifest["files"], actual: Asset[]): void {
     if (actual.length !== expected.length) throw new Error("Release asset inventory differs from the reviewed package.");
+    if (new Set(expected.map(file => file.name)).size !== expected.length || new Set(actual.map(asset => asset.name)).size !== actual.length) throw new Error("Release asset inventory contains duplicate filenames.");
     for (const file of expected) {
         const matches = actual.filter(asset => asset.name === file.name);
         if (matches.length !== 1 || matches[0].size !== file.bytes || matches[0].digest !== `sha256:${file.sha256}`) throw new Error(`Release asset verification failed: ${file.name}`);

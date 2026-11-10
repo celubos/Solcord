@@ -15,8 +15,8 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 | Persistent tracked files | 753 |
 | Text files scanned | 738 |
 | Binary files classified | 15 |
-| Text lines scanned | 146,635 |
-| Custom Solcord lines | 64,873 |
+| Text lines scanned | 146,681 |
+| Custom Solcord lines | 64,919 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -31,7 +31,7 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | DOM queries | 364 | 266 |
 | Webpack discovery calls | 87 | 12 |
 | Patch calls | 31 | 11 |
-| Synchronous filesystem calls | 1,100 | 962 |
+| Synchronous filesystem calls | 1,107 | 969 |
 | Console calls | 86 | 65 |
 | Empty catch blocks | 6 | 4 |
 
@@ -47,9 +47,9 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 6 | `tests/solcord/native-suite-security.test.ts` | 1,447 | 76.4 KiB |
 | 7 | `src/betterdiscord/styles/solcord.css` | 1,308 | 97.2 KiB |
 | 8 | `bun.lock` | 1,301 | 140.2 KiB |
-| 9 | `CHANGELOG.md` | 1,204 | 46.6 KiB |
-| 10 | `src/betterdiscord/modules/solcord/store.ts` | 1,202 | 63.6 KiB |
-| 11 | `tests/solcord/disposable-acceptance.test.ts` | 1,191 | 57.7 KiB |
+| 9 | `tests/solcord/disposable-acceptance.test.ts` | 1,211 | 58.4 KiB |
+| 10 | `CHANGELOG.md` | 1,204 | 46.6 KiB |
+| 11 | `src/betterdiscord/modules/solcord/store.ts` | 1,202 | 63.6 KiB |
 | 12 | `tests/common/i18n.test.ts` | 1,170 | 46.4 KiB |
 | 13 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,101 | 74.9 KiB |
 | 14 | `installer/Solcord.Installer/InstallerForm.cs` | 1,013 | 59.1 KiB |
@@ -71,8 +71,8 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 5 | `tests/solcord/storage-security.test.ts` | 1,595 | 94.1 KiB |
 | 6 | `tests/solcord/native-suite-security.test.ts` | 1,447 | 76.4 KiB |
 | 7 | `src/betterdiscord/styles/solcord.css` | 1,308 | 97.2 KiB |
-| 8 | `src/betterdiscord/modules/solcord/store.ts` | 1,202 | 63.6 KiB |
-| 9 | `tests/solcord/disposable-acceptance.test.ts` | 1,191 | 57.7 KiB |
+| 8 | `tests/solcord/disposable-acceptance.test.ts` | 1,211 | 58.4 KiB |
+| 9 | `src/betterdiscord/modules/solcord/store.ts` | 1,202 | 63.6 KiB |
 | 10 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,101 | 74.9 KiB |
 | 11 | `installer/Solcord.Installer/InstallerForm.cs` | 1,013 | 59.1 KiB |
 | 12 | `tests/solcord/fake-deafen.test.ts` | 948 | 51.4 KiB |

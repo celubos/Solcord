@@ -78,7 +78,7 @@ export function prepareRelease(input: string, output: string, sourceCommit: stri
     fs.writeFileSync(path.join(output, "release-package.json"), JSON.stringify(manifest, null, 2) + "\n", {flag: "wx"});
     const entries = fs.readdirSync(output).sort().map(name => describe(path.join(output, name)));
     fs.writeFileSync(path.join(output, "RELEASE-SHA256SUMS.txt"), entries.map(file => `${file.sha256}  ${file.name}`).join("\n") + "\n", {flag: "wx"});
-    const notes = fs.readFileSync(path.join(import.meta.dir, `../docs/releases/${SOLCORD_PRODUCT_IDENTITY.numericVersion}.md`), "utf8").replace(/\]\((\.\.?\/[^)]+)\)/g, (_, target: string) => `](https://github.com/celubos/Solcord/blob/${sourceCommit}/${path.posix.normalize(path.posix.join("docs/releases", target))})`);
+    const notes = fs.readFileSync(path.join(import.meta.dir, `../docs/releases/${SOLCORD_PRODUCT_IDENTITY.numericVersion}.md`), "utf8").replace(/\]\((?![a-z][a-z0-9+.-]*:|\/|#)([^)\s]+)\)/gi, (_, target: string) => `](https://github.com/celubos/Solcord/blob/${sourceCommit}/${path.posix.normalize(path.posix.join("docs/releases", target))})`);
     fs.writeFileSync(path.join(output, "release-notes.md"), `${notes}\nSource: [${sourceCommit}](https://github.com/celubos/Solcord/commit/${sourceCommit}).\n`, {flag: "wx"});
 }
 

@@ -6,6 +6,7 @@ import path from "node:path";
 import vm from "node:vm";
 import ts from "typescript";
 import {SOLCORD_PRODUCT_IDENTITY} from "../../src/common/solcord/product-identity";
+import {validateUploadedAssets} from "../../scripts/publish-solcord-release";
 
 // Execute the production functions with a private environment and a completely
 // mocked HTTP boundary. No real credential or GitHub request is used or needed.
@@ -80,6 +81,29 @@ function fixture() {
 }
 
 describe("reviewed release publication API", () => {
+    test("duplicate expected filenames cannot conceal an unexpected asset of the same inventory size", () => {
+        const file = {name: "reviewed.zip", bytes: 42, sha256: "a".repeat(64)};
+        const uploaded = {name: file.name, size: file.bytes, digest: `sha256:${file.sha256}`};
+        expect(() => validateUploadedAssets([file, {...file}], [uploaded, {...uploaded, name: "unexpected.zip"}])).toThrow("inventory contains duplicate");
+        expect(() => validateUploadedAssets([file, {...file, name: "other.zip"}], [uploaded, {...uploaded}])).toThrow("inventory contains duplicate");
+        expect(() => validateUploadedAssets([file, {...file, name: "other.zip"}], [{...uploaded, name: "other.zip"}, uploaded])).not.toThrow();
+    });
+
+    test("a malformed local manifest with repeated names is rejected before any GitHub request", async () => {
+        const h = fixture();
+        const manifestPath = path.join(h.directory, "release-package.json");
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        manifest.files.push({...manifest.files[0]});
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+        fs.writeFileSync(path.join(h.directory, "unexpected.zip"), "unreviewed bytes");
+        const checksum = fs.readdirSync(h.directory).sort().filter(name => !["RELEASE-SHA256SUMS.txt", "release-notes.md"].includes(name))
+            .map(name => `${createHash("sha256").update(fs.readFileSync(path.join(h.directory, name))).digest("hex")}  ${name}`).join("\n") + "\n";
+        fs.writeFileSync(path.join(h.directory, "RELEASE-SHA256SUMS.txt"), checksum);
+        await expect(h.publish()).rejects.toThrow("inventory contains duplicate");
+        expect(h.calls).toEqual([]);
+        expect(h.releases).toEqual([]);
+    });
+
     test("verifies every draft asset before creating the exact lightweight tag and publishing", async () => {
         const h = fixture(); expect(await h.publish()).toContain(`/releases/tag/${LABEL}`);
         const tagIndex = h.calls.findIndex(call => call.method === "POST" && call.endpoint === "git/refs");
