@@ -1,10 +1,12 @@
-import {afterEach, describe, expect, test} from "bun:test";
+import {afterEach, describe, expect, spyOn, test} from "bun:test";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import {SolcordFakeDeafenController, applySolcordFakeDeafenConsentTransition} from "../../src/betterdiscord/modules/solcord/fake-deafen";
 import {discoverSolcordFakeDeafenCapabilities, isSolcordFakeDeafenGateway, isSolcordFakeDeafenMediaActions} from "../../src/betterdiscord/modules/solcord/fake-deafen-capabilities";
 import {readSolcordOwnVoiceDeafenState} from "../../src/betterdiscord/modules/solcord/fake-deafen-voice-state";
+import {isSolcordFakeDeafenPresentationModule, preserveSolcordOwnVoiceDeafenPresentation} from "../../src/betterdiscord/modules/solcord/fake-deafen-presentation";
+import {patchSolcordFakeDeafenSend} from "../../src/betterdiscord/modules/solcord/fake-deafen-send";
 import {SolcordDisposalScope} from "../../src/betterdiscord/modules/solcord/disposal";
 
 // Execute the shipping Runtime methods with controlled host dependencies. No
@@ -22,22 +24,48 @@ emitChange() {notify(this);}
 start() {this.#started = true;}
 stop() {this.#stopFakeDeafen();}
 };`);
+const patcherSource = fs.readFileSync(new URL("../../src/betterdiscord/modules/patcher.ts", import.meta.url), "utf8");
+const patcherParsed = ts.createSourceFile("patcher.ts", patcherSource, ts.ScriptTarget.Latest, true);
+const patcherClass = patcherParsed.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === "Patcher")!;
+const patcherCode = new Bun.Transpiler({loader: "ts", target: "browser"}).transformSync(`return ${patcherClass.getText(patcherParsed).replace("export default ", "")}`);
 const active: Array<{stop(): void;}> = [];
 afterEach(() => {for (const runtime of active.splice(0)) runtime.stop();});
 
-function harness() {
+function harness({deferPresentation = false, rejectPresentationPatch = false, rejectSendCompletion = ""} = {}) {
     let accountId = "111111111111111111";
     let channelId: string | undefined;
     let localDeafened = false;
-    let socket = {webSocket: {}, send(_opcode: number, _payload: unknown) {}};
+    let failSend = false;
+    let failRawSend = false;
+    const acceptedFrames: unknown[] = [];
+    let socket = {webSocket: {readyState: 1,
+send(frame: unknown) {
+        if (failRawSend) throw new Error("raw transport failed");
+        if (this.readyState !== 1) return;
+        acceptedFrames.push(structuredClone(frame));
+    }},
+send(_opcode: number, payload: unknown) {
+        if (failSend) throw new Error("gateway send failed");
+        try {this.webSocket.send(payload);}
+        catch {/* The reviewed native gateway swallows transport exceptions. */}
+    }};
     let patches = 0;
-    let livePatches = 0;
     let missingAudio = false;
     let failGateway = false;
     let throwOnReady = false;
     let stopOnReady = false;
     let notifications = 0;
     let serverSelfDeaf = false;
+    const removals: string[] = [];
+    const rowRefreshes: Array<{channelId: unknown; armed: boolean; patched: boolean;}> = [];
+    // Execute the real patcher: shared before/after args identity, original
+    // exception propagation and hook removal order are part of this regression.
+    const actualPatcher = vm.compileFunction(patcherCode, ["Logger", "DiscordModules", "getByKeys"])({err() {}}, {}, () => undefined);
+    let presentationResolve: ((value: unknown) => void) | undefined;
+    const sessionId = "current-voice-session";
+    const rowModule = {Nd(record: {sessionId: string; merge(update: object): unknown;}, local: {sessionId: string; selfMute: boolean; selfDeaf: boolean;}) {
+        return record.sessionId === local.sessionId ? record.merge({selfMute: local.selfMute, selfDeaf: local.selfDeaf}) : record;
+    }};
     let beforeRegister: (() => void) | undefined;
     const listeners = new Set<() => void>();
     let listenerCount = 0;
@@ -63,6 +91,7 @@ toggleSelfDeaf() {
     }};
     const stores: Record<string, unknown> = {
         UserStore: {getCurrentUser: () => ({id: accountId})},
+        AuthenticationStore: {getSessionId: () => sessionId},
         SelectedChannelStore: {...observable(), getVoiceChannelId: () => channelId},
         // Server deafening must not be mistaken for the local control state.
         MediaEngineStore: {...observable(), isSelfDeaf: () => localDeafened, isDeaf: () => true},
@@ -70,7 +99,18 @@ toggleSelfDeaf() {
     };
     const dependencies = {
         SolcordDisposalScope,
+        patchSolcordFakeDeafenSend,
+        getInternalInstance() {return null;},
+        document: {getElementById: () => ({})},
+        refreshSolcordFakeDeafenCurrentChannelRow: ({channelId: targetChannel, isCurrent}: {channelId: unknown; isCurrent(): boolean;}) => {
+            if (isCurrent()) rowRefreshes.push({channelId: targetChannel, armed: runtime.fakeDeafenStatus().armed, patched: actualPatcher.getPatchesByCaller("Solcord~FakeDeafenIndicator").length > 0});
+        },
         readSolcordOwnVoiceDeafenState,
+        isSolcordFakeDeafenPresentationModule,
+        // Discovery validation is independently exercised against real module
+        // shapes; this host fixture controls only asynchronous module arrival.
+        findSolcordFakeDeafenPresentationKey: (module: unknown) => module === rowModule ? "Nd" : undefined,
+        preserveSolcordOwnVoiceDeafenPresentation,
 SolcordFakeDeafenController,
 applySolcordFakeDeafenConsentTransition,
         isSolcordFakeDeafenGateway,
@@ -97,14 +137,25 @@ isSolcordFakeDeafenMediaActions,
         getStore: (name: string) => stores[name],
         getLazy: async (filter: (value: unknown) => boolean, {signal}: {signal: AbortSignal;}) => {
             signals.push(signal);
+            if (filter === isSolcordFakeDeafenPresentationModule) {
+                if (!deferPresentation) return rowModule;
+                return new Promise(resolve => {presentationResolve = resolve; signal.addEventListener("abort", () => resolve(undefined), {once: true});});
+            }
             for (const candidate of [gateway, ...(missingAudio ? [] : [mediaActions])]) if (filter(candidate)) return candidate;
             return new Promise(resolve => signal.addEventListener("abort", () => resolve(undefined), {once: true}));
         },
-        Patcher: {before(_name: string, target: typeof socket, _method: string, callback: (self: unknown, args: unknown[]) => void) {
-            patches++; livePatches++;
-            const original = target.send;
-            target.send = function (...args: [number, unknown]) {callback(this, args); return original.apply(this, args);};
-            return () => {target.send = original; livePatches--;};
+        Patcher: {get patches() {return actualPatcher.patches;},
+before(name: string, target: typeof socket, method: string, callback: (self: unknown, args: unknown[]) => void, options: object) {
+            if (name === "Solcord~FakeDeafen") patches++;
+            const remove = actualPatcher.before(name, target, method, callback, options);
+            return () => {removals.push(name === "Solcord~FakeDeafen" ? "before" : "transport-before"); remove();};
+        },
+after(name: string, target: object, key: string, callback: (self: unknown, args: unknown[], result: unknown) => unknown, options: object) {
+            if (target === rowModule && rejectPresentationPatch) throw new Error("read-only export");
+            if (name === "Solcord~FakeDeafen" && rejectSendCompletion === "throw") throw new Error("completion export failed");
+            if (name === "Solcord~FakeDeafen" && rejectSendCompletion === "null") return null;
+            const remove = actualPatcher.after(name, target, key, callback, options);
+            return () => {if (key === "send") removals.push(name === "Solcord~FakeDeafen" ? "after" : "transport-after"); remove();};
         }}
     };
     const Runtime = vm.compileFunction(harnessCode, Object.keys(dependencies))(...Object.values(dependencies));
@@ -116,6 +167,20 @@ isSolcordFakeDeafenMediaActions,
         toasts,
         signals,
         pendingNative,
+        rowModule,
+        sessionId,
+        acceptedFrames,
+        removals,
+        rowRefreshes,
+        get failSend() {return failSend;},
+        set failSend(value: boolean) {failSend = value;},
+        get failRawSend() {return failRawSend;},
+        set failRawSend(value: boolean) {failRawSend = value;},
+        get rawReadyState() {return socket.webSocket.readyState;},
+        set rawReadyState(value: number) {socket.webSocket.readyState = value;},
+        get localDeafened() {return localDeafened;},
+        get presentationPatches() {return actualPatcher.getPatchesByCaller("Solcord~FakeDeafenIndicator").length;},
+        arrivePresentation() {presentationResolve?.(rowModule);},
         get notifications() {return notifications;},
         get listenerCount() {return listenerCount;},
         get serverSelfDeaf() {return serverSelfDeaf;},
@@ -123,7 +188,8 @@ isSolcordFakeDeafenMediaActions,
         emitVoiceChange() {for (const listener of listeners) listener();},
         stopBeforeListenerRegisters() {beforeRegister = () => {beforeRegister = undefined; runtime.stop();};},
         get patches() {return patches;},
-        get livePatches() {return livePatches;},
+        get livePatches() {return actualPatcher.getPatchesByCaller("Solcord~FakeDeafen").filter((patch: {type: string;}) => patch.type === "before").length;},
+        get liveSendHooks() {return actualPatcher.getPatchesByCaller("Solcord~FakeDeafen").length + actualPatcher.getPatchesByCaller("Solcord~FakeDeafenTransport").length;},
         get channelId() {return channelId;},
         set channelId(value: string | undefined) {channelId = value;},
         get missingAudio() {return missingAudio;},
@@ -136,8 +202,8 @@ isSolcordFakeDeafenMediaActions,
         set throwOnReady(value: boolean) {throwOnReady = value;},
         get stopOnReady() {return stopOnReady;},
         set stopOnReady(value: boolean) {stopOnReady = value;},
-        replaceSocket() {socket = {webSocket: {}, send() {}};},
-        replaceTransport() {socket.webSocket = {};}
+        replaceSocket() {socket = {webSocket: {readyState: 1, send() {}}, send() {}};},
+        replaceTransport() {socket.webSocket = {readyState: 1, send() {}};}
     };
 }
 
@@ -189,6 +255,81 @@ describe("Fake Deafen runtime handoff", () => {
         expect(h.runtime.fakeDeafenStatus().armed).toBeTrue();
         expect(h.toasts.map(toast => toast.kind)).toEqual(["success"]);
         expect(h.settings.privacy).toEqual({profile: "strict", telemetry: "block", crashReporting: "block", activityDiscovery: "block"});
+    });
+
+    test.each([[false, false], [true, false], [false, true], [true, true]])("failed native restoration never publishes armed success (first send also fails: %s, swallowed raw failure: %s)", async (failFirst, rawFailure) => {
+        const originalTimeout = globalThis.setTimeout;
+        let expire: (() => void) | undefined;
+        const timer = spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, delay: number, ...args: unknown[]) => {
+            if (delay === 5_000) expire = callback;
+            return originalTimeout(callback, delay, ...args);
+        }) as never);
+        try {
+            const h = harness(); h.channelId = "333333333333333333";
+            const operation = h.runtime.toggleFakeDeafenDirect();
+            for (let i = 0; i < 20 && !h.pendingNative.length; i++) await Promise.resolve();
+            h.failSend = failFirst && !rawFailure;
+            h.failRawSend = failFirst && rawFailure;
+            const first = h.pendingNative.shift()!;
+            if (failFirst && !rawFailure) expect(first).toThrow("gateway send failed");
+            else first();
+            await Promise.resolve();
+            h.failSend = !rawFailure;
+            h.failRawSend = rawFailure;
+            const restore = h.pendingNative.shift()!;
+            if (rawFailure) restore();
+            else expect(restore).toThrow("gateway send failed");
+            expect(h.localDeafened).toBeFalse();
+            expect(h.runtime.fakeDeafenStatus()).toMatchObject({armed: false, pending: true});
+            expect(h.toasts).toHaveLength(0);
+            expect(expire).toBeFunction();
+            expire!();
+            expect(await operation).toBeFalse();
+            expect(h.runtime.fakeDeafenStatus()).toMatchObject({armed: false, pending: false, phase: "attention"});
+            expect(h.acceptedFrames).toHaveLength(failFirst ? 0 : 1);
+            expect(h.toasts.some(toast => toast.kind === "success")).toBeFalse();
+            expect(h.settings.privacy.profile).toBe("strict");
+            h.runtime.stop();
+            expect(h.liveSendHooks).toBe(0);
+        }
+        finally {timer.mockRestore();}
+    });
+
+    test.each(["throw", "null"])("a %s completion hook rolls back the before hook", async rejectSendCompletion => {
+        const h = harness({rejectSendCompletion});
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeFalse();
+        expect(h.liveSendHooks).toBe(0);
+        expect(h.removals).toEqual(["before", "transport-after", "transport-before"]);
+        expect(h.runtime.fakeDeafenStatus().armed).toBeFalse();
+    });
+
+    test("teardown removes the completion hook before the rewrite hook", async () => {
+        const h = harness();
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeTrue();
+        expect(h.liveSendHooks).toBe(4);
+        h.runtime.stop();
+        expect(h.liveSendHooks).toBe(0);
+        expect(h.removals).toEqual(["after", "before", "transport-after", "transport-before"]);
+    });
+
+    test.each(["throw", "closed"])("direct off reports an unconfirmed restoration when raw transport is %s", async failure => {
+        const h = harness(); h.channelId = "333333333333333333";
+        const operation = h.runtime.toggleFakeDeafenDirect();
+        for (let i = 0; i < 20 && !h.pendingNative.length; i++) await Promise.resolve();
+        h.pendingNative.shift()!(); await Promise.resolve(); h.pendingNative.shift()!();
+        expect(await operation).toBeTrue();
+        const frames = h.acceptedFrames.length;
+        if (failure === "throw") h.failRawSend = true;
+        else h.rawReadyState = 3;
+        expect(await h.runtime.toggleFakeDeafenDirect()).toBeFalse();
+        expect(h.acceptedFrames).toHaveLength(frames);
+        expect(h.runtime.fakeDeafenStatus()).toMatchObject({armed: false, phase: "attention"});
+        expect(h.runtime.fakeDeafenStatus().detail).toContain("resynchron");
+        expect(h.toasts.at(-1)?.kind).toBe("error");
+        expect(h.localDeafened).toBeFalse();
+        expect(h.settings.privacy.profile).toBe("strict");
+        h.runtime.stop();
+        expect(h.liveSendHooks).toBe(0);
     });
 
     test("host exceptions become visible errors and a subsequent click can retry", async () => {
@@ -300,5 +441,111 @@ describe("Fake Deafen runtime handoff", () => {
         expect(h.listenerCount).toBe(3);
         h.runtime.stop();
         expect(h.listenerCount).toBe(0);
+    });
+
+    test("the own-row indicator follows the received state without changing local audio and restores on direct off", async () => {
+        const h = harness(); h.channelId = "333333333333333333";
+        const operation = h.runtime.toggleFakeDeafenDirect();
+        for (let i = 0; i < 20 && !h.pendingNative.length; i++) await Promise.resolve();
+        h.pendingNative.shift()!(); await Promise.resolve(); h.pendingNative.shift()!();
+        expect(await operation).toBeTrue();
+        h.serverSelfDeaf = true;
+        class VoiceRow {
+            userId = h.accountId; channelId = h.channelId; sessionId = h.sessionId;
+            selfDeaf = true; selfMute = true; deaf = false;
+            merge(update: object): VoiceRow {return Object.assign(new VoiceRow(), this, update);}
+        }
+        const record = new VoiceRow();
+        const local = {sessionId: h.sessionId, selfDeaf: false, selfMute: true};
+        expect(h.runtime.fakeDeafenStatus()).toMatchObject({armed: true, ownRowIndicator: true, voice: {localSelfDeaf: false, serverSelfDeaf: true}});
+        expect(h.presentationPatches).toBe(1);
+        expect(h.rowModule.Nd(record, local)).toMatchObject({selfDeaf: true, selfMute: true});
+        expect(record.selfDeaf).toBeTrue();
+        h.channelId = "444444444444444444";
+        const moved = new VoiceRow();
+        const beforeRender = h.notifications;
+        expect(h.rowModule.Nd(moved, local)).toMatchObject({selfDeaf: false, selfMute: true});
+        expect(h.notifications).toBe(beforeRender); // Render guard has no dispatch or status side effects.
+        h.channelId = record.channelId;
+        expect(await h.runtime.toggleFakeDeafenDirect()).toBeTrue();
+        expect(h.rowModule.Nd(record, local)).toMatchObject({selfDeaf: false, selfMute: true});
+        expect(h.runtime.fakeDeafenStatus().voice?.localSelfDeaf).toBeFalse();
+        h.runtime.stop();
+        expect(h.presentationPatches).toBe(0);
+        expect(h.settings.privacy.profile).toBe("strict");
+    });
+
+    test("lazy row discovery cannot install a patch after teardown", async () => {
+        const h = harness({deferPresentation: true});
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeTrue();
+        expect(h.runtime.fakeDeafenStatus().ownRowIndicator).toBeFalse();
+        h.runtime.stop(); h.arrivePresentation();
+        await Promise.resolve(); await Promise.resolve();
+        expect(h.presentationPatches).toBe(0);
+        expect(h.signals.every(signal => signal.aborted)).toBeTrue();
+        expect(h.runtime.fakeDeafenStatus().ownRowIndicator).toBeFalse();
+    });
+
+    test("late indicator installation, direct off and teardown refresh only the owned row", async () => {
+        const h = harness({deferPresentation: true}); h.channelId = "333333333333333333";
+        const operation = h.runtime.toggleFakeDeafenDirect();
+        for (let i = 0; i < 20 && !h.pendingNative.length; i++) await Promise.resolve();
+        h.pendingNative.shift()!(); await Promise.resolve(); h.pendingNative.shift()!();
+        expect(await operation).toBeTrue();
+        h.serverSelfDeaf = true;
+        expect(h.rowRefreshes).toEqual([]);
+        h.arrivePresentation();
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+        expect(h.rowRefreshes).toEqual([{channelId: h.channelId, armed: true, patched: true}]);
+        h.emitVoiceChange(); h.emitVoiceChange();
+        for (let i = 0; i < 3; i++) await Promise.resolve();
+        const refreshed = h.rowRefreshes.length;
+        h.emitVoiceChange(); h.emitVoiceChange();
+        for (let i = 0; i < 3; i++) await Promise.resolve();
+        expect(h.rowRefreshes).toHaveLength(refreshed);
+        expect(await h.runtime.toggleFakeDeafenDirect()).toBeTrue();
+        expect(h.rowRefreshes.at(-1)).toEqual({channelId: h.channelId, armed: false, patched: true});
+        h.runtime.stop(); await Promise.resolve();
+        expect(h.rowRefreshes.at(-1)).toEqual({channelId: h.channelId, armed: false, patched: false});
+        expect(h.localDeafened).toBeFalse();
+        expect(h.settings.privacy.profile).toBe("strict");
+    });
+
+    test("a queued row refresh cannot follow the account into a replacement identity", async () => {
+        const h = harness(); h.channelId = "333333333333333333";
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeTrue();
+        for (let i = 0; i < 3; i++) await Promise.resolve();
+        h.rowRefreshes.length = 0;
+        h.serverSelfDeaf = true; h.emitVoiceChange();
+        await Promise.resolve(); // The owned store update queued a row refresh.
+        h.accountId = "222222222222222222";
+        await Promise.resolve();
+        expect(h.rowRefreshes).toEqual([]);
+        h.runtime.stop(); await Promise.resolve();
+        expect(h.rowRefreshes).toEqual([]);
+    });
+
+    test("a replacement generation cancels the old cleanup refresh", async () => {
+        const h = harness(); h.channelId = "333333333333333333";
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeTrue();
+        for (let i = 0; i < 3; i++) await Promise.resolve();
+        h.rowRefreshes.length = 0;
+        h.runtime.stop();
+        const replacement = h.runtime.setPowerExperiment("fake-deafen", true, true);
+        expect(await replacement).toBeTrue();
+        for (let i = 0; i < 3; i++) await Promise.resolve();
+        expect(h.rowRefreshes.length).toBeGreaterThan(0);
+        expect(h.rowRefreshes.every(row => row.patched)).toBeTrue();
+    });
+
+    test("a read-only presentation export stays visibly unavailable without stopping voice ownership", async () => {
+        const h = harness({rejectPresentationPatch: true});
+        expect(await h.runtime.setPowerExperiment("fake-deafen", true, true)).toBeTrue();
+        await Promise.resolve(); await Promise.resolve();
+        expect(h.presentationPatches).toBe(0);
+        expect(h.livePatches).toBe(1);
+        expect(h.runtime.fakeDeafenStatus().ownRowIndicator).toBeFalse();
+        h.runtime.stop();
+        expect(h.livePatches).toBe(0);
     });
 });

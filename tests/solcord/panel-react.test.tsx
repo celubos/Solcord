@@ -342,23 +342,30 @@ describe("production Solcord Control Center React tree with controlled host inte
         fakeStatus = {...idleFakeStatus(), phase: "armed", armed: true};
         const host = await mount(); await navigate(host, "Voice & Activities");
         const facts = fakeControls(host).section.querySelector("dl[aria-label='Your voice state']")!;
-        expect([...facts.querySelectorAll("dt")].map(item => item.textContent)).toEqual(["Local deafen", "Discord self-deafen", "Server deafen"]);
-        expect([...facts.querySelectorAll("dd")].map(item => item.textContent)).toEqual(["Unknown", "Unknown", "Unknown"]);
+        expect([...facts.querySelectorAll("dt")].map(item => item.textContent)).toEqual(["Your deafened icon", "Local deafen", "Discord self-deafen", "Server deafen"]);
+        expect([...facts.querySelectorAll("dd")].map(item => item.textContent)).toEqual(["Not available yet", "Unknown", "Unknown", "Unknown"]);
         expect(fakeControls(host).section.textContent).toContain("latest observed state for your current call");
         expect(fakeControls(host).section.textContent).toContain("do not confirm a fresh Discord response or audio playback");
+        expect(fakeControls(host).section.textContent).toContain("your voice-row icon follows the deafened state received from Discord");
+        await act(async () => {fakeStatus = {...fakeStatus, ownRowIndicator: true}; emit();});
+        expect([...facts.querySelectorAll("dd")].map(item => item.textContent)).toEqual(["Ready", "Unknown", "Unknown", "Unknown"]);
         expect(writes).toEqual([]); expect(powerCalls).toEqual([]);
     });
 
     test("Fake Deafen shows separate local and observed Discord values and updates without a control action", async () => {
         fakeStatus = {...idleFakeStatus(), phase: "armed", armed: true, voice: {localSelfDeaf: false, serverSelfDeaf: true, serverDeaf: false}};
         const host = await mount(); await navigate(host, "Voice & Activities");
-        const values = () => [...fakeControls(host).section.querySelectorAll("dl[aria-label='Your voice state'] dd")].map(item => item.textContent);
+        const facts = () => [...fakeControls(host).section.querySelectorAll("dl[aria-label='Your voice state'] dd")].map(item => item.textContent);
+        const values = () => facts().slice(1);
+        expect(facts()[0]).toBe("Not available yet");
         expect(values()).toEqual(["Off", "On", "Off"]);
-        await act(async () => {fakeStatus = {...fakeStatus, voice: {localSelfDeaf: true, serverSelfDeaf: false, serverDeaf: true}}; emit();});
+        await act(async () => {fakeStatus = {...fakeStatus, ownRowIndicator: true, voice: {localSelfDeaf: true, serverSelfDeaf: false, serverDeaf: true}}; emit();});
+        expect(facts()[0]).toBe("Ready");
         expect(values()).toEqual(["On", "Off", "On (server enforced)"]);
         await act(async () => {fakeStatus = {...fakeStatus, voice: {localSelfDeaf: false}}; emit();});
         expect(values()).toEqual(["Off", "Unknown", "Unknown"]);
         await act(async () => {accountGeneration++; fakeStatus = idleFakeStatus(); emit();});
+        expect(facts()[0]).toBe("Not available yet");
         expect(values()).toEqual(["Unknown", "Unknown", "Unknown"]);
         expect(writes).toEqual([]); expect(powerCalls).toEqual([]);
     });
@@ -377,9 +384,14 @@ getVoiceChannelId: () => "222222222222222222",
 getSocket: () => socket,
             isLocallyDeafened: () => locallyDeafened,
 toggleLocalDeafen: () => native.click(),
-            patchSend: (target, observe) => {
+            patchSend: (target, before, after) => {
                 const original = target.send;
-                target.send = function (...args) {observe(args); return Reflect.apply(original, this, args);};
+                target.send = function (...args) {
+                    before(args);
+                    const result = Reflect.apply(original, this, args);
+                    after(args);
+                    return result;
+                };
                 return () => {target.send = original;};
             },
             onStatus: status => {fakeStatus = status; directControl?.update(status); emit();}

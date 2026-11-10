@@ -27,7 +27,7 @@ describe("Solcord release identity", () => {
         expect(SOLCORD_PRODUCT_IDENTITY).toEqual({
             product: "Solcord",
             numericVersion: "2.0.1",
-            candidateLabel: "v2.0.1-rc.7"
+            candidateLabel: "v2.0.1-rc.8"
         });
         expect(SOLCORD_PRODUCT_IDENTITY.candidateLabel).not.toBe(SOLCORD_PRODUCT_IDENTITY.numericVersion);
         expect(() => assertSolcordPackageVersion(packageMetadata.version)).not.toThrow();

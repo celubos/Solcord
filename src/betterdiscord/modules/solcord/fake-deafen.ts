@@ -27,6 +27,7 @@ export interface SolcordFakeDeafenStatus {
     capturedVoiceState: boolean;
     armed: boolean;
     pending?: boolean;
+    ownRowIndicator?: boolean;
     voice?: {localSelfDeaf?: boolean; serverSelfDeaf?: boolean; serverDeaf?: boolean;};
 }
 
@@ -37,7 +38,7 @@ export interface SolcordFakeDeafenDependencies {
     getVoiceChannelId(): string | undefined;
     isLocallyDeafened(): boolean;
     toggleLocalDeafen(): void;
-    patchSend(socket: SolcordGatewaySocket, observe: (args: unknown[]) => void): (() => void) | null;
+    patchSend(socket: SolcordGatewaySocket, before: (args: unknown[]) => void, after: (args: unknown[]) => void): (() => void) | null;
     onStatus?(status: SolcordFakeDeafenStatus): void;
 }
 
@@ -223,6 +224,15 @@ export function normalizeVoiceStatePayload(value: unknown): SolcordVoiceStatePay
     return {...payload, channel_id: channel, self_deaf: payload.self_deaf, self_mute: payload.self_mute} as SolcordVoiceStatePayload;
 }
 
+interface VoiceStateRestorationAttempt {
+    args?: unknown[];
+    payload: SolcordVoiceStatePayload;
+    channelId: string;
+    socket: SolcordGatewaySocket;
+    generation: number;
+    confirmed: boolean;
+}
+
 export class SolcordFakeDeafenController {
     #socket?: SolcordGatewaySocket;
     #unpatch?: () => void;
@@ -235,6 +245,8 @@ export class SolcordFakeDeafenController {
     #directAwaitingUndeafened = false;
     #directPrimeQueued = false;
     #localRestorePending = false;
+    #pendingRestoreSend?: {args: unknown[]; payload: unknown; channelId: string; generation: number;};
+    #restorationAttempt?: VoiceStateRestorationAttempt;
     #directArmGeneration = 0;
     #directArmTimer?: ReturnType<typeof setTimeout>;
     #directArmResult?: Promise<boolean>;
@@ -277,7 +289,7 @@ export class SolcordFakeDeafenController {
             this.#setStatus("attention", "Discord's gateway transport could not be validated; nothing was patched.");
             return false;
         }
-        const unpatch = this.dependencies.patchSend(socket, args => this.#observeSend(args));
+        const unpatch = this.dependencies.patchSend(socket, args => this.#observeSend(args), args => this.#completeSend(args));
         if (!unpatch) {
             this.#setStatus("attention", "Discord's scoped gateway sender failed structural validation; nothing was patched.");
             return false;
@@ -320,6 +332,18 @@ export class SolcordFakeDeafenController {
             return false;
         }
         return true;
+    }
+
+    /** A read-only render guard; never publish status or send during React rendering. */
+    canPresentArmedState(): boolean {
+        try {
+            return Boolean(this.#unpatch && this.#armedChannelId && this.#status.armed && !this.#directArmPending && !this.#localRestorePending
+                && discordId(this.dependencies.getAccountId()) === this.#boundAccountId
+                && discordId(this.dependencies.getVoiceChannelId()) === this.#armedChannelId
+                && this.dependencies.getSocket() === this.#socket
+                && (!this.dependencies.getConnectionIdentity || this.dependencies.getConnectionIdentity() === this.#boundConnectionIdentity));
+        }
+        catch {return false;}
     }
 
     arm(): boolean {
@@ -424,15 +448,24 @@ export class SolcordFakeDeafenController {
             this.#setStatus("ready", "Disarmed. The voice connection changed, so Solcord sent no synthetic state.");
             return false;
         }
+        let attempt: VoiceStateRestorationAttempt | undefined;
         try {
-            socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, {...payload, channel_id: channelId, self_deaf: this.dependencies.isLocallyDeafened()});
-            this.#setStatus("ready", "Disarmed and restored the server-visible deafen state to match the local client.");
+            attempt = {payload: {...payload, channel_id: channelId, self_deaf: this.dependencies.isLocallyDeafened()}, channelId, socket, generation: this.#directArmGeneration, confirmed: false};
+            this.#restorationAttempt = attempt;
+            socket.send(DISCORD_VOICE_STATE_UPDATE_OPCODE, attempt.payload);
+            if (this.#restorationAttempt !== attempt || attempt.generation !== this.#directArmGeneration) return false;
+            if (!attempt.confirmed || !this.validateOwnership() || discordId(this.dependencies.getVoiceChannelId()) !== channelId || this.dependencies.isLocallyDeafened() !== attempt.payload.self_deaf) {
+                this.#setStatus("attention", "Disarmed locally, but Discord's state-restoration send was not confirmed. Toggle normal deafen once to resynchronize.");
+                return false;
+            }
+            this.#setStatus("ready", "Disarmed. Normal deafen state was sent; local audio is unchanged.");
             return true;
         }
         catch {
             this.#setStatus("attention", "Disarmed locally, but Discord's state-restoration send failed. Toggle normal deafen once to resynchronize.");
             return false;
         }
+        finally {if (this.#restorationAttempt === attempt) this.#restorationAttempt = undefined;}
     }
 
     stop(): boolean {
@@ -466,6 +499,9 @@ export class SolcordFakeDeafenController {
 
     #observeSend(args: unknown[]): void {
         if (args[0] !== DISCORD_VOICE_STATE_UPDATE_OPCODE) return;
+        const restoration = this.#restorationAttempt;
+        if (restoration && restoration.payload === args[1] && !restoration.args) restoration.args = args;
+        this.#pendingRestoreSend = undefined;
         if (!this.validateOwnership()) return;
         const payload = normalizeVoiceStatePayload(args[1]);
         if (!payload) {
@@ -526,16 +562,13 @@ export class SolcordFakeDeafenController {
         }
         if (payload.channel_id !== this.#armedChannelId || currentChannelId !== this.#armedChannelId) {
             this.#armedChannelId = undefined;
+            this.#finishDirectArm(false);
             this.#setStatus("attention", "Voice channel changed; Fake Deafen disarmed and passed the new state through unchanged.");
             return;
         }
         args[1] = {...payload, self_deaf: true};
         const generation = this.#directArmGeneration;
         const restoredLocalAudio = this.#localRestorePending && !payload.self_deaf && !this.dependencies.isLocallyDeafened();
-        if (restoredLocalAudio) {
-            this.#localRestorePending = false;
-            this.#directArmPending = false;
-        }
         try {
             this.#setStatus(this.#localRestorePending ? "ready" : "armed", this.#localRestorePending
                 ? "Waiting for Discord to restore local audio and emit its matching voice-state update."
@@ -554,7 +587,56 @@ export class SolcordFakeDeafenController {
             try {owned = Boolean(this.#armedChannelId && this.#armedChannelId === payload.channel_id && generation === this.#directArmGeneration && this.validateOwnership());}
             finally {if (!owned) args[1] = payload;}
         }
-        if (restoredLocalAudio && this.#armedChannelId === payload.channel_id && generation === this.#directArmGeneration && this.validateOwnership()) this.#finishDirectArm(true);
+        if (restoredLocalAudio && this.#directArmPending && this.#armedChannelId === payload.channel_id && generation === this.#directArmGeneration && this.validateOwnership()) {
+            // A before hook only sees an attempted send. Keep activation pending
+            // until this exact invocation returns from the original sender.
+            this.#pendingRestoreSend = {args, payload: args[1], channelId: payload.channel_id, generation};
+        }
+    }
+
+    #completeSend(args: unknown[]): void {
+        const restoration = this.#restorationAttempt;
+        if (restoration && restoration.args === args && args[0] === DISCORD_VOICE_STATE_UPDATE_OPCODE && args[1] === restoration.payload) {
+            restoration.confirmed = restoration.generation === this.#directArmGeneration && !this.#armedChannelId && !this.#directArmPending
+                && restoration.socket === this.#socket && this.validateOwnership()
+                && restoration.payload.channel_id === restoration.channelId
+                && discordId(this.dependencies.getVoiceChannelId()) === restoration.channelId
+                && this.dependencies.isLocallyDeafened() === restoration.payload.self_deaf;
+            return;
+        }
+        const candidate = this.#pendingRestoreSend;
+        if (!candidate || candidate.args !== args) return;
+        this.#pendingRestoreSend = undefined;
+        const {generation, channelId} = candidate;
+        if (generation !== this.#directArmGeneration || !this.#directArmPending || !this.#localRestorePending || this.#armedChannelId !== channelId) return;
+        try {
+            if (!this.validateOwnership()) return;
+            const payload = normalizeVoiceStatePayload(args[1]);
+            if (args[0] !== DISCORD_VOICE_STATE_UPDATE_OPCODE || args[1] !== candidate.payload || payload?.channel_id !== channelId || !payload.self_deaf || this.dependencies.isLocallyDeafened()) return;
+            this.#localRestorePending = false;
+            this.#directArmPending = false;
+            this.#setStatus("armed", "Armed for this voice connection. Server-visible self-deafen is held while local audio remains under your control.");
+            if (generation !== this.#directArmGeneration) return;
+            if (this.validateOwnership() && !this.dependencies.isLocallyDeafened()) {
+                this.#finishDirectArm(true);
+            }
+            else if (generation === this.#directArmGeneration) {
+                this.#armedChannelId = undefined;
+                this.#finishDirectArm(false);
+                this.#setStatus("attention", "The native voice state changed while confirming activation; Fake Deafen stayed off. Verify the normal Deafen control before retrying.");
+            }
+        }
+        catch (error) {
+            // The successful send may already have held self-deafen. Restore only
+            // while ownership still matches, and always settle the pending result
+            // even when the host isolates an observer's exception.
+            try {this.disarm();}
+            catch {/* The attention state below does not claim restoration. */}
+            this.#armedChannelId = undefined;
+            this.#finishDirectArm(false);
+            this.#status = {...this.#status, phase: "attention", detail: "Fake Deafen could not publish its confirmed state. Verify the normal Deafen control before retrying.", armed: false, pending: false};
+            throw error;
+        }
     }
 
     #beginDirectArm(channelId: string): void {
@@ -578,6 +660,8 @@ export class SolcordFakeDeafenController {
         this.#directAwaitingUndeafened = false;
         this.#directPrimeQueued = false;
         this.#localRestorePending = false;
+        this.#pendingRestoreSend = undefined;
+        this.#restorationAttempt = undefined;
         this.#directArmGeneration++;
         clearTimeout(this.#directArmTimer);
         this.#directArmTimer = undefined;
