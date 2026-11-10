@@ -7,6 +7,7 @@ New to Solcord? Start with [Installation](QUICK_START.md), then the [User guide]
 | Guide | What it covers |
 | --- | --- |
 | [Installation](QUICK_START.md) | Download, checksum, setup, launch, and update |
+| [Mac preview](MACOS.md) | Apple Silicon and Intel setup, copied-app ownership, and recovery limits |
 | [User guide](USER_GUIDE.md) | Workspaces, themes, motion, controls, and feature states |
 | [Recovery](INSTALL_AND_ROLLBACK.md) | Repair, rollback, uninstall, and preserved data |
 | [Troubleshooting](../SUPPORT.md) | Common problems and useful bug reports |

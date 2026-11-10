@@ -22,6 +22,7 @@ import {
 import {SolcordBaselineSuite} from "../src/betterdiscord/modules/solcord/baseline-suite";
 import {SolcordDisposalScope, type SolcordResourceKind} from "../src/betterdiscord/modules/solcord/disposal";
 import {SolcordStreamAudienceGuard, type SolcordAudienceGuardAdapter} from "../src/betterdiscord/modules/solcord/stream-audience-guard";
+import {SolcordFakeDeafenController, type SolcordGatewaySocket, type SolcordVoiceStatePayload} from "../src/betterdiscord/modules/solcord/fake-deafen";
 
 const EVIDENCE_KIND = "non-live synthetic backend lifecycle soak";
 const DEFAULT_DURATION_MS = 30 * 60 * 1_000;
@@ -29,6 +30,7 @@ const DEFAULT_CYCLE_DELAY_MS = 100;
 const DEFAULT_SAMPLE_INTERVAL_MS = 30_000;
 const DEFAULT_HEAP_GROWTH_LIMIT_BYTES = 64 * 1024 * 1024;
 const MAX_MEMORY_SAMPLES = 256;
+const MAX_CYCLE_TIMINGS = 4096;
 const RESOURCE_KINDS: readonly SolcordResourceKind[] = [
     "listener", "timer", "interval", "observer", "style", "element", "patch", "cache", "media",
     "audio-context", "track", "object-url", "other"
@@ -41,9 +43,10 @@ export interface SolcordBackendSoakOptions {
     heapGrowthLimitBytes?: number;
     maxCycles?: number;
     scenario?: SolcordBackendSoakScenario;
+    onProgress?: (progress: {elapsedMs: number; cycles: number; fakeDeafenCycles: number; memory: SolcordBackendSoakMemorySample;}) => Promise<void>;
 }
 
-export type SolcordBackendSoakScenario = "all" | "disposal" | "dom-control" | "baseline" | "layout" | "embed" | "autoscroll" | "link-preview" | "controllers" | "audience";
+export type SolcordBackendSoakScenario = "all" | "disposal" | "dom-control" | "baseline" | "layout" | "embed" | "autoscroll" | "link-preview" | "controllers" | "audience" | "fake-deafen";
 
 export interface SolcordBackendSoakMemorySample {
     elapsedMs: number;
@@ -61,6 +64,8 @@ export interface SolcordBackendSoakReport {
     scenario: SolcordBackendSoakScenario;
     elapsedMs: number;
     cycles: number;
+    fakeDeafenCycles: number;
+    cycleTiming: {sampleKind: string; samples: number; medianMs: number; p95Ms: number; maximumMs: number;};
     adapterExecutions: 0;
     maximumVoiceHealthSamples: number;
     maximumOwnedResources: number;
@@ -85,6 +90,7 @@ interface DisposableController {
 interface CycleResult {
     maximumOwnedResources: number;
     voiceHealthSamples: number;
+    fakeDeafenCycles: number;
 }
 
 function finiteInteger(value: number | undefined, fallback: number, minimum: number, maximum: number, label: string): number {
@@ -308,7 +314,83 @@ function runAudienceGuardCycle(): number {
     return owned;
 }
 
-function runOneCycle(sequence: number, scenario: SolcordBackendSoakScenario): CycleResult {
+export async function runSolcordFakeDeafenSoakCycle(sequence: number): Promise<void> {
+    const originalAccount = "111111111111111111";
+    const originalChannel = "333333333333333333";
+    let account = originalAccount;
+    let channel = originalChannel;
+    let localDeaf = false;
+    let patches = 0;
+    let confirm = true;
+    let transport: unknown = {};
+    const frames: SolcordVoiceStatePayload[] = [];
+    const native: Array<() => void> = [];
+    const variant = sequence % 6;
+    const socket: SolcordGatewaySocket = {send(_opcode, payload) {frames.push(structuredClone(payload) as SolcordVoiceStatePayload);}};
+    const controller = new SolcordFakeDeafenController({
+        getAccountId: () => account,
+        getSocket: () => socket,
+        getConnectionIdentity: () => transport,
+        getVoiceChannelId: () => channel,
+        isLocallyDeafened: () => localDeaf,
+        toggleLocalDeafen: () => {
+            const action = () => {
+                localDeaf = !localDeaf;
+                socket.send(4, {channel_id: channel, guild_id: "555555555555555555", self_mute: false, self_deaf: localDeaf});
+            };
+            if (variant === 3) native.push(action);
+            else action();
+        },
+        // Controlled synchronous receipt boundary. The production controller is
+        // exercised; no real gateway, media device, or external adapter exists.
+        patchSend: (target, before, after) => {
+            const original = target.send;
+            patches++;
+            target.send = function (...args: [number, unknown, ...unknown[]]) {
+                before(args);
+                const result = original.apply(this, args);
+                if (confirm) after(args);
+                return result;
+            };
+            return () => {target.send = original; patches--;};
+        }
+    });
+    try {
+        if (!controller.start() || patches !== 1) throw new Error("Fake Deafen soak did not own exactly one scoped patch.");
+        if (!controller.toggleDirect()) throw new Error("Fake Deafen soak rejected its explicit controlled activation.");
+        if (variant === 3) {
+            const activation = controller.waitForActivation();
+            channel = "444444444444444444";
+            if (controller.validateOwnership() || await activation) throw new Error("Fake Deafen soak crossed the pending channel boundary.");
+            native.shift()?.();
+            if (controller.snapshot().armed || frames.at(-1)?.self_deaf !== true) throw new Error("Fake Deafen soak rewrote or armed a late native action after channel change.");
+        }
+        else {
+            if (!await controller.waitForActivation() || !controller.snapshot().armed || localDeaf || frames.at(-1)?.self_deaf !== true) throw new Error("Fake Deafen soak did not hold deafen while restoring local audio.");
+            if (variant === 1 || variant === 2) {
+                if (variant === 1) account = "222222222222222222";
+                else transport = {};
+                const count = frames.length;
+                if (controller.validateOwnership() || controller.snapshot().armed || frames.length !== count) throw new Error("Fake Deafen soak restored or remained armed after ownership drift.");
+            }
+            else if (variant === 4) {
+                confirm = false;
+                if (controller.disarm() || controller.snapshot().phase !== "attention" || localDeaf) throw new Error("Fake Deafen soak claimed restoration without a matching send receipt.");
+            }
+            else if (variant === 5) {
+                if (!controller.stop() || controller.snapshot().armed || localDeaf || frames.at(-1)?.self_deaf !== false) throw new Error("Fake Deafen soak failed its armed teardown restoration.");
+            }
+            else if (!controller.disarm() || controller.snapshot().armed || localDeaf || frames.at(-1)?.self_deaf !== false) {
+                throw new Error("Fake Deafen soak failed direct off restoration.");
+            }
+        }
+    }
+    finally {controller.stop();}
+    await Promise.resolve();
+    if (patches || controller.snapshot().armed || controller.snapshot().pending || native.length) throw new Error("Fake Deafen soak retained a patch, pending operation, or native fixture action after teardown.");
+}
+
+async function runOneCycle(sequence: number, scenario: SolcordBackendSoakScenario): Promise<CycleResult> {
     const disposalOwned = scenario === "all" || scenario === "disposal" ? runDisposalScopeCycle() : 0;
     if (scenario === "dom-control") {
         resetFixtureDom();
@@ -321,16 +403,19 @@ function runOneCycle(sequence: number, scenario: SolcordBackendSoakScenario): Cy
         : 0;
     const controllers = scenario === "all" || scenario === "controllers" ? runV2ControllerCycle(sequence) : {owned: 0, voiceHealthSamples: 0};
     const audienceOwned = scenario === "all" || scenario === "audience" ? runAudienceGuardCycle() : 0;
+    const fakeDeafenCycles = scenario === "all" || scenario === "fake-deafen" ? 1 : 0;
+    if (fakeDeafenCycles) await runSolcordFakeDeafenSoakCycle(sequence);
     return {
         maximumOwnedResources: Math.max(disposalOwned, baselineOwned, controllers.owned, audienceOwned),
-        voiceHealthSamples: controllers.voiceHealthSamples
+        voiceHealthSamples: controllers.voiceHealthSamples,
+        fakeDeafenCycles
     };
 }
 
 function normalizeScenario(value: unknown): SolcordBackendSoakScenario {
     if (value === undefined) return "all";
-    if (value === "all" || value === "disposal" || value === "dom-control" || value === "baseline" || value === "layout" || value === "embed" || value === "autoscroll" || value === "link-preview" || value === "controllers" || value === "audience") return value;
-    throw new Error("Scenario must be all, disposal, dom-control, baseline, layout, embed, autoscroll, link-preview, controllers, or audience.");
+    if (value === "all" || value === "disposal" || value === "dom-control" || value === "baseline" || value === "layout" || value === "embed" || value === "autoscroll" || value === "link-preview" || value === "controllers" || value === "audience" || value === "fake-deafen") return value;
+    throw new Error("Scenario must be all, disposal, dom-control, baseline, layout, embed, autoscroll, link-preview, controllers, audience, or fake-deafen.");
 }
 
 function assertSettledTeardown(): void {
@@ -374,6 +459,9 @@ export async function runSolcordBackendSoak(options: SolcordBackendSoakOptions =
     let maximumVoiceHealthSamples = 0;
     let maximumOwnedResources = 0;
     let fixtureQueryCacheResets = 0;
+    let fakeDeafenCycles = 0;
+    const cycleTimings: number[] = [];
+    let maximumCycleMs = 0;
 
     forceGarbageCollection();
     samples.push(memorySample(startedAt));
@@ -381,8 +469,13 @@ export async function runSolcordBackendSoak(options: SolcordBackendSoakOptions =
     while (Date.now() - startedAt < durationMs) {
         if (maxCycles !== undefined && cycles >= maxCycles) break;
         try {
-            const cycle = runOneCycle(cycles + 1, scenario);
+            const cycleStartedAt = performance.now();
+            const cycle = await runOneCycle(cycles + 1, scenario);
+            const cycleMs = performance.now() - cycleStartedAt;
+            cycleTimings[cycles % MAX_CYCLE_TIMINGS] = cycleMs;
+            maximumCycleMs = Math.max(maximumCycleMs, cycleMs);
             cycles++;
+            fakeDeafenCycles += cycle.fakeDeafenCycles;
             maximumVoiceHealthSamples = Math.max(maximumVoiceHealthSamples, cycle.voiceHealthSamples);
             maximumOwnedResources = Math.max(maximumOwnedResources, cycle.maximumOwnedResources);
         }
@@ -394,6 +487,7 @@ export async function runSolcordBackendSoak(options: SolcordBackendSoakOptions =
         if (now >= nextSampleAt && samples.length < MAX_MEMORY_SAMPLES - 1) {
             forceGarbageCollection();
             samples.push(memorySample(startedAt));
+            await options.onProgress?.({elapsedMs: now - startedAt, cycles, fakeDeafenCycles, memory: samples.at(-1)!});
             nextSampleAt = now + sampleIntervalMs;
         }
         await delay(cycleDelayMs);
@@ -418,6 +512,7 @@ export async function runSolcordBackendSoak(options: SolcordBackendSoakOptions =
     if (cycles === 0) failures.push("The soak completed without a lifecycle cycle.");
     if (finalHeapGrowthBytes > heapGrowthLimitBytes) failures.push(`Final heap growth ${finalHeapGrowthBytes} exceeded the ${heapGrowthLimitBytes} byte limit.`);
     const finishedAt = new Date();
+    cycleTimings.sort((left, right) => left - right);
     return {
         version: 1,
         evidenceKind: EVIDENCE_KIND,
@@ -427,6 +522,8 @@ export async function runSolcordBackendSoak(options: SolcordBackendSoakOptions =
         scenario,
         elapsedMs: finishedAt.getTime() - startedAt,
         cycles,
+        fakeDeafenCycles,
+        cycleTiming: {sampleKind: `Last ${MAX_CYCLE_TIMINGS} completed cycles, excluding configured idle delay`, samples: cycleTimings.length, medianMs: cycleTimings[Math.floor(cycleTimings.length * 0.5)] ?? 0, p95Ms: cycleTimings[Math.floor(cycleTimings.length * 0.95)] ?? 0, maximumMs: maximumCycleMs},
         adapterExecutions: 0,
         maximumVoiceHealthSamples,
         maximumOwnedResources,
@@ -444,7 +541,8 @@ export async function runSolcordBackendSoak(options: SolcordBackendSoakOptions =
             "This does not launch or inspect Discord.",
             "This does not establish live renderer, owner-profile, Activity, installer, or human visual acceptance.",
             "Happy DOM document query caches are cleared after each asserted teardown; this is disclosed test-harness maintenance, not product cleanup.",
-            "Intent objects are validated but never executed against an adapter."
+            "Intent objects are validated but never executed against an external adapter.",
+            "Fake Deafen uses its production controller with controlled synthetic local state and synchronous receipt callbacks; this is not real call, audio, gateway, or server-acknowledgement evidence."
         ]
     };
 }
@@ -470,13 +568,15 @@ async function main(): Promise<void> {
     const proof = process.argv.includes("--proof");
     const output = argumentValue("--output");
     if (!output || !isAbsolute(output)) throw new Error("--output requires an absolute directory path.");
+    await mkdir(output, {recursive: true});
     const report = await runSolcordBackendSoak({
         durationMs: numericArgument("--duration-ms") ?? (proof ? 60_000 : DEFAULT_DURATION_MS),
         cycleDelayMs: numericArgument("--cycle-delay-ms") ?? (proof ? 0 : DEFAULT_CYCLE_DELAY_MS),
         sampleIntervalMs: numericArgument("--sample-interval-ms") ?? (proof ? 10 : DEFAULT_SAMPLE_INTERVAL_MS),
         heapGrowthLimitBytes: numericArgument("--heap-growth-limit-bytes"),
         maxCycles: numericArgument("--max-cycles") ?? (proof ? 50 : undefined),
-        scenario: normalizeScenario(argumentValue("--scenario"))
+        scenario: normalizeScenario(argumentValue("--scenario")),
+        onProgress: async progress => {await writeFile(join(output, "backend-soak-progress.json"), `${JSON.stringify(progress, null, 2)}\n`, "utf8");}
     });
     await mkdir(output, {recursive: true});
     const reportPath = join(output, "backend-soak-report.json");

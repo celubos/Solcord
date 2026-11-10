@@ -28,6 +28,7 @@ internal sealed class InstallerEngine
     private readonly Action<string>? _mutationHook;
 
     internal string? LastLauncherWarning {get; private set;}
+    internal string RecoveryDirectory => Path.Combine(_roamingAppData, "BetterDiscord", "solcord-installer");
 
     internal InstallerEngine(
         string bundleRoot,

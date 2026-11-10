@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace Solcord.Installer;
 
@@ -33,6 +34,9 @@ internal sealed class InstallerForm : Form
     private readonly Button _primaryAction;
     private readonly Button _verifyAction;
     private readonly Button _recoveryAction;
+    private readonly Button _refreshTargetsAction;
+    private readonly Button _closeAction;
+    private readonly Button _errorDetailsAction;
     private readonly Label _maintenanceHeading = new();
     private readonly TableLayoutPanel _maintenanceList = new();
     private readonly TableLayoutPanel _workspace = new();
@@ -45,6 +49,11 @@ internal sealed class InstallerForm : Form
     private readonly Dictionary<string, ActionVisual> _actions = new(StringComparer.Ordinal);
     private string? _recommendedKey;
     private bool _busy;
+    private bool _checkingState;
+    private bool _refreshingTargets;
+    private bool _canVerify;
+    private bool _canOpenRecovery;
+    private string? _errorDetails;
     private int _stateGeneration;
     private Color _stateBorder = Color.FromArgb(118, 171, 163);
 
@@ -55,6 +64,9 @@ internal sealed class InstallerForm : Form
         _primaryAction = NewButton("Continue", ButtonTone.Primary);
         _verifyAction = NewButton("Verify files", ButtonTone.Outline);
         _recoveryAction = NewButton("Open recovery folder", ButtonTone.Outline);
+        _refreshTargetsAction = NewButton("Refresh", ButtonTone.Outline);
+        _closeAction = NewButton("Close", ButtonTone.Outline);
+        _errorDetailsAction = NewButton("Error details", ButtonTone.Outline);
 
         Text = $"Solcord Setup · {_manifest.CandidateLabel}";
         ClientSize = new Size(900, 650);
@@ -70,8 +82,9 @@ internal sealed class InstallerForm : Form
 
         Controls.Add(BuildShell());
         AcceptButton = _primaryAction;
-        Load += (_, _) => RefreshTargets();
-        Shown += (_, _) => _primaryAction.Focus();
+        CancelButton = _closeAction;
+        Load += async (_, _) => await RefreshTargetsAsync();
+        Shown += (_, _) => {if (_targets.Enabled) _targets.Focus();};
         _targets.SelectedIndexChanged += (_, _) => RefreshInstallationState();
         FormClosing += (_, e) => {if (_busy) e.Cancel = true;};
     }
@@ -166,26 +179,34 @@ internal sealed class InstallerForm : Form
 
     private Control BuildTargetField()
     {
-        var field = new TableLayoutPanel {Dock = DockStyle.Top, AutoSize = true, MinimumSize = new Size(0, 40), ColumnCount = 2, RowCount = 1, BackColor = Canvas, Margin = new Padding(0, 0, 0, 8), Padding = Padding.Empty};
+        var field = new TableLayoutPanel {Dock = DockStyle.Top, AutoSize = true, MinimumSize = new Size(0, 40), ColumnCount = 3, RowCount = 1, BackColor = Canvas, Margin = new Padding(0, 0, 0, 8), Padding = Padding.Empty};
         field.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 136));
         field.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        field.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
         field.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var label = NewLabel("Version", 9.5f, FontStyle.Bold, Ink);
+        var label = NewLabel("Discord app", 9.5f, FontStyle.Bold, Ink);
         label.Dock = DockStyle.Fill;
         label.TextAlign = ContentAlignment.MiddleLeft;
         _targets.DropDownStyle = ComboBoxStyle.DropDownList;
         _targets.FormattingEnabled = true;
         _targets.Dock = DockStyle.Fill;
-        _targets.Margin = new Padding(0, 5, 0, 5);
+        _targets.Margin = new Padding(0, 5, 8, 5);
         _targets.BackColor = Surface;
         _targets.ForeColor = Ink;
         _targets.FlatStyle = FlatStyle.Flat;
         _targets.TabIndex = 0;
-        _targets.AccessibleName = "Discord version";
+        _targets.AccessibleName = "Discord app and version";
         _targets.AccessibleDescription = "Choose an installed Stable, PTB, or Canary version.";
         _targets.Format += (_, eventArgs) => {if (eventArgs.ListItem is DiscordTarget target) eventArgs.Value = $"{target.Channel} · {target.Version}";};
+        _refreshTargetsAction.Dock = DockStyle.Fill;
+        _refreshTargetsAction.Margin = new Padding(0, 2, 0, 2);
+        _refreshTargetsAction.TabIndex = 1;
+        _refreshTargetsAction.AccessibleName = "Refresh installed Discord versions";
+        _refreshTargetsAction.AccessibleDescription = "Check for installed Stable, PTB, or Canary versions. Keyboard shortcut: F5.";
+        _refreshTargetsAction.Click += async (_, _) => await RefreshTargetsAsync();
         field.Controls.Add(label, 0, 0);
         field.Controls.Add(_targets, 1, 0);
+        field.Controls.Add(_refreshTargetsAction, 2, 0);
         return field;
     }
 
@@ -346,11 +367,24 @@ internal sealed class InstallerForm : Form
         _recoveryAction.TabIndex = 6;
         _recoveryAction.AccessibleName = "Open recovery folder";
         _recoveryAction.Click += (_, _) => RunAction("Recovery files", () => {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BetterDiscord", "solcord-installer")) {UseShellExecute = true});
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_engine.RecoveryDirectory) {UseShellExecute = true});
             return "Opened the Solcord recovery folder.";
         });
+        _errorDetailsAction.Dock = DockStyle.Left;
+        _errorDetailsAction.AutoSize = true;
+        _errorDetailsAction.Margin = Padding.Empty;
+        _errorDetailsAction.TabIndex = 7;
+        _errorDetailsAction.AccessibleName = "Read error details";
+        _errorDetailsAction.AccessibleDescription = "Read the full error and affected local paths. No report is sent.";
+        _errorDetailsAction.Visible = false;
+        _errorDetailsAction.Click += (_, _) => {
+            if (_errorDetails is null) return;
+            using Form details = CreateErrorDetailsDialog(_errorDetails);
+            details.ShowDialog(this);
+        };
         utilities.Controls.Add(_verifyAction, 0, 0);
         utilities.Controls.Add(_recoveryAction, 1, 0);
+        utilities.Controls.Add(_errorDetailsAction, 2, 0);
         return utilities;
     }
 
@@ -369,61 +403,118 @@ internal sealed class InstallerForm : Form
         var note = NewLabel("Built with BetterDiscord, created by @slaveofsolace.", 8.75f, FontStyle.Regular, Muted);
         note.Dock = DockStyle.Fill;
         note.TextAlign = ContentAlignment.MiddleLeft;
-        var close = NewButton("Close", ButtonTone.Outline);
-        close.Dock = DockStyle.Fill;
-        close.Margin = Padding.Empty;
-        close.TabIndex = 7;
-        close.AccessibleName = "Close installer";
-        close.Click += (_, _) => Close();
+        _closeAction.Dock = DockStyle.Fill;
+        _closeAction.Margin = Padding.Empty;
+        _closeAction.TabIndex = 8;
+        _closeAction.AccessibleName = "Close installer";
+        _closeAction.Click += (_, _) => Close();
         layout.Controls.Add(note, 0, 0);
-        layout.Controls.Add(close, 1, 0);
+        layout.Controls.Add(_closeAction, 1, 0);
         _footer.Controls.Add(layout);
         return _footer;
     }
 
-    private void RefreshTargets()
+    protected override bool ProcessCmdKey(ref Message message, Keys keyData)
     {
-        DiscordTarget? previous = _targets.SelectedItem as DiscordTarget;
-        _targets.Items.Clear();
-        foreach (DiscordTarget target in _engine.DetectTargets()) _targets.Items.Add(target);
-        // Retain an explicit route to the receipt-selected older version after
-        // Discord downloads an update, including managed rollback and launch.
+        if (keyData == Keys.F5)
+        {
+            if (!_busy && !_refreshingTargets) _ = RefreshTargetsAsync();
+            return true;
+        }
+        return base.ProcessCmdKey(ref message, keyData);
+    }
+
+    private IReadOnlyList<DiscordTarget> ReadDetectedTargets()
+    {
+        var targets = _engine.DetectTargets().ToList();
         try
         {
             DiscordTarget? managed = _engine.ManagedTarget();
-            if (managed is not null && !_targets.Items.Cast<DiscordTarget>().Any(target => target.Channel == managed.Channel && target.Version == managed.Version))
-                _targets.Items.Add(managed);
+            if (managed is not null && !targets.Any(target => target.Channel == managed.Channel && target.Version == managed.Version)) targets.Add(managed);
         }
         catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException) {/* Readiness errors are shown by the selected-target check. */}
-        if (_targets.Items.Count > 0)
+        return targets;
+    }
+
+    private async Task RefreshTargetsAsync(Func<IReadOnlyList<DiscordTarget>>? detect = null, Func<DiscordTarget, InstallationState>? inspect = null)
+    {
+        if (_refreshingTargets) return;
+        int generation = ++_stateGeneration;
+        DiscordTarget? previous = _targets.SelectedItem as DiscordTarget;
+        _refreshingTargets = true;
+        _checkingState = true;
+        SetErrorDetails(null);
+        SetState("Checking", "Finding installed Discord versions", "Stable, PTB, and Canary can be refreshed without closing Setup.", StateTone.Protected, null);
+        UpdateInteractionState();
+        try
         {
-            int previousIndex = previous is null ? -1 : _targets.Items.Cast<DiscordTarget>().ToList().FindIndex(target => target.Channel == previous.Channel && target.Version == previous.Version);
-            _targets.SelectedIndex = previousIndex >= 0 ? previousIndex : 0;
+            IReadOnlyList<DiscordTarget> targets = await Task.Run(detect ?? ReadDetectedTargets);
+            if (IsDisposed || generation != _stateGeneration) return;
+            _targets.BeginUpdate();
+            try
+            {
+                _targets.Items.Clear();
+                foreach (DiscordTarget target in targets) _targets.Items.Add(target);
+                if (_targets.Items.Count > 0)
+                {
+                    int previousIndex = previous is null ? -1 : targets.ToList().FindIndex(target => target.Channel == previous.Channel && target.Version == previous.Version);
+                    _targets.SelectedIndex = previousIndex >= 0 ? previousIndex : 0;
+                }
+            }
+            finally {_targets.EndUpdate();}
+            _refreshingTargets = false;
+            if (_targets.Items.Count > 0) await RefreshInstallationStateAsync(inspect);
+            else
+            {
+                SetActionAvailability(false, false, false, false, false);
+                SetState("Discord not found", "Install Discord, then refresh", "Stable, PTB, or Canary was not detected on this PC. Install Discord or finish its update, then choose Refresh (F5).", StateTone.Warning, null);
+            }
         }
-        else {SetState("Discord not found", "Install Discord first", "Stable, PTB, or Canary was not detected on this PC.", StateTone.Warning, null); SetActionAvailability(false, false, false, false, false);}
+        catch (Exception error)
+        {
+            if (IsDisposed || generation != _stateGeneration) return;
+            SetActionAvailability(false, false, false, false, false);
+            SetErrorDetails(error);
+            SetState("Needs attention", "Discord versions couldn't be checked", $"{FriendlyError(error)} Refresh (F5) to try again.", StateTone.Danger, null);
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                if (generation == _stateGeneration) {_refreshingTargets = false; _checkingState = false;}
+                UpdateInteractionState();
+            }
+        }
     }
 
     private async void RefreshInstallationState()
     {
-        if (!_busy) await RefreshInstallationStateAsync();
+        if (!_busy && !_refreshingTargets) await RefreshInstallationStateAsync();
     }
 
-    private async Task RefreshInstallationStateAsync()
+    private InstallationState ReadInstallationState(DiscordTarget selected)
+    {
+        bool pending = _engine.HasPendingRecovery();
+        bool managed = _engine.HasManagedInstall();
+        bool channelMatches = _engine.IsManagedChannel(selected);
+        bool packageRecorded = managed && channelMatches && _engine.IsCurrentPackageRecorded();
+        bool exact = !pending && packageRecorded && _engine.VerifyInstalled(selected);
+        return new(pending, managed, channelMatches, packageRecorded, exact);
+    }
+
+    private async Task RefreshInstallationStateAsync(Func<DiscordTarget, InstallationState>? inspect = null)
     {
         DiscordTarget? selected = _targets.SelectedItem as DiscordTarget;
         bool targetReady = selected is not null;
         if (!targetReady) {SetActionAvailability(false, false, false, false, false); return;}
         int generation = ++_stateGeneration;
+        _checkingState = true;
+        SetErrorDetails(null);
+        SetState("Checking", $"Checking Discord {selected!.Channel}", $"Reviewing {selected.Version}. Wait for its available actions before continuing.", StateTone.Protected, null);
+        UpdateInteractionState();
         try
         {
-            var status = await Task.Run(() => {
-                bool pending = _engine.HasPendingRecovery();
-                bool managed = _engine.HasManagedInstall();
-                bool channelMatches = _engine.IsManagedChannel(selected!);
-                bool packageRecorded = managed && channelMatches && _engine.IsCurrentPackageRecorded();
-                bool exact = !pending && packageRecorded && _engine.VerifyInstalled(selected);
-                return (pending, managed, channelMatches, packageRecorded, exact);
-            });
+            var status = await Task.Run(() => (inspect ?? ReadInstallationState)(selected));
             if (IsDisposed || generation != _stateGeneration) return;
             var (pending, managed, channelMatches, packageRecorded, exact) = status;
             if (managed && !channelMatches)
@@ -443,7 +534,12 @@ internal sealed class InstallerForm : Form
         {
             if (IsDisposed || generation != _stateGeneration) return;
             SetActionAvailability(false, false, false, false, _engine.HasPendingRecovery());
-            SetState("Needs attention", "Review before continuing", error.Message, StateTone.Danger, _engine.HasPendingRecovery() ? "rollback" : null);
+            SetErrorDetails(error);
+            SetState("Needs attention", "Review before continuing", FriendlyError(error), StateTone.Danger, _engine.HasPendingRecovery() ? "rollback" : null);
+        }
+        finally
+        {
+            if (!IsDisposed && generation == _stateGeneration) {_checkingState = false; UpdateInteractionState();}
         }
     }
 
@@ -454,17 +550,16 @@ internal sealed class InstallerForm : Form
         SetManagedAction("uninstall", targetReady && managed && !pending);
         bool anyMaintenance = _actions.Values.Any(action => action.Row.Visible);
         _maintenanceHeading.Visible = anyMaintenance;
-        _verifyAction.Enabled = targetReady && managed && !pending;
-        ApplyButtonTone(_verifyAction, ButtonTone.Outline);
-        _recoveryAction.Enabled = Directory.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BetterDiscord", "solcord-installer"));
-        ApplyButtonTone(_recoveryAction, ButtonTone.Outline);
+        _canVerify = targetReady && managed && !pending;
+        _canOpenRecovery = Directory.Exists(_engine.RecoveryDirectory);
+        UpdateInteractionState();
     }
 
     private void SetManagedAction(string key, bool visible)
     {
         ActionVisual visual = _actions[key];
         visual.Row.Visible = visible;
-        visual.Button.Enabled = visible;
+        visual.Button.Enabled = visible && !_busy && !_checkingState && !_refreshingTargets;
         ApplyButtonTone(visual.Button, visual.Tone);
     }
 
@@ -480,13 +575,30 @@ internal sealed class InstallerForm : Form
         _stateBorder = danger ? Danger : warning ? Warning : Color.FromArgb(118, 171, 163);
         _statePanel.Invalidate();
         _recommendedKey = recommendedKey;
-        _primaryAction.Enabled = recommendedKey is not null;
+        _primaryAction.Enabled = recommendedKey is not null && !_busy && !_checkingState && !_refreshingTargets;
         _primaryAction.Visible = recommendedKey is not null;
         _primaryRow.Visible = recommendedKey is not null;
         _primaryRow.Height = recommendedKey is null ? 0 : 46;
         _primaryAction.Text = primaryLabel ?? recommendedKey switch {"install" => "Install Solcord", "update" => "Update Solcord", "repair" => "Repair Solcord", "rollback" => "Roll back", "launch" => "Open Solcord", _ => "Continue"};
         _primaryAction.AccessibleDescription = body;
         ApplyButtonTone(_primaryAction, ButtonTone.Primary);
+    }
+
+    private void UpdateInteractionState()
+    {
+        bool ready = !_busy && !_checkingState && !_refreshingTargets;
+        _targets.Enabled = !_busy && !_refreshingTargets && _targets.Items.Count > 0;
+        _refreshTargetsAction.Enabled = !_busy && !_refreshingTargets;
+        _primaryAction.Enabled = ready && _recommendedKey is not null;
+        foreach (ActionVisual action in _actions.Values) {action.Button.Enabled = ready && action.Row.Visible; ApplyButtonTone(action.Button, action.Tone);}
+        _verifyAction.Enabled = ready && _canVerify;
+        _recoveryAction.Enabled = ready && _canOpenRecovery;
+        _errorDetailsAction.Enabled = !_busy && _errorDetails is not null;
+        _closeAction.Enabled = !_busy;
+        _closeAction.Text = _busy ? "Working…" : "Close";
+        _closeAction.AccessibleName = _busy ? "Operation in progress" : "Close installer";
+        _closeAction.AccessibleDescription = _busy ? "Setup can close when the current operation finishes." : "Close Setup. Keyboard shortcut: Escape.";
+        foreach (Button button in new[] {_primaryAction, _verifyAction, _recoveryAction, _refreshTargetsAction, _errorDetailsAction, _closeAction}) ApplyButtonTone(button, button == _primaryAction ? ButtonTone.Primary : ButtonTone.Outline);
     }
 
     private DiscordTarget Target() => _targets.SelectedItem as DiscordTarget ?? throw new InvalidOperationException("Select an installed Discord channel first.");
@@ -499,7 +611,7 @@ internal sealed class InstallerForm : Form
 
     private void RunOperation(string key)
     {
-        if (_busy) return;
+        if (_busy || _checkingState || _refreshingTargets) return;
         DiscordTarget selected = Target();
         if (key == "uninstall" && MessageBox.Show("Remove Solcord from this Discord installation?\n\nDiscord returns to normal. Plugins, themes, settings, and recovery files stay on disk.", "Uninstall Solcord", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         ActionVisual? visual = _actions.GetValueOrDefault(key);
@@ -536,39 +648,86 @@ internal sealed class InstallerForm : Form
 
     private async void RunAction(string actionName, Func<string> action, string? retryKey = null)
     {
-        if (_busy) return;
+        if (_busy || _checkingState || _refreshingTargets) return;
         _busy = true;
         ++_stateGeneration;
         Control? previousFocus = ActiveControl;
-        _targets.Enabled = false;
         UseWaitCursor = true;
-        foreach (ActionVisual visual in _actions.Values) visual.Button.Enabled = false;
-        _primaryAction.Enabled = false;
-        _verifyAction.Enabled = false;
-        _recoveryAction.Enabled = false;
+        SetErrorDetails(null);
+        UpdateInteractionState();
         SetState("Working", actionName, "Settings, add-ons, and account data stay in place.", StateTone.Protected, null);
-        try {string result = await Task.Run(action); RefreshTargets(); await RefreshInstallationStateAsync(); _stateBody.Text = result;}
+        try
+        {
+            string result = await Task.Run(action);
+            await RefreshTargetsAsync();
+            _stateBody.Text = _errorDetails is null ? result : $"{result} Status refresh needs attention; open Error details.";
+        }
         catch (Exception error)
         {
             await RefreshInstallationStateAsync();
             bool pending = _engine.HasPendingRecovery();
             string? next = pending ? "rollback" : retryKey;
+            SetErrorDetails(error);
             SetState("Action needed", $"{actionName} couldn't finish", FriendlyError(error), StateTone.Danger, next, pending ? "Restore backup" : next is null ? null : "Try again");
         }
         finally
         {
             _busy = false;
-            _targets.Enabled = true;
             UseWaitCursor = false;
+            UpdateInteractionState();
             if (previousFocus is {IsDisposed: false, CanFocus: true}) previousFocus.Focus();
         }
     }
 
     private static string FriendlyError(Exception error)
     {
-        string message = error.Message.Replace('\r', ' ').Replace('\n', ' ');
+        string message = ErrorMessage(error).Replace('\r', ' ').Replace('\n', ' ');
         while (message.Contains("  ", StringComparison.Ordinal)) message = message.Replace("  ", " ", StringComparison.Ordinal);
         return message.Length <= 170 ? message : $"{message[..167]}…";
+    }
+
+    private static string ErrorMessage(Exception error)
+    {
+        // Only the message is shown: never dump stack traces, exception Data,
+        // process arguments, credentials, or profile documents into the UI.
+        string message = Regex.Replace(error.Message, @"(?im)\b(authorization|password|(?:access[_ -]?|refresh[_ -]?)?token|secret)\s*[:=]\s*[^\r\n]+", "$1: [redacted]");
+        message = Regex.Replace(message, @"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [redacted]");
+        return message.Length <= 16_384 ? message : $"{message[..16_384]}\r\n[Message shortened]";
+    }
+
+    private void SetErrorDetails(Exception? error)
+    {
+        _errorDetails = error is null ? null : $"{error.GetType().Name}\r\n\r\n{ErrorMessage(error)}";
+        _errorDetailsAction.Visible = error is not null;
+        _errorDetailsAction.Enabled = error is not null && !_busy;
+    }
+
+    private static Form CreateErrorDetailsDialog(string details)
+    {
+        var dialog = new Form {Text = "Solcord Setup · Error details", ClientSize = new Size(680, 360), MinimumSize = new Size(520, 280), StartPosition = FormStartPosition.CenterParent, AutoScaleMode = AutoScaleMode.Dpi, Font = new Font("Segoe UI Variable Text", 9.5f), BackColor = Canvas, ForeColor = Ink, MinimizeBox = false, MaximizeBox = false};
+        var layout = new TableLayoutPanel {Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(16), Margin = Padding.Empty};
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        var explanation = NewLabel("Full error message and affected local paths. Nothing is uploaded. Select text to copy it if needed.", 9.25f, FontStyle.Regular, Body);
+        explanation.AutoSize = true;
+        explanation.Dock = DockStyle.Fill;
+        explanation.Margin = new Padding(0, 0, 0, 12);
+        var message = new TextBox {Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = true, Dock = DockStyle.Fill, Text = details, BackColor = Surface, ForeColor = Ink, AccessibleName = "Full installer error message", TabIndex = 0};
+        var close = NewButton("Close", ButtonTone.Outline);
+        close.Dock = DockStyle.Right;
+        close.Width = 96;
+        close.Margin = new Padding(0, 8, 0, 0);
+        close.TabIndex = 1;
+        close.DialogResult = DialogResult.Cancel;
+        layout.Controls.Add(explanation, 0, 0);
+        layout.Controls.Add(message, 0, 1);
+        layout.Controls.Add(close, 0, 2);
+        dialog.Controls.Add(layout);
+        dialog.AcceptButton = close;
+        dialog.CancelButton = close;
+        return dialog;
     }
 
     private static Button NewButton(string text, ButtonTone tone)
@@ -622,10 +781,94 @@ internal sealed class InstallerForm : Form
         var closing = new FormClosingEventArgs(CloseReason.UserClosing, false);
         form.OnFormClosing(closing);
         if (!closing.Cancel) throw new InvalidDataException("installer-responsiveness: close bypassed the active transaction");
+        if (form._closeAction.Enabled || form._closeAction.Text != "Working…" || form._refreshTargetsAction.Enabled)
+            throw new InvalidDataException("installer-responsiveness: active transaction did not explain disabled close/refresh");
         var deadline = System.Diagnostics.Stopwatch.StartNew();
         while (form._busy && deadline.ElapsedMilliseconds < 5000) {Application.DoEvents(); Thread.Sleep(1);}
         if (form._busy || ticks < 3 || form._stateBody.Text != "Fixture operation completed.")
             throw new InvalidDataException("installer-responsiveness: message pump or operation completion failed");
+        if (!form._closeAction.Enabled || form._closeAction.Text != "Close" || form.CancelButton != form._closeAction)
+            throw new InvalidDataException("installer-keyboard: idle Close/Escape was not restored");
+        ValidateTargetReadiness(form, fixtureRoot);
+        ValidateRefreshRecovery(form, engine);
+        ValidateErrorDetails(form, fixtureRoot);
+    }
+
+    private static void CompleteUiTask(Task operation, string stage)
+    {
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (!operation.IsCompleted && deadline.ElapsedMilliseconds < 5000) {Application.DoEvents(); Thread.Sleep(1);}
+        if (!operation.IsCompleted) throw new InvalidDataException($"installer-{stage}: asynchronous UI work did not settle");
+        operation.GetAwaiter().GetResult();
+    }
+
+    private static void ValidateTargetReadiness(InstallerForm form, string fixtureRoot)
+    {
+        var first = new DiscordTarget("Stable", "1.2.3", Path.Combine(fixtureRoot, "Discord.exe"), "Discord");
+        var second = new DiscordTarget("Canary", "2.3.4", Path.Combine(fixtureRoot, "DiscordCanary.exe"), "DiscordCanary");
+        form._refreshingTargets = true;
+        form._targets.Items.Add(first); form._targets.Items.Add(second); form._targets.SelectedIndex = 0;
+        form._refreshingTargets = false;
+        form.SetActionAvailability(true, true, true, true, false);
+        form.SetState("Ready", "Old target is ready", "Old recommendation", StateTone.Protected, "launch");
+        using var release = new ManualResetEventSlim();
+        var returned = System.Diagnostics.Stopwatch.StartNew();
+        Task previous = form.RefreshInstallationStateAsync(_ => {release.Wait(2000); return new(false, false, true, false, false);});
+        if (returned.ElapsedMilliseconds > 150 || form._primaryAction.Enabled || form._verifyAction.Enabled || form._actions.Values.Any(action => action.Button.Enabled))
+            throw new InvalidDataException("installer-target-readiness: old-target action remained available during a new check");
+        if (!form._refreshTargetsAction.Enabled || !form._closeAction.Enabled)
+            throw new InvalidDataException("installer-target-readiness: read-only check trapped refresh or Close");
+        bool actionEntered = false;
+        form.RunAction("Fixture stale action", () => {actionEntered = true; return "This action must not run.";});
+        if (form._busy || actionEntered) throw new InvalidDataException("installer-target-readiness: checking allowed another action to invalidate its refresh");
+        form._refreshingTargets = true;
+        form._targets.SelectedIndex = 1;
+        form._refreshingTargets = false;
+        CompleteUiTask(form.RefreshInstallationStateAsync(_ => new(false, true, true, false, false)), "target-readiness");
+        if (!form._primaryAction.Enabled || form._recommendedKey != "update") throw new InvalidDataException("installer-target-readiness: newest selected target did not become available");
+        release.Set(); CompleteUiTask(previous, "stale-target-readiness");
+        if (form._recommendedKey != "update") throw new InvalidDataException("installer-target-readiness: stale result replaced the current target state");
+        using var oldCheckRelease = new ManualResetEventSlim();
+        using var newListRelease = new ManualResetEventSlim();
+        using var oldCheckStarted = new ManualResetEventSlim();
+        Task oldRefresh = form.RefreshTargetsAsync(() => new[] {first}, _ => {oldCheckStarted.Set(); oldCheckRelease.Wait(2000); return new(false, false, true, false, false);});
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (!oldCheckStarted.IsSet && deadline.ElapsedMilliseconds < 5000) {Application.DoEvents(); Thread.Sleep(1);}
+        if (!oldCheckStarted.IsSet) throw new InvalidDataException("installer-target-refresh: first readiness did not begin");
+        Task newRefresh = form.RefreshTargetsAsync(() => {newListRelease.Wait(2000); return new[] {second};}, _ => new(false, true, true, false, false));
+        oldCheckRelease.Set(); CompleteUiTask(oldRefresh, "superseded-refresh");
+        if (!form._refreshingTargets || form._refreshTargetsAction.Enabled)
+            throw new InvalidDataException("installer-target-refresh: superseded readiness released a newer refresh's controls");
+        newListRelease.Set(); CompleteUiTask(newRefresh, "latest-refresh");
+        if ((form._targets.SelectedItem as DiscordTarget) != second || form._recommendedKey != "update")
+            throw new InvalidDataException("installer-target-refresh: current refresh did not keep its target and action");
+    }
+
+    private static void ValidateRefreshRecovery(InstallerForm form, InstallerEngine engine)
+    {
+        CompleteUiTask(form.RefreshTargetsAsync(() => Array.Empty<DiscordTarget>()), "empty-target-refresh");
+        if (form._targets.Items.Count != 0 || !form._refreshTargetsAction.Enabled || form._primaryAction.Enabled)
+            throw new InvalidDataException("installer-target-refresh: missing Discord did not leave a usable refresh action");
+        CompleteUiTask(form.RefreshTargetsAsync(() => throw new IOException("Fixture discovery could not read a local directory.")), "failed-target-refresh");
+        if (!form._refreshTargetsAction.Enabled || form._checkingState || form._refreshingTargets || form._errorDetails is null)
+            throw new InvalidDataException("installer-target-refresh: failed discovery trapped retry or lost the error detail");
+        Directory.CreateDirectory(engine.RecoveryDirectory);
+        form.SetActionAvailability(false, false, false, false, false);
+        if (!engine.RecoveryDirectory.Contains("solcord-ui-fixture-", StringComparison.Ordinal) || !form._recoveryAction.Enabled)
+            throw new InvalidDataException("installer-recovery-directory: UI escaped its injected disposable roaming root");
+    }
+
+    private static void ValidateErrorDetails(InstallerForm form, string fixtureRoot)
+    {
+        string affectedPath = Path.Combine(fixtureRoot, new string('a', 220) + ".asar");
+        var error = new IOException($"The file could not be replaced: {affectedPath}\r\nAuthorization: Bearer fixture-secret");
+        form.SetErrorDetails(error);
+        if (form._errorDetails is null || !form._errorDetails.Contains(affectedPath, StringComparison.Ordinal) || form._errorDetails.Contains("fixture-secret", StringComparison.Ordinal) || FriendlyError(error).Length > 170)
+            throw new InvalidDataException("installer-error-details: complete local path or credential redaction failed");
+        using Form dialog = CreateErrorDetailsDialog(form._errorDetails);
+        TextBox message = dialog.Controls[0].Controls.OfType<TextBox>().Single();
+        if (!message.ReadOnly || !message.WordWrap || message.ScrollBars != ScrollBars.Vertical || message.Text != form._errorDetails || dialog.CancelButton is null)
+            throw new InvalidDataException("installer-error-details: details cannot be read or closed with Escape");
     }
 
     internal static void ValidateGeometryMatrix(string bundleRoot)
@@ -645,6 +888,7 @@ internal sealed class InstallerForm : Form
                     "update",
                     "Try again"
                 );
+                form.SetErrorDetails(new IOException("The selected local archive could not be opened. Refresh the Discord app list or try again."));
                 form.MinimumSize = Size.Empty;
                 form.Scale(new SizeF(scale, scale));
                 form.ClientSize = new Size(
@@ -763,5 +1007,6 @@ internal sealed class InstallerForm : Form
 
     private enum ButtonTone {Primary, Outline, Danger}
     private enum StateTone {Protected, Warning, Danger}
+    private sealed record InstallationState(bool Pending, bool Managed, bool ChannelMatches, bool PackageRecorded, bool Exact);
     private sealed record ActionVisual(string Title, string Description, Control Row, Button Button, ButtonTone Tone, int RowIndex);
 }

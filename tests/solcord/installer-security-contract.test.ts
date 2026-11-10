@@ -164,7 +164,7 @@ describe("Solcord installer security contracts", () => {
         expect(installerForm).toContain("Solcord Setup");
         expect(installerForm).toContain("\"Recovery\"");
         expect(installerForm).toContain("_maintenanceList.Dock = DockStyle.Top");
-        expect(installerForm).toContain("NewLabel(\"Version\"");
+        expect(installerForm).toContain("NewLabel(\"Discord app\"");
         expect(installerForm).toContain("$\"{target.Channel} · {target.Version}\"");
         expect(installerForm).toContain("new Size(112, 36)");
         expect(installerForm).toContain("primary-action-collapsed");

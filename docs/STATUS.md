@@ -1,48 +1,47 @@
 # Release status
 
-## Downloads and source
+## Downloads and platforms
 
-| Item | Status |
-| --- | --- |
-| Published Windows download | [Solcord 2.0 — Signal](https://github.com/celubos/Solcord/releases/tag/v2.0.0) |
-| Current release | `v2.0.0` |
-| Source delivery branch | `main` |
-| Upstream integration branch | `development` |
-| Distribution | Unsigned Windows x64 stable release |
-| Code signing | Not available; Windows may show an unknown-publisher warning |
+| Platform | Distribution | Limits |
+| --- | --- | --- |
+| Windows x64 | [Solcord 2.0.1](https://github.com/celubos/Solcord/releases/tag/v2.0.1), self-contained installer | Unsigned; Windows may show an unknown-publisher warning |
+| macOS Apple Silicon and Intel | Separate command-line preview archives in the same release | Locally ad-hoc signed, not Developer ID signed or notarized; live Discord acceptance remains outstanding |
+| Linux | Source tests and core build | No supported consumer installer in this release |
 
-The [changelog](../CHANGELOG.md) describes source changes. A merge is not an installation or a release. Use the version and hashes in the downloaded release's manifest to identify a package.
+The source delivery branch is `main`; `development` remains the upstream integration branch. Use the version, source commit, and hashes in the downloaded package manifests to identify a build. Historical candidates are not relabeled or overwritten.
 
-## Current release
+## What changed
 
-Solcord 2.0 — Signal promotes the reviewed V2 line without relabeling any release candidate. It keeps the tested Discord-update recovery path and adds a lower-cost ambient renderer: fewer backing pixels, paced background frames, cached field geometry, and no self-triggered DOM synchronization pass. When Discord replaces its startup files, **Update Solcord** or **Repair Solcord** restores the startup handoff without replacing plugins, themes, settings, or private stores.
+The 2.0.1 line repairs modern Discord startup, late-login initialization, and the settings entry. **User Settings → Open Solcord Suite** opens an independent Control Center with nine workspaces. The voice controller now confirms the actual send before reporting activation and preserves the current user's received deafened indicator while local audio remains enabled. The owner confirmed that Fake Deafen works after the installed RC8 live check.
 
-The published `v2.0.0` release has six package assets: `SolcordInstaller.exe`, `solcord.asar`, `SHA256SUMS.txt`, `solcord-build-manifest.json`, `solcord-installer-manifest.json`, and `solcord-installer-build-receipt.json`. The build and installer manifests bind the source commit and core hash; the checksum list and installer-build receipt bind package bytes and the isolated installer self-test. No `release-manifest.json` from the separate acceptance-evidence assembler is attached to that release. These assets establish package integrity and isolated tests; they do not establish live signed-in client, microphone, or interactive rollback acceptance. Older candidates keep their own immutable receipts and are not relabeled.
+The audited fixes cover file confinement, redirect credentials, interrupted installer recovery, Timeline persistence and privacy filtering, recording/playback races, bounded DOM work, and startup catalog loading. Setup now offers refresh, disables actions while checking a selected Discord app, explains busy states, and exposes full local error details.
 
-| Check | Recorded result |
-| --- | --- |
-| Historical source matrix | The audited Windows source baseline passed 1,087 tests across two isolated batches. The audit's Linux run passed 1,047 with 40 Windows-only skips. Current source changes require their own checks. Full CSS diagnostics are tracked as inherited debt; the scoped Solcord CSS check does not certify every stylesheet |
-| Discord-update fixture | A newer Discord version replaces the startup archive; the installer updates the receipt, restores injection, verifies the result, and preserves plugin, theme, and settings bytes |
-| Installer | Embedded-resource self-test covers install, update, repair, rollback, interrupted recovery, downgrade refusal, and uninstall in isolated targets |
-| Installed client | No public release-bound signed-in desktop acceptance record is linked by these package assets. The installer's local receipt describes installation ownership and recovery; it is not proof of live feature behavior |
-| Private and experimental tools | Stay opt-in. Fake Deafen stays off until explicitly enabled and armed for a call |
+See the [changelog](../CHANGELOG.md), [release notes](releases/2.0.1.md), and [automated checks](https://github.com/celubos/Solcord/actions/workflows/solcord-ci.yml).
 
-Destructive installer lifecycle cases remain isolated from the signed-in owner profile. Call-dependent tools, Activities, account actions, and every Discord update remain separate live checks. Isolated tests do not stand in for those checks.
+## Evidence and package integrity
 
-The [hosted checks](https://github.com/celubos/Solcord/actions/workflows/solcord-ci.yml) report the result for each commit. Future releases must compare their documented evidence names with the actual uploaded asset inventory and bind acceptance records to the reviewed source SHA and artifact digest before making a live-acceptance claim. The Windows installer remains unsigned. Earlier packages and their manifests are never relabeled or overwritten.
+Windows packages include `SolcordInstaller.exe`, `solcord.asar`, `SHA256SUMS.txt`, the core and installer manifests, and the installer build receipt. The receipt binds package bytes and the isolated embedded-resource self-test. Mac previews have separate architecture-specific receipts and archives. `release-package.json` binds the combined inventory to one source commit; `RELEASE-SHA256SUMS.txt` covers all release attachments except itself.
+
+The release workflow requires source verification, Windows recovery tests and packaging, and native macOS fixture and packaging jobs on both architectures. It verifies uploaded asset names, sizes and SHA-256 digests before publishing a draft. An existing version or mismatched artifact is never overwritten.
+
+Release preparation also includes a 30-minute synthetic backend/controller soak, renderer performance comparisons, repeated settings navigation, controlled Chromium UI scenarios, and native Windows installer usability checks. These are controlled tests, not an all-day signed-in Discord network or microphone audit. The [release notes](releases/2.0.1.md) record the measured scope and limits.
+
+## Privacy and live acceptance
+
+Strict Privacy remains enabled in the accepted Windows profile, with native acknowledgement, manual updates, and validated renderer protection for two telemetry, two optional crash-reporting, and twelve activity-discovery surfaces. No privacy choices were changed during validation. Discord login, messages, voice, and essential service traffic still reach Discord; Strict is not a zero-traffic guarantee.
+
+The installed RC8 Windows client opened signed in; the Control Center opened, closed and reopened; its workspaces rendered and a density setting persisted. Live Fake Deafen on/off checks showed the received deafen state with local audio enabled, then normal state restoration. The owner subsequently confirmed successful deafen/audio behavior. New platform-specific installer changes do not turn that Windows acceptance into Mac acceptance.
+
+Interactive rollback on the signed-in Windows installation and real Mac startup, microphone, keychain and Discord-update behavior remain separate acceptance work. Destructive recovery scenarios use disposable applications and profiles. No real account, message, credential, or recording is included in public fixtures.
 
 ## Compatibility limits
 
 - Discord internal APIs can change. Unsupported adapters stay inactive and report their status.
-- On-device translation is available only where Discord exposes a compatible engine.
-- External translation requires explicit provider configuration and disclosure.
+- Private history, Audience Guard, and experimental tools remain opt-in. Fake Deafen must be explicitly enabled and armed for a call.
+- On-device translation requires a compatible engine; external translation requires explicit provider configuration.
 - Audience Guard is detection-based, not per-viewer server access control.
-- Private data uses encrypted account-scoped storage where available. Session-only fallback is labeled.
+- Private data uses encrypted account-scoped storage where available; session-only fallback is labeled.
 - Community addons retain their own compatibility and outbound-access requirements.
-- Windows publisher warnings remain possible because the installer is unsigned.
+- Do not disable platform security to run an unsigned package. Mac preview instructions never remove quarantine or bypass Gatekeeper.
 
-## Historical results
-
-[RC33 acceptance notes](archive/RC33_ACCEPTANCE.md), RC38 receipts, and older records are preserved. They describe the exact versions and conditions named there. They do not certify the stable package.
-
-For current installation instructions, use [Quick start](QUICK_START.md). For live testing, use the [desktop checklist](development/DESKTOP_TESTING.md).
+For current installation instructions, use [Quick start](QUICK_START.md) or the [Mac preview guide](MACOS.md). Older [archived results](archive/README.md) describe only the versions named in them.
