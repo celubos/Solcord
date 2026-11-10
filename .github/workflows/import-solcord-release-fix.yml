@@ -1,0 +1,31 @@
+name: Import verified Solcord release fix
+
+on: create
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    if: github.repository == 'celubos/Solcord' && github.event.ref_type == 'branch' && github.event.ref == 'delivery/solcord-2.0.1-fix1-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed delivery
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Verify and import immutable fix history
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle='.delivery/release-fix-history.bundle'
+          test "$(wc -c < "$bundle")" = '5664'
+          printf '%s  %s\n' '675687647190803fb1f4188227e0450b4e6ead36f4640b72af068caeb0fa1ae4' "$bundle" | sha256sum --check --strict
+          git bundle verify "$bundle"
+          git fetch "$bundle" HEAD
+          test "$(git rev-parse FETCH_HEAD)" = '5020b0f1e940bf8f926b7f62b184074d36548a35'
+          git merge-base --is-ancestor '6c7c8f19059fcc21d354952788545df62ecfb0d1' FETCH_HEAD
+          test "$(git rev-parse 'FETCH_HEAD^{tree}')" = '1821346a9e653562eaa4d7146e97d25d9c61aad6'
+          git push origin '5020b0f1e940bf8f926b7f62b184074d36548a35:refs/heads/delivery/solcord-source-2.0.1-fix1'
+          test "$(git ls-remote origin refs/heads/delivery/solcord-source-2.0.1-fix1 | cut -f1)" = '5020b0f1e940bf8f926b7f62b184074d36548a35'
