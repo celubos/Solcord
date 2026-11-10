@@ -1,0 +1,19 @@
+name: Dispatch verified Solcord release
+on: create
+permissions:
+  contents: read
+  actions: write
+jobs:
+  dispatch:
+    if: github.repository == 'celubos/Solcord' && github.event.ref_type == 'branch' && github.event.ref == 'delivery/solcord-release-dispatch-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch only the reviewed merged source
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/celubos/Solcord/git/ref/heads/main --jq .object.sha)" = 'e9cd1118ea6bdc5d01aac319d3e2a7580a7ad4a4'
+          gh api --method POST repos/celubos/Solcord/actions/workflows/solcord-release.yml/dispatches -f ref=main
+          test "$(gh api repos/celubos/Solcord/git/ref/heads/main --jq .object.sha)" = 'e9cd1118ea6bdc5d01aac319d3e2a7580a7ad4a4'
