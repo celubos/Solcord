@@ -1,3 +1,4 @@
 assets/themes/Solcord-*.theme.css text eol=lf
 tests/fixtures/solcord-legacy-*.theme.css text eol=lf
 src/common/solcord/addon-catalog.generated.ts text eol=lf
+assets/catalog/solcord-browsing.generated.json text eol=lf
