@@ -1,0 +1,47 @@
+name: Import qualified Apple Silicon runner selection
+on: create
+permissions:
+  contents: read
+jobs:
+  import:
+    if: github.repository == 'celubos/Solcord' && github.event.ref_type == 'branch' && github.event.ref == 'delivery/solcord-2.0.1-runner-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Verify and import exact history
+        run: |
+          set -euo pipefail
+          bundle='.delivery/release-runner-history.bundle'
+          test "$(wc -c < "$bundle")" = '611'
+          printf '%s  %s\n' '275efeb8b25988742334dd2c791fa60a13d0736cb6d9c41b3fa3427277db5948' "$bundle" | sha256sum --check --strict
+          git bundle verify "$bundle"
+          git fetch "$bundle" HEAD
+          test "$(git rev-parse FETCH_HEAD)" = 'be1a94a12130704810a920da8f66511aa8c4bc2f'
+          git merge-base --is-ancestor '5020b0f1e940bf8f926b7f62b184074d36548a35' FETCH_HEAD
+          test "$(git rev-parse 'FETCH_HEAD^{tree}')" = 'd7535b87485997db23f33cea1eeb1edd12664431'
+          git push origin 'be1a94a12130704810a920da8f66511aa8c4bc2f:refs/heads/delivery/solcord-source-2.0.1-runner'
+          test "$(git ls-remote origin refs/heads/delivery/solcord-source-2.0.1-runner | cut -f1)" = 'be1a94a12130704810a920da8f66511aa8c4bc2f'
+  stop-superseded-queues:
+    needs: import
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Stop only the two superseded release qualification runs
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: |
+          set -euo pipefail
+          for run_id in 42742357663 42742350606; do
+            endpoint="repos/celubos/Solcord/actions/runs/$run_id"
+            test "$(gh api "$endpoint" --jq .head_sha)" = '5020b0f1e940bf8f926b7f62b184074d36548a35'
+            if test "$(gh api "$endpoint" --jq .status)" != completed; then
+              gh api --method POST "$endpoint/cancel"
+            fi
+          done
