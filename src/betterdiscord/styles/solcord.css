@@ -885,7 +885,8 @@ button.solcord-fake-deafen-button:disabled { cursor: wait; opacity: 0.58; }
 .solcord-history-times div { display: flex; gap: 5px; }
 .solcord-history-times dd { margin: 0; }
 .solcord-history-text { margin: 0; color: var(--sc-text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.solcord-history-versions > summary { width: fit-content; color: var(--sc-text); cursor: pointer; }
+.solcord-history-versions > summary { min-height: 32px; color: var(--sc-text); cursor: pointer; list-style: none; }
+.solcord-history-versions > summary::-webkit-details-marker { display: none; }
 .solcord-history-versions ol { display: grid; gap: 8px; margin: 8px 0 0; padding-left: 22px; }
 .solcord-history-version-label { color: var(--sc-muted); font-size: 12px; }
 .solcord-history-versions p { margin: 2px 0 0; color: var(--sc-text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
@@ -1089,13 +1090,16 @@ button.solcord-fake-deafen-button:disabled { cursor: wait; opacity: 0.58; }
 .solcord-native-tools > details > summary,
 .solcord-secondary-tools > summary,
 .solcord-state-help > summary,
-.solcord-native-unavailable-list > summary { display: flex; align-items: center; gap: 8px; }
+.solcord-history-versions > summary,
+.solcord-native-unavailable-list > summary { display: flex; align-items: center; gap: 8px; padding-inline-end: 4px; }
 .solcord-native-tools > details > summary::after,
 .solcord-secondary-tools > summary::after,
 .solcord-state-help > summary::after,
-.solcord-native-unavailable-list > summary::after { margin-inline-start: 4px; color: var(--sc-muted); content: "›"; font-size: 16px; line-height: 1; transition: transform 110ms ease-out; }
+.solcord-history-versions > summary::after,
+.solcord-native-unavailable-list > summary::after { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-inline-start: 4px; color: var(--sc-muted); content: "›"; font-size: 16px; line-height: 1; transition: transform 110ms ease-out; }
 .solcord-native-tools > details[open] > summary::after,
 .solcord-secondary-tools[open] > summary::after,
+.solcord-history-versions[open] > summary::after,
 .solcord-state-help[open] > summary::after,
 .solcord-native-unavailable-list[open] > summary::after { transform: rotate(90deg); }
 .solcord-native-preview { display: grid; gap: 7px; margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--sc-accent); background: var(--sc-surface-raised); }
