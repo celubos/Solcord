@@ -20,7 +20,7 @@ Installation takes about one minute on a typical PC **after download**. Your exi
 > [!IMPORTANT]
 > **Solcord 2.0.1** is an unsigned Windows release. Windows may show an unknown-publisher warning. Do not disable Windows security to install it. The macOS packages are previews, not notarized Mac applications. [Release status](docs/STATUS.md)
 
-If a Discord desktop update makes Solcord disappear, open the current installer and choose **Update Solcord**. If you are already on the same Solcord release, choose **Repair Solcord**. Both paths keep plugins, themes, settings, and private stores in place.
+When Discord updates itself, Solcord follows it automatically. If Setup shows **Discord updated**, or Solcord disappears after an update, open the current installer and choose **Repair Solcord** (same release) or **Update Solcord** (newer release). Both keep plugins, themes, settings, and private stores in place.
 
 ## What Solcord adds
 
@@ -39,7 +39,7 @@ Features that depend on Discord internals verify compatibility before starting. 
 
 ## Privacy and compatibility
 
-Private history, Audience Guard, and experimental tools are opt-in. Private stores are account-scoped; the interface distinguishes encrypted storage from session-only storage. Translation providers require an explicit choice before text leaves Discord.
+Private history (including [Message History](docs/MESSAGE_HISTORY.md) for deleted and edited messages), Audience Guard, and experimental tools are opt-in. Private stores are account-scoped; the interface distinguishes encrypted storage from session-only storage. Translation providers require an explicit choice before text leaves Discord.
 
 Strict Privacy blocks supported optional telemetry, crash-reporting, and activity-discovery paths. It keeps ordinary Discord messaging, login, and voice connections working; those still communicate with Discord. Protection status shows native acknowledgement and which renderer adapters are active. Updates remain manual.
 

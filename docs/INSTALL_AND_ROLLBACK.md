@@ -14,16 +14,29 @@ For a first installation, follow [Quick start](QUICK_START.md). Use the verified
 | Verify files | You want to check the installed package | Everything; this checks files without replacing them |
 | Open recovery folder | You need the receipts or backups | Everything |
 
-Repair also restores the startup handoff when a Discord desktop update replaces it. Repair does not download a newer Solcord release. Rollback uses the backup recorded by the installer; it does not install an arbitrary older release. A normal update refuses a downgrade.
+Repair does not download a newer Solcord release. Rollback uses the backup recorded by the installer; it does not install an arbitrary older release. A normal update refuses a downgrade.
+
+## When Discord updates itself
+
+Discord installs each update in a new `app-<version>` folder. When Discord quits after downloading an update, Solcord copies its startup loader into the new folder, so Solcord keeps loading after the update. If that step cannot finish, the new folder is left as ordinary Discord and nothing breaks.
+
+The installer records the Discord version it installed into. After a Discord update it shows **Discord updated** and recommends:
+
+- **Repair Solcord** if you are running the same Solcord release, or
+- **Update Solcord** if you opened a newer release.
+
+Either one moves Solcord's record to the current Discord version. Until then, **Uninstall** and a first-install **Roll back** refuse with "Discord updated to … Choose Repair Solcord first". This prevents removing the core while the new Discord version still loads it, which would stop Discord from starting. Nothing is changed when they refuse.
+
+If Discord has already removed the version Solcord recorded, the installer says so and asks for **Repair** or **Update** in the same way.
 
 ## Before changing the core
 
 1. Save unfinished drafts and leave calls.
 2. Compare the installer checksum with **SHA256SUMS.txt** from the same release.
 3. Keep the current recovery folder until you have checked the new installation.
-4. Select the Discord entry you actually use under **Version**.
+4. Select the Discord installation you actually use under **Discord app**.
 
-Stable, PTB, and Canary share Solcord's core. The installer requests graceful shutdown of verified Discord processes, then stops verified remaining processes if necessary. It refuses to continue if shutdown cannot be safely completed. It does not kill unrelated applications by name.
+Stable, PTB, and Canary share Solcord's core. If Discord is running, the installer asks before closing it, because closing ends any call or upload in progress. It then requests graceful shutdown of verified Discord processes and stops verified remaining processes if necessary. It refuses to continue if shutdown cannot be safely completed. It does not kill unrelated applications by name.
 
 The installer is unsigned. Review Windows prompts yourself and do not disable Windows security.
 
@@ -58,13 +71,14 @@ These do not replace the installed core. If Discord cannot open, use installer r
 | `%APPDATA%\BetterDiscord\plugins` | Community plugin source and configuration |
 | `%APPDATA%\BetterDiscord\themes` | Community themes |
 | `%APPDATA%\BetterDiscord\data` | Settings and local feature data |
+| `%APPDATA%\BetterDiscord\solcord-timeline-v1` | Encrypted Message History, one opaque store per Discord account |
 | `%APPDATA%\BetterDiscord\solcord-installer` | Installation receipts and rollback backups |
 
-Uninstall is not a private-data wipe. The installer does not erase addon configuration, Custom CSS, message history stores, translation credentials, or provider archives.
+Uninstall is not a private-data wipe. The installer does not erase addon configuration, Custom CSS, Message History, translation credentials, or provider archives. To remove Message History, use **Erase history** in Solcord before uninstalling ([details](MESSAGE_HISTORY.md)).
 
 ## Acceptance and limitations
 
-The current installer is [RC39](https://github.com/celubos/Solcord/releases/tag/v2.0.0-rc.39). New source changes need their own package and acceptance evidence; see [Release status](STATUS.md).
+Each release lists its installer, checksums, and the acceptance evidence that applies to it. New source changes need their own package and evidence; see [Release status](STATUS.md).
 
 The core and injector are separate files. Their verified replacements are recoverable through receipts, not one atomic filesystem operation. Keep backups through a successful restart.
 

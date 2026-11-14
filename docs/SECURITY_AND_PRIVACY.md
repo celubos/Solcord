@@ -21,7 +21,7 @@ Protected refers to the category shown, not all Discord traffic. Discord's accou
 
 ## Local data
 
-Friend Watch, Message Timeline, Audience Guard, and private notes are opt-in and account-scoped. Retention is bounded. Use each feature's clear or export controls deliberately.
+Friend Watch, Message History, Audience Guard, and private notes are opt-in and account-scoped. Retention is bounded. Use each feature's clear or export controls deliberately.
 
 Where durable private storage is promised, Solcord uses Electron's secure storage. If encryption is unavailable, the interface reports **session-only** or holds the affected feature. It does not silently persist private data as plaintext.
 
@@ -49,7 +49,9 @@ Audience Guard can prevent or stop a stream after a denied user is detected. It 
 
 Voice Note Studio requires explicit recording, preview, and send or save actions. It does not record or upload automatically.
 
-Message Timeline observes only events already available to the running client after opt-in. It does not fetch unseen or deleted history, import another logger's private database, or reveal hidden channels. Friend Watch does not claim to know who blocked whom.
+Message History (deleted and edited messages) observes only events already available to the running client after opt-in. It does not fetch unseen or deleted history, import another logger's private database, or reveal hidden channels. It saves DMs and group DMs by default and server channels only when added one at a time; text only unless you choose attachment names. Saved events are encrypted locally with AES-256-GCM under a safeStorage-protected key, or kept in memory only when that is unavailable or chosen. Retention is measured from first capture and keeps expiring while capture is off; each account keeps at most 10,000 saved events. Conversation and author names are resolved from Discord when you view the list and are not stored. [How Message History works](MESSAGE_HISTORY.md).
+
+Friend Watch does not claim to know who blocked whom.
 
 ## Installation and recovery
 

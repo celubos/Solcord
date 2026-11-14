@@ -74,6 +74,7 @@ Download the new release's installer and checksum file, verify the download, and
 | Discord cannot close | Quit it from the Windows system tray, then retry. The installer will not guess at an unverified process. |
 | Files are missing or damaged | Run the same package and choose **Repair**. |
 | Setup reports an error | Choose **Error details** for the complete local error and recovery path. Nothing is uploaded automatically. |
+| Setup says **Discord updated** | Choose the recommended **Repair Solcord** (same release) or **Update Solcord** (newer release). This moves Solcord to the new Discord version. Uninstall waits until you do. |
 | Discord updated and Solcord disappeared | Open the newest installer. Choose **Update Solcord**, or **Repair Solcord** if that exact release is already recorded. |
 | The new core will not start | Use **Roll back** to restore the verified pre-change backup. |
 | A feature says Unavailable | Check Plugin Doctor; the current Discord build may not support that adapter. |
@@ -83,6 +84,6 @@ Download the new release's installer and checksum file, verify the download, and
 
 ## Removing Solcord
 
-Choose **Uninstall** in the installer. It removes the core/injector and keeps plugins, themes, settings, private stores, and backups. This is deliberately not a data-wipe action.
+Choose **Uninstall** in the installer. It removes the core/injector and keeps plugins, themes, settings, private stores, and backups. This is deliberately not a data-wipe action. To remove saved deleted/edited messages too, choose **Erase history** in Solcord's **Message History** first.
 
 For manual recovery and backup details, read [Install and rollback](INSTALL_AND_ROLLBACK.md).
