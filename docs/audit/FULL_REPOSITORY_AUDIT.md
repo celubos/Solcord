@@ -12,11 +12,11 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 
 | Measure | Count |
 | --- | ---: |
-| Persistent tracked files | 758 |
-| Text files scanned | 743 |
+| Persistent tracked files | 760 |
+| Text files scanned | 745 |
 | Binary files classified | 15 |
-| Text lines scanned | 148,426 |
-| Custom Solcord lines | 66,600 |
+| Text lines scanned | 149,104 |
+| Custom Solcord lines | 67,270 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -48,9 +48,9 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 7 | `src/betterdiscord/styles/solcord.css` | 1,338 | 100.2 KiB |
 | 8 | `bun.lock` | 1,301 | 140.2 KiB |
 | 9 | `src/betterdiscord/modules/solcord/store.ts` | 1,224 | 64.6 KiB |
-| 10 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,211 | 81.5 KiB |
-| 11 | `tests/solcord/disposable-acceptance.test.ts` | 1,211 | 58.4 KiB |
-| 12 | `CHANGELOG.md` | 1,204 | 46.6 KiB |
+| 10 | `CHANGELOG.md` | 1,212 | 47.8 KiB |
+| 11 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,211 | 81.5 KiB |
+| 12 | `tests/solcord/disposable-acceptance.test.ts` | 1,211 | 58.4 KiB |
 | 13 | `tests/common/i18n.test.ts` | 1,170 | 46.4 KiB |
 | 14 | `installer/Solcord.Installer/InstallerForm.cs` | 1,032 | 61.6 KiB |
 | 15 | `tests/solcord/fake-deafen.test.ts` | 948 | 51.4 KiB |
@@ -83,7 +83,7 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 17 | `src/betterdiscord/modules/solcord/fake-deafen.ts` | 687 | 32.8 KiB |
 | 18 | `src/common/solcord/v2-feature-models.ts` | 661 | 36.1 KiB |
 | 19 | `docs/audit/2026-11-07/file-coverage.csv` | 627 | 73.8 KiB |
-| 20 | `tests/solcord/settings.test.ts` | 601 | 31.9 KiB |
+| 20 | `docs/releases/2.0.2-performance.json` | 609 | 22.7 KiB |
 
 ## Earlier repository corrections
 

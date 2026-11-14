@@ -4,13 +4,13 @@
 
 A BetterDiscord fork with a built-in Control Center, local privacy tools, full-shell themes, and reversible installation. Windows x64 is supported; an optional macOS command-line preview is available for Apple Silicon and Intel.
 
-**[Download for Windows](https://github.com/celubos/Solcord/releases/tag/v2.0.1)** · [Installation](docs/QUICK_START.md) · [Mac preview](docs/MACOS.md) · [User guide](docs/USER_GUIDE.md) · [Get help](SUPPORT.md)
+**[Download for Windows](https://github.com/celubos/Solcord/releases/tag/v2.0.2)** · [Installation](docs/QUICK_START.md) · [Mac preview](docs/MACOS.md) · [User guide](docs/USER_GUIDE.md) · [Get help](SUPPORT.md)
 
 ## Install
 
 You need **Windows x64** and the official **Discord desktop app**. You do not need Git, Bun, .NET, plugin libraries, or a separate BetterDiscord installation.
 
-1. Download **SolcordInstaller.exe** and **SHA256SUMS.txt** from the [same release](https://github.com/celubos/Solcord/releases/tag/v2.0.1). [Check the download](docs/QUICK_START.md#check-the-download).
+1. Download **SolcordInstaller.exe** and **SHA256SUMS.txt** from the [same release](https://github.com/celubos/Solcord/releases/tag/v2.0.2). [Check the download](docs/QUICK_START.md#check-the-download).
 2. Save your drafts and leave any calls. The installer closes verified Discord processes before changing its shared core.
 3. Open the installer. Under **Discord app**, select your Discord installation, then choose **Install Solcord** or **Update Solcord**. Use **Refresh** if Discord has just installed or updated.
 4. Choose **Open Solcord**. On a fresh installation, First Setup opens when Discord is ready. You can complete it now or choose **Finish later**.
@@ -18,7 +18,7 @@ You need **Windows x64** and the official **Discord desktop app**. You do not ne
 Installation takes about one minute on a typical PC **after download**. Your existing Discord login, plugins, themes, and settings stay in place.
 
 > [!IMPORTANT]
-> **Solcord 2.0.1** is an unsigned Windows release. Windows may show an unknown-publisher warning. Do not disable Windows security to install it. The macOS packages are previews, not notarized Mac applications. [Release status](docs/STATUS.md)
+> **Solcord 2.0.2** is an unsigned Windows release. Windows may show an unknown-publisher warning. Do not disable Windows security to install it. The macOS packages are previews, not notarized Mac applications. [Release status](docs/STATUS.md)
 
 When Discord updates itself, Solcord follows it automatically. If Setup shows **Discord updated**, or Solcord disappears after an update, open the current installer and choose **Repair Solcord** (same release) or **Update Solcord** (newer release). Both keep plugins, themes, settings, and private stores in place.
 

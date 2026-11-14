@@ -1,6 +1,6 @@
 # Solcord quick start
 
-Use this guide for the **Solcord 2.0.1** Windows installer. Mac users should read the separate [macOS preview guide](MACOS.md).
+Use this guide for the **Solcord 2.0.2** Windows installer. Mac users should read the separate [macOS preview guide](MACOS.md).
 
 Allow about one minute on a typical PC **after download**. Windows prompts, Discord shutdown, or recovery can take longer.
 
@@ -18,8 +18,8 @@ Allow about one minute on a typical PC **after download**. Windows prompts, Disc
 
 Download both files into the same folder:
 
-- [SolcordInstaller.exe](https://github.com/celubos/Solcord/releases/download/v2.0.1/SolcordInstaller.exe)
-- [SHA256SUMS.txt](https://github.com/celubos/Solcord/releases/download/v2.0.1/SHA256SUMS.txt)
+- [SolcordInstaller.exe](https://github.com/celubos/Solcord/releases/download/v2.0.2/SolcordInstaller.exe)
+- [SHA256SUMS.txt](https://github.com/celubos/Solcord/releases/download/v2.0.2/SHA256SUMS.txt)
 
 ### Check the download
 
