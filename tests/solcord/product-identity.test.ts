@@ -31,7 +31,8 @@ describe("Solcord release identity", () => {
         });
         expect(SOLCORD_PRODUCT_IDENTITY.candidateLabel).not.toBe(SOLCORD_PRODUCT_IDENTITY.numericVersion);
         expect(() => assertSolcordPackageVersion(packageMetadata.version)).not.toThrow();
-        expect(() => assertSolcordPackageVersion("2.0.2")).toThrow("typed product identity");
+        expect(() => assertSolcordPackageVersion("2.0.3")).toThrow("typed product identity");
+        expect(() => assertSolcordPackageVersion("2.0.1")).toThrow("typed product identity");
     });
 
     test("plumbs the release and source identity into build and installed UI surfaces", () => {
