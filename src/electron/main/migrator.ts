@@ -1,7 +1,7 @@
 import {app} from "electron";
+import {migrateDiscordUpdate} from "./discord-update-migration";
 import path from "path";
 import fs from "fs";
-import {comparator} from "@common/semver";
 import {bdFolder} from "./modules/betterdiscord";
 import {randomUUID} from "crypto";
 
@@ -22,46 +22,9 @@ function migrate() {
     };
 
     try {
-        const base = path.dirname(process.execPath);
-
-        const currentVersion = path.basename(base).slice(4);
-        const discordPath = path.dirname(base);
-
-        const latestVersion = fs.readdirSync(discordPath)
-            .filter((item) => item.startsWith("app-") && fs.statSync(path.join(discordPath, item)).isDirectory())
-            .map(item => item.slice(4))
-            .reduce((pre, cur) => {
-                if (comparator(pre, cur) === 1) return cur;
-                return pre;
-            });
-
-        log(`Current version is ${currentVersion} and latest is ${latestVersion}`);
-
-        if (latestVersion === currentVersion) return log("Latest version is same");
-
-        log("Attempting migration");
-
-        const resources = path.join(discordPath, `app-${latestVersion}`, "resources");
-
-        if (fs.existsSync(path.join(resources, "betterdiscord.app.asar"))) return log("Appears migration has happened before");
-
-        log(`Renaming app.asar`);
-
-        fs.renameSync(path.join(resources, "app.asar"), path.join(resources, "betterdiscord.app.asar"));
-
-        fs.mkdirSync(path.join(resources, "app"), {recursive: true});
-
-        log("Writing new app directory");
-
-        fs.writeFileSync(path.join(resources, "app", "index.js"), `
-require(${JSON.stringify(path.join(__dirname, "main.js"))});
-require("../betterdiscord.app.asar");
-`);
-
-        fs.writeFileSync(path.join(resources, "app", "package.json"), JSON.stringify({
-            name: "discord",
-            main: "index.js"
-        }));
+        // main.js sits at the root of the packaged core, so __dirname is the core path
+        // the installer records (BetterDiscord\data\betterdiscord.asar).
+        migrateDiscordUpdate({execPath: process.execPath, corePath: __dirname, log});
     }
     catch (e) {
         log(`Migration Failed!\n${String(e)}`);

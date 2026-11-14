@@ -155,6 +155,116 @@ static class RecoveryTests
         Console.WriteLine("PASS interrupted recovery refuses changed owner bytes");
     }
 
+    // Mirrors src/electron/main/discord-update-migration.ts (canonical) and the
+    // inherited migrator shipped through Solcord 2.0.1 (legacy).
+    static string StageDiscordUpdate(string root, string version, string format, string core)
+    {
+        string app = Path.Combine(root, "local", "Discord", $"app-{version}");
+        string resources = Path.Combine(app, "resources");
+        Directory.CreateDirectory(resources);
+        File.WriteAllText(Path.Combine(app, "Discord.exe"), "fixture-executable");
+        if (format == "vanilla")
+        {
+            File.WriteAllText(Path.Combine(resources, "app.asar"), $"original-{version}");
+            return resources;
+        }
+        File.WriteAllText(Path.Combine(resources, "betterdiscord.app.asar"), $"original-{version}");
+        Directory.CreateDirectory(Path.Combine(resources, "app"));
+        if (format == "canonical")
+        {
+            File.WriteAllText(Path.Combine(resources, "app", "package.json"), "{\"main\":\"./index.js\",\"name\":\"discord\"}");
+            File.WriteAllText(Path.Combine(resources, "app", "index.js"), $"require({JsonSerializer.Serialize(core)});\nmodule.exports = require(\"../betterdiscord.app.asar\");\n");
+        }
+        else
+        {
+            File.WriteAllText(Path.Combine(resources, "app", "package.json"), "{\"name\":\"discord\",\"main\":\"index.js\"}");
+            File.WriteAllText(Path.Combine(resources, "app", "index.js"), $"\nrequire({JsonSerializer.Serialize(Path.Combine(core, "main.js"))});\nrequire(\"../betterdiscord.app.asar\");\n");
+        }
+        return resources;
+    }
+
+    static void TestDiscordUpdateMigration(string root)
+    {
+        foreach (string format in new[] {"canonical", "legacy"})
+        {
+            string scenario = Path.Combine(root, format);
+            var (engine, target) = Fixture(scenario);
+            engine.InstallNew(target);
+            string core = Path.Combine(scenario, "roaming", "BetterDiscord", "data", "betterdiscord.asar");
+            string newer = StageDiscordUpdate(scenario, "1.2.4", format, core);
+            try {engine.Uninstall(target); throw new InvalidDataException($"Uninstall deleted the core a newer {format} loader needs");}
+            catch (InvalidOperationException error) when (error.Message.Contains("Discord updated to 1.2.4. Choose Repair Solcord first", StringComparison.Ordinal)) {}
+            Check(File.Exists(core) && engine.VerifyInstalled(target) && !engine.HasPendingRecovery(), $"Refused {format} uninstall changed state");
+
+            DiscordTarget updated = engine.DetectTargets().Single();
+            Check(updated.Version == "1.2.4" && !engine.VerifyInstalled(updated), $"Newer {format} Discord was reported verified before repair");
+            engine.Repair(updated);
+            Check(engine.VerifyInstalled(updated), $"Repair did not adopt the {format}-migrated Discord version");
+            Check(File.ReadAllText(Path.Combine(newer, "app", "package.json")) == "{\"main\":\"./index.js\",\"name\":\"discord\"}", $"Repair left the {format} loader package");
+            string receipt = Path.Combine(scenario, "roaming", "BetterDiscord", "solcord-installer", "current.json");
+            Check(JsonSerializer.Deserialize<InstallReceipt>(File.ReadAllText(receipt))!.DiscordVersion == "1.2.4", "Receipt did not follow the Discord update");
+
+            engine.Uninstall(updated);
+            Check(File.ReadAllText(Path.Combine(newer, "app.asar")) == "original-1.2.4" && !Directory.Exists(Path.Combine(newer, "app")) && !File.Exists(core), $"Uninstall after {format} migration did not restore vanilla Discord");
+            Check(File.ReadAllText(Path.Combine(scenario, "roaming", "BetterDiscord", "plugins", "owner.plugin.js")) == "private-owner-data", "Owner bytes changed");
+            Console.WriteLine($"PASS Discord update with {format} migrated loader: uninstall refused, repair adopted, uninstall restored vanilla");
+        }
+
+        string vanilla = Path.Combine(root, "vanilla");
+        var (plain, plainTarget) = Fixture(vanilla);
+        plain.InstallNew(plainTarget);
+        StageDiscordUpdate(vanilla, "1.2.4", "vanilla", "");
+        plain.Uninstall(plainTarget);
+        Check(!File.Exists(Path.Combine(vanilla, "roaming", "BetterDiscord", "data", "betterdiscord.asar")), "A vanilla newer folder blocked uninstall");
+        Console.WriteLine("PASS a vanilla newer Discord folder does not block uninstall");
+
+        string removed = Path.Combine(root, "removed");
+        var (gone, goneTarget) = Fixture(removed);
+        gone.InstallNew(goneTarget);
+        string removedCore = Path.Combine(removed, "roaming", "BetterDiscord", "data", "betterdiscord.asar");
+        StageDiscordUpdate(removed, "1.2.4", "canonical", removedCore);
+        Directory.Delete(Path.GetDirectoryName(goneTarget.ExecutablePath)!, recursive: true);
+        DiscordTarget current = gone.DetectTargets().Single();
+        foreach (Action action in new Action[] {() => gone.Uninstall(current), () => gone.RollBack(current)})
+        {
+            try {action(); throw new InvalidDataException("A removed recorded Discord version was not explained");}
+            catch (InvalidOperationException error) when (error.Message.Contains("Discord updated to 1.2.4 and removed 1.2.3", StringComparison.Ordinal)) {}
+        }
+        gone.Repair(current);
+        Check(gone.VerifyInstalled(current), "Repair did not recover after Discord removed the recorded version");
+        gone.Uninstall(current);
+        Check(!File.Exists(removedCore), "Uninstall after recovery left the core");
+        Console.WriteLine("PASS removed recorded Discord version: actionable refusal, repair, uninstall");
+    }
+
+    static void TestLoaderRecognition()
+    {
+        string core = Path.Combine(Path.GetTempPath(), "Ünïcode user's", "BetterDiscord", "data", "betterdiscord.asar");
+        string nodeStyle = $"require(\"{core.Replace("\\", "\\\\")}\");\nmodule.exports = require(\"../betterdiscord.app.asar\");\n";
+        Check(InstallerEngine.LoaderTargetsCore(nodeStyle, core, allowLegacy: false), "Node JSON escaping of a non-ASCII path was not recognized");
+        Check(InstallerEngine.LoaderTargetsCore(nodeStyle.Replace("\n", "\r\n"), core, allowLegacy: false), "CRLF loader was not recognized");
+        Check(!InstallerEngine.LoaderTargetsCore(nodeStyle, core + ".other", allowLegacy: true), "A loader for another core was accepted");
+        Check(!InstallerEngine.LoaderTargetsCore(nodeStyle + "require('evil');\n", core, allowLegacy: true), "Appended code was accepted");
+        string legacy = $"\nrequire({JsonSerializer.Serialize(Path.Combine(core, "main.js"))});\nrequire(\"../betterdiscord.app.asar\");\n";
+        Check(InstallerEngine.LoaderTargetsCore(legacy, core, allowLegacy: true) && !InstallerEngine.LoaderTargetsCore(legacy, core, allowLegacy: false), "Legacy loader handling is wrong");
+        Check(!InstallerEngine.LoaderTargetsCore("require(\"relative\\\\betterdiscord.asar\");\nmodule.exports = require(\"../betterdiscord.app.asar\");\n", "relative\\betterdiscord.asar", allowLegacy: true), "A relative loader path was accepted");
+        Console.WriteLine("PASS semantic loader recognition (escaping, CRLF, legacy, foreign/extra code)");
+    }
+
+    static void TestCompletedInstallIsNotRecovery(string root)
+    {
+        var (engine, target) = Fixture(root);
+        engine.InstallNew(target);
+        string installerRoot = Path.Combine(root, "roaming", "BetterDiscord", "solcord-installer");
+        File.Copy(Path.Combine(installerRoot, "current.json"), Path.Combine(installerRoot, "pending.json"));
+        Check(!engine.HasPendingRecovery(), "An interrupted cleanup of a completed install was presented as needing Roll Back");
+        engine.Repair(target);
+        Check(engine.VerifyInstalled(target) && !File.Exists(Path.Combine(installerRoot, "pending.json")), "Matching pending receipt was not reconciled");
+        File.WriteAllText(Path.Combine(installerRoot, "pending.json"), File.ReadAllText(Path.Combine(installerRoot, "current.json")).Replace("Stable", "Canary"));
+        Check(engine.HasPendingRecovery(), "A different pending receipt was hidden");
+        Console.WriteLine("PASS identical pending receipt is reconciled, a different one still requires recovery");
+    }
+
     static int Main(string[] args)
     {
         if (args.Length == 3 && args[0] == "--crash-child") return CrashChild(args[1], args[2]);
@@ -166,6 +276,9 @@ static class RecoveryTests
             TestChannelOwnership(Path.Combine(root, "channels"));
             TestUninstallRestart(Path.Combine(root, "restart"));
             TestOwnerDrift(Path.Combine(root, "drift"));
+            TestLoaderRecognition();
+            TestDiscordUpdateMigration(Path.Combine(root, "discord-update"));
+            TestCompletedInstallIsNotRecovery(Path.Combine(root, "completed"));
             return 0;
         }
         catch (Exception error) {Console.Error.WriteLine(error); return 1;}
