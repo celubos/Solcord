@@ -499,7 +499,8 @@ internal sealed class InstallerForm : Form
         bool channelMatches = _engine.IsManagedChannel(selected);
         bool packageRecorded = managed && channelMatches && _engine.IsCurrentPackageRecorded();
         bool exact = !pending && packageRecorded && _engine.VerifyInstalled(selected);
-        return new(pending, managed, channelMatches, packageRecorded, exact);
+        string? recordedVersion = managed && channelMatches ? _engine.RecordedDiscordVersion() : null;
+        return new(pending, managed, channelMatches, packageRecorded, exact, recordedVersion);
     }
 
     private async Task RefreshInstallationStateAsync(Func<DiscordTarget, InstallationState>? inspect = null)
@@ -516,16 +517,27 @@ internal sealed class InstallerForm : Form
         {
             var status = await Task.Run(() => (inspect ?? ReadInstallationState)(selected));
             if (IsDisposed || generation != _stateGeneration) return;
-            var (pending, managed, channelMatches, packageRecorded, exact) = status;
+            var (pending, managed, channelMatches, packageRecorded, exact, recordedVersion) = status;
+            bool discordUpdated = managed && channelMatches && !pending && !exact && recordedVersion is not null && recordedVersion != selected.Version
+                && Version.TryParse(recordedVersion, out Version? recorded) && Version.TryParse(selected.Version, out Version? chosen) && chosen > recorded;
             if (managed && !channelMatches)
             {
                 SetActionAvailability(false, false, false, false, false);
-                SetState("Different channel", "Select the managed Discord channel", "Solcord manages one channel at a time. Uninstall from its recorded channel before switching.", StateTone.Warning, null);
+                string? recordedChannel = null;
+                try {recordedChannel = _engine.RecordedChannel();}
+                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException) {}
+                bool recordedPresent = recordedChannel is not null && _targets.Items.OfType<DiscordTarget>().Any(target => target.Channel == recordedChannel);
+                if (recordedChannel is not null && !recordedPresent)
+                    SetState("Different channel", $"Solcord is recorded for Discord {recordedChannel}", $"Discord {recordedChannel} is not installed now. Reinstall it to uninstall Solcord there, or open Recovery files for the saved backups.", StateTone.Warning, null);
+                else
+                    SetState("Different channel", $"Select Discord {recordedChannel ?? "the managed channel"}", "Solcord manages one channel at a time. Select its recorded channel above, then uninstall there before switching.", StateTone.Warning, null);
                 return;
             }
             SetActionAvailability(targetReady, managed, exact, packageRecorded, pending);
             if (pending) SetState("Recovery required", "Restore the last known state", "A previous change stopped early. Restore its backup to continue.", StateTone.Warning, "rollback");
             else if (exact) SetState("Installed and verified", $"{_manifest.CandidateLabel} is ready", "Installed files match this package.", StateTone.Protected, "launch");
+            else if (discordUpdated && packageRecorded) SetState("Discord updated", "Move Solcord to the new Discord version", $"Discord updated from {recordedVersion} to {selected.Version}. Repair re-applies Solcord there; settings and add-ons stay in place.", StateTone.Warning, "repair");
+            else if (discordUpdated) SetState("Discord updated", $"Update to {_manifest.CandidateLabel}", $"Discord updated from {recordedVersion} to {selected.Version}. Update installs this package there; the current version is backed up first.", StateTone.Warning, "update");
             else if (packageRecorded) SetState("Repair available", "Restore this build", "The release receipt matches, but installed files changed.", StateTone.Warning, "repair");
             else if (managed) SetState("Update available", $"Update to {_manifest.CandidateLabel}", "The current version will be backed up first.", StateTone.Warning, "update");
             else SetState("Ready to install", $"Install {_manifest.CandidateLabel}", "BetterDiscord settings and add-ons stay in place.", StateTone.Protected, "install");
@@ -614,6 +626,13 @@ internal sealed class InstallerForm : Form
         if (_busy || _checkingState || _refreshingTargets) return;
         DiscordTarget selected = Target();
         if (key == "uninstall" && MessageBox.Show("Remove Solcord from this Discord installation?\n\nDiscord returns to normal. Plugins, themes, settings, and recovery files stay on disk.", "Uninstall Solcord", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+        if (key is "install" or "update" or "repair" or "rollback" or "uninstall")
+        {
+            IReadOnlyList<string> running;
+            try {running = _engine.RunningDiscordChannels();}
+            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) {running = [];}
+            if (running.Count > 0 && MessageBox.Show($"Discord {string.Join(", ", running)} is running. Setup will close it to continue, which ends any call or upload in progress.\n\nClose Discord and continue?", "Close Discord", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+        }
         ActionVisual? visual = _actions.GetValueOrDefault(key);
         string title = visual?.Title ?? (key == "launch" ? "Open Solcord" : key == "install" ? "Install Solcord" : key == "update" ? "Update Solcord" : "Solcord operation");
         RunAction(title, () => key switch {
@@ -1007,6 +1026,6 @@ internal sealed class InstallerForm : Form
 
     private enum ButtonTone {Primary, Outline, Danger}
     private enum StateTone {Protected, Warning, Danger}
-    private sealed record InstallationState(bool Pending, bool Managed, bool ChannelMatches, bool PackageRecorded, bool Exact);
+    private sealed record InstallationState(bool Pending, bool Managed, bool ChannelMatches, bool PackageRecorded, bool Exact, string? RecordedVersion = null);
     private sealed record ActionVisual(string Title, string Description, Control Row, Button Button, ButtonTone Tone, int RowIndex);
 }

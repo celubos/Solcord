@@ -510,6 +510,14 @@ const SettingsRenderer = new class SettingsRenderer {
         return typeof UserSettings?.USER_SETTINGS_MODAL_KEY === "string" ? UserSettings.USER_SETTINGS_MODAL_KEY : "USER_SETTINGS_MODAL_MODAL_KEY";
     }
 
+    /** Close the Solcord dialog and Discord settings so a navigation lands in the visible chat. */
+    public closeSolcordSurfaces() {
+        try {Modals.ModalActions?.closeModal?.("solcord-control-center");}
+        finally {this.controlCenterModal = undefined;}
+        this.closeUserSettingsModal();
+        DiscordModules.Dispatcher?.dispatch?.({type: "LAYER_POP_ALL"});
+    }
+
     public closeUserSettingsModal() {
         Modals.ModalActions?.closeModal?.(this.DISCORD_USER_SETTINGS_MODAL_KEY);
     }

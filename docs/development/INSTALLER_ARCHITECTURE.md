@@ -8,7 +8,7 @@ For a normal installation, start with the [quick start](../QUICK_START.md). This
 
 Published historical candidates remain immutable. The owner-machine install manifest, not this repository page, identifies whichever exact build is currently installed in the signed-in profile.
 
-The current download is [v2.0.0-rc.39](https://github.com/celubos/Solcord/releases/tag/v2.0.0-rc.39). Its automated installer evidence covers install, update, Discord-update repair, downgrade refusal, interrupted recovery, rollback, and uninstall in isolated targets; that is not a claim that destructive recovery cases were exercised against the signed-in owner profile.
+The current download is listed in [Release status](../STATUS.md). The installer's automated evidence covers install, update, Discord-update repair, downgrade refusal, interrupted recovery, rollback, and uninstall in isolated targets; that is not a claim that destructive recovery cases were exercised against the signed-in owner profile.
 
 The local install receipt identifies the exact source commit, core hash, Discord version, and backup. Those owner-machine paths are intentionally not embedded here. New source changes require new build and runtime evidence. Audience Guard uses account-bound encrypted storage only when Electron's secure storage is available, and reports session-only storage otherwise. It does not provide per-person control over Discord's media delivery.
 
@@ -73,7 +73,7 @@ The machine-readable install manifest records exact backup and rollback paths af
 
 The normal RC path is designed to take about one minute on a typical Windows PC after download. This is a usability target, not a time guarantee.
 
-1. Download `SolcordInstaller.exe` and the release-level `SHA256SUMS.txt` from the same owner-controlled `v2.0.0-rc.39` release. The complete review bundle is also available inside the delivery ZIP under its exact generated name.
+1. Download `SolcordInstaller.exe` and the release-level `SHA256SUMS.txt` from the same owner-controlled release. The complete review bundle is also available inside the delivery ZIP under its exact generated name.
 2. Compare the executable hash with the `installer/SolcordInstaller.exe` entry in the release-level `SHA256SUMS.txt`; that nested evidence name applies byte-for-byte to the root-published executable. Stop on any mismatch.
 3. Save anything in progress and leave active calls. Run `SolcordInstaller.exe`, confirm **Version** (Stable, PTB, or Canary), and choose **Install Solcord** or **Update Solcord**. Because the core is shared, the installer closes verified running Discord desktop channels, not just the selected one.
 4. Choose **Verify files**, then **Open Solcord**. A fresh install opens **User Settings → Solcord Suite** on Welcome after Discord is ready; an update or repair preserves completed setup.

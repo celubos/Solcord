@@ -38,6 +38,24 @@ const MAX_PROFILES = 50;
 const MAX_MIGRATION_ENTRIES = 30;
 const MAX_SETUP_TRANSACTIONS = 10;
 
+/**
+ * Keep the newest snapshots within the limit, but never evict one that a setup
+ * transaction needs for its rollback. Ordinary edits capture snapshots often;
+ * evicting the setup snapshot made "Roll back latest setup" fail after files
+ * had already been removed.
+ */
+export function retainSnapshots<T extends {id: string;}>(snapshots: readonly T[], pinned: ReadonlySet<string>): T[] {
+    let excess = snapshots.length - MAX_SNAPSHOTS;
+    if (excess <= 0) return [...snapshots];
+    return snapshots.filter(snapshot => {
+        if (excess > 0 && !pinned.has(snapshot.id)) {
+            excess--;
+            return false;
+        }
+        return true;
+    });
+}
+
 export const SOLCORD_THEMES: Array<{id: SolcordThemeId; name: string; fileName: string;}> = [
     {id: "solcord-default", name: "Solcord Default", fileName: "Solcord-Default.theme.css"},
     {id: "obsidian-thread", name: "Obsidian Thread", fileName: "Solcord-ObsidianThread.theme.css"},
@@ -427,8 +445,12 @@ export function normalizeSolcordDocument(raw: unknown): SolcordSettingsDocument 
                 activePlugins: normalizeAddonFileNames(snapshot.activePlugins, "plugin"),
                 activeThemes: normalizeAddonFileNames(snapshot.activeThemes, "theme")
             } satisfies SolcordSnapshot];
-        }).slice(-MAX_SNAPSHOTS)
+        })
         : [];
+    const pinnedSnapshotIds = new Set(Array.isArray(record.setupTransactions)
+        ? record.setupTransactions.filter(isRecord).map(entry => entry.snapshotId).filter((id): id is string => typeof id === "string")
+        : []);
+    snapshots.splice(0, snapshots.length, ...retainSnapshots(snapshots, pinnedSnapshotIds));
 
     const updateLedger = Array.isArray(record.updateLedger)
         ? record.updateLedger.filter(isRecord).flatMap(entry => {
@@ -595,15 +617,15 @@ export function previewSolcordImportChanges(current: SolcordSettingsDocument, ca
 
     const previousPolicy = current.timelinePolicy;
     const nextPolicy = candidate.timelinePolicy;
-    if (previousPolicy.enabled !== nextPolicy.enabled) changes.push(`Message Timeline enabled: ${booleanLabel(previousPolicy.enabled)} → ${booleanLabel(nextPolicy.enabled)}`);
-    if (previousPolicy.scope !== nextPolicy.scope) changes.push(`Message Timeline scope: ${previousPolicy.scope} → ${nextPolicy.scope}`);
+    if (previousPolicy.enabled !== nextPolicy.enabled) changes.push(`Message History enabled: ${booleanLabel(previousPolicy.enabled)} → ${booleanLabel(nextPolicy.enabled)}`);
+    if (previousPolicy.scope !== nextPolicy.scope) changes.push(`Message History scope: ${previousPolicy.scope} → ${nextPolicy.scope}`);
     if (JSON.stringify(previousPolicy.serverChannelIds) !== JSON.stringify(nextPolicy.serverChannelIds)) {
-        changes.push(`Message Timeline selected channels: ${previousPolicy.serverChannelIds.length} → ${nextPolicy.serverChannelIds.length} (identifiers hidden)`);
+        changes.push(`Message History selected channels: ${previousPolicy.serverChannelIds.length} → ${nextPolicy.serverChannelIds.length} (identifiers hidden)`);
     }
-    if (previousPolicy.retention !== nextPolicy.retention) changes.push(`Message Timeline retention: ${previousPolicy.retention} → ${nextPolicy.retention}`);
-    if (previousPolicy.content !== nextPolicy.content) changes.push(`Message Timeline content: ${previousPolicy.content} → ${nextPolicy.content}`);
-    if (previousPolicy.textBudgetBytes !== nextPolicy.textBudgetBytes) changes.push(`Message Timeline text budget: ${previousPolicy.textBudgetBytes} → ${nextPolicy.textBudgetBytes} bytes`);
-    if (previousPolicy.mediaBudgetBytes !== nextPolicy.mediaBudgetBytes) changes.push(`Message Timeline media budget: ${previousPolicy.mediaBudgetBytes} → ${nextPolicy.mediaBudgetBytes} bytes`);
+    if (previousPolicy.retention !== nextPolicy.retention) changes.push(`Message History retention: ${previousPolicy.retention} → ${nextPolicy.retention}`);
+    if (previousPolicy.content !== nextPolicy.content) changes.push(`Message History content: ${previousPolicy.content} → ${nextPolicy.content}`);
+    if (previousPolicy.textBudgetBytes !== nextPolicy.textBudgetBytes) changes.push(`Message History text budget: ${previousPolicy.textBudgetBytes} → ${nextPolicy.textBudgetBytes} bytes`);
+    if (previousPolicy.mediaBudgetBytes !== nextPolicy.mediaBudgetBytes) changes.push(`Message History media budget: ${previousPolicy.mediaBudgetBytes} → ${nextPolicy.mediaBudgetBytes} bytes`);
     if (JSON.stringify(current.productPreferences) !== JSON.stringify(candidate.productPreferences)) changes.push("Control Center appearance, safety, or People preferences");
 
     const resetPowerLab = defaultPowerLab();
@@ -723,7 +745,7 @@ export function previewSetupChanges(document: SolcordSettingsDocument, rawDraft:
         if (document.curatedAddons[name].mode !== draft.addonModes[name]) changes.push(`${name}.mode: ${document.curatedAddons[name].mode} → ${draft.addonModes[name]}`);
         if (document.curatedAddons[name].provider !== draft.addonProviders[name]) changes.push(`${name}.provider: ${document.curatedAddons[name].provider} → ${draft.addonProviders[name]}`);
     }
-    if (JSON.stringify(document.timelinePolicy) !== JSON.stringify(draft.timelinePolicy)) changes.push("Message Timeline policy");
+    if (JSON.stringify(document.timelinePolicy) !== JSON.stringify(draft.timelinePolicy)) changes.push("Message History policy");
     if (JSON.stringify(document.productPreferences) !== JSON.stringify(draft.productPreferences)) changes.push("Control Center product preferences");
     return changes;
 }
@@ -939,7 +961,7 @@ class SolcordStore extends Store {
             } : {})
         };
         this.#document.snapshots.push(snapshot);
-        this.#document.snapshots.splice(0, Math.max(0, this.#document.snapshots.length - MAX_SNAPSHOTS));
+        this.#document.snapshots = retainSnapshots(this.#document.snapshots, new Set(this.#document.setupTransactions.map(transaction => transaction.snapshotId)));
         return clone(snapshot);
     }
 
@@ -1138,10 +1160,10 @@ class SolcordStore extends Store {
         const policy = normalizeTimelinePolicy(rawPolicy);
         if (JSON.stringify(policy) === JSON.stringify(this.#document.timelinePolicy)) return;
         this.#commit(() => {
-            this.#capture("Before changing Message Timeline policy");
+            this.#capture("Before changing Message History policy");
             this.#document.timelinePolicy = policy;
             this.#document.modules["message-timeline"].enabled = policy.enabled;
-            this.#appendLedger("setting", `Message Timeline policy changed (${policy.enabled ? `${policy.scope}, ${policy.retention}, ${policy.content}` : "off"}).`);
+            this.#appendLedger("setting", `Message History policy changed (${policy.enabled ? `${policy.scope}, ${policy.retention}, ${policy.content}` : "off"}).`);
         });
     }
 

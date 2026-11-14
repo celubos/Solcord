@@ -9,7 +9,8 @@ New to Solcord? Start with [Installation](QUICK_START.md), then the [User guide]
 | [Installation](QUICK_START.md) | Download, checksum, setup, launch, and update |
 | [Mac preview](MACOS.md) | Apple Silicon and Intel setup, copied-app ownership, and recovery limits |
 | [User guide](USER_GUIDE.md) | Workspaces, themes, motion, controls, and feature states |
-| [Recovery](INSTALL_AND_ROLLBACK.md) | Repair, rollback, uninstall, and preserved data |
+| [Recovery](INSTALL_AND_ROLLBACK.md) | Repair, rollback, uninstall, Discord updates, and preserved data |
+| [Message History](MESSAGE_HISTORY.md) | Deleted and edited messages: what is saved, where, for how long, and how to erase it |
 | [Troubleshooting](../SUPPORT.md) | Common problems and useful bug reports |
 | [Privacy](SECURITY_AND_PRIVACY.md) | Local data, network access, consent, and storage limits |
 | [Translation](TRANSLATION_DESK.md) | On-device support and optional providers |

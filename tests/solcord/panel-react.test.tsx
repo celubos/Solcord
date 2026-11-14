@@ -3,6 +3,7 @@ import React, {act} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import * as StoreExports from "../../src/betterdiscord/modules/solcord/store";
 import {SolcordFakeDeafenButton, SolcordFakeDeafenController, type SolcordFakeDeafenStatus, type SolcordGatewaySocket} from "../../src/betterdiscord/modules/solcord/fake-deafen";
+import {MessageTimelineJournal, type TimelineHistoryQuery} from "../../src/betterdiscord/modules/solcord/message-timeline";
 
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean;}).IS_REACT_ACT_ENVIRONMENT = true;
 let state = StoreExports.normalizeSolcordDocument(undefined);
@@ -37,6 +38,9 @@ module: (key: keyof typeof state.modules) => state.modules[key],
     setOnboardingStep(step: number) {state = {...state, onboarding: {...state.onboarding, lastStep: step}}; emit();},
     skipOnboarding() {state = {...state, onboarding: {...state.onboarding, status: "skipped"}}; emit();}
 };
+const historyJournal = new MessageTimelineJournal();
+let historyPersistent = false;
+const historyCalls: string[] = [];
 const manager = {...observed("plugins"), addonList: [], resolveAddon: () => undefined, getAddon: () => undefined, isEnabled: () => false};
 const doctor = {...observed("doctor"), snapshot: () => []};
 const empty: never[] = [];
@@ -66,8 +70,15 @@ fakeDeafenProvider: () => communityFakeProvider ? "community" : state.powerLab["
 privacyDecisionReceipts: () => empty,
 privacyReceiptStorage: () => "session-only",
     privacyNativePolicyStatus: () => ({state: "applied", profile: "strict"}),
-    timelineStatus: () => ({records: 0, deleted: 0, edited: 0, ghostPings: 0, textBytes: 0, persistent: false}),
+    timelineStatus: () => ({...historyJournal.status(), persistent: historyPersistent}),
     timelineView: () => empty,
+    timelineHistory: (query: TimelineHistoryQuery) => historyJournal.query(query),
+    timelineConversation: (channelId: string) => channelId === "200" ? {kind: "dm", label: "Direct message · Controlled friend"} : {kind: "unknown", label: "Conversation not loaded"},
+    openTimelineConversation: (channelId: string, messageId?: string) => {historyCalls.push(`open:${channelId}:${messageId}`); return false;},
+    async setTimelinePolicy(value: Partial<typeof state.timelinePolicy>) {historyCalls.push(`policy:${Object.keys(value).join(",")}`); state = {...state, timelinePolicy: {...state.timelinePolicy, ...value}}; emit();},
+    async clearTimeline(clearOpaqueStores: boolean) {historyCalls.push(`clear:${clearOpaqueStores}`); historyJournal.clear(); emit(); return {status: "complete", cleared: 1, remaining: 0, opaqueStores: 0, requiresOpaqueRecovery: false};},
+    async exportTimeline() {historyCalls.push("export"); return {status: "complete", omittedSegments: 0, unreadableSegments: 0, retentionApplied: true};},
+    async setCurrentChannelInTimeline() {return false;},
 timelineCurrentChannel: () => ({eligible: false, included: false}),
     localIdentityNotesStatus: async () => ({persistent: false}),
 readLocalIdentityNotes: async () => empty,
@@ -118,6 +129,7 @@ afterEach(async () => {
     document.body.replaceChildren(); errors.length = 0; writes.length = 0; toasts.length = 0; reminders = [];
     frames.clear();
     fakeStatus = idleFakeStatus(); accountGeneration = 1; communityFakeProvider = false; powerOverride = undefined; powerCalls.length = 0;
+    historyJournal.clear(); historyPersistent = false; historyCalls.length = 0;
     state = StoreExports.normalizeSolcordDocument(undefined); state.onboarding.status = "complete";
 });
 async function mount() {
@@ -169,7 +181,7 @@ describe("production Solcord Control Center React tree with controlled host inte
 
     test("every workspace renders with unavailable optional native adapters and no privacy mutation", async () => {
         const host = await mount();
-        for (const label of ["Appearance & Accessibility", "Performance", "Privacy & Safety", "Chat & Composer", "Voice & Activities", "Friends & Spaces", "Extensions", "Recovery", "Overview"]) {
+        for (const label of ["Appearance & Accessibility", "Performance", "Privacy & Safety", "Chat & Composer", "Message History", "Voice & Activities", "Friends & Spaces", "Extensions", "Recovery", "Overview"]) {
             await navigate(host, label);
             expect(host.querySelector(".solcord-workspace-heading h2")?.textContent).toBe(label);
             expect(host.querySelector(".solcord-workspace")?.textContent?.trim().length).toBeGreaterThan(30);
@@ -422,5 +434,106 @@ toggle: async () => {
             expect(sent.at(-1)?.payload.self_deaf).toBe(false); expect(powerCalls).toEqual([["fake-deafen", true, true]]);
         }
         finally {await act(async () => {directControl?.stop(); controller.stop(); nativeHost.remove();});}
+    });
+});
+
+describe("Message History workspace", () => {
+    function seedHistory() {
+        const policy = {...state.timelinePolicy, enabled: true, retention: "manual" as const};
+        state = {...state, timelinePolicy: policy};
+        historyJournal.hydrate([
+            {eventId: "c1", kind: "create", observedAt: 1_000, messageId: "101", channelId: "200", authorLabel: "Ana", content: "original text"},
+            {eventId: "e1", kind: "edit", observedAt: 2_000, messageId: "101", channelId: "200", content: "edited text"},
+            {eventId: "c2", kind: "create", observedAt: 3_000, messageId: "102", channelId: "200", authorLabel: "Ben", content: "removed secret"},
+            {eventId: "d2", kind: "delete", observedAt: 4_000, messageId: "102", channelId: "200"},
+            {eventId: "c3", kind: "create", observedAt: 5_000, messageId: "103", channelId: "300", authorLabel: "Cy", content: "plain message"}
+        ], policy, 6_000);
+    }
+    const entries = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>(".solcord-history-entry")];
+    const chip = (host: HTMLElement, label: string) => {
+        const match = [...host.querySelectorAll<HTMLButtonElement>(".solcord-history-filters button")].find(item => item.textContent?.startsWith(label));
+        if (!match) throw new Error(`Missing filter ${label}`);
+        return match;
+    };
+    async function type(input: HTMLInputElement, value: string) {
+        await act(async () => {
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+            input.dispatchEvent(new Event("input", {bubbles: true}));
+        });
+    }
+
+    test("is found by searching for deleted messages and shows only deleted and edited messages by default", async () => {
+        seedHistory();
+        const host = await mount(); await flushFrames();
+        await type(host.querySelector<HTMLInputElement>(".solcord-workspace-search input")!, "deleted messages");
+        const results = [...host.querySelectorAll<HTMLButtonElement>(".solcord-workspace-nav-list button")];
+        expect(results.map(item => item.textContent)).toEqual(["Message History"]);
+        await act(async () => results[0].click()); await flushFrames();
+        expect(host.querySelector(".solcord-workspace-heading h2")?.textContent).toBe("Message History");
+
+        expect(entries(host).map(item => item.querySelector("h4")?.textContent)).toEqual(["Ben", "Ana"]);
+        expect(chip(host, "Deleted & edited").getAttribute("aria-pressed")).toBe("true");
+        expect(chip(host, "Deleted & edited").textContent).toContain("2");
+        expect(chip(host, "Everything saved").textContent).toContain("3");
+        const [deleted, edited] = entries(host);
+        expect(deleted.textContent).toContain("Deleted");
+        expect(deleted.textContent).toContain("removed secret");
+        expect(deleted.textContent).toContain("Direct message · Controlled friend");
+        expect(edited.textContent).toContain("Edited once");
+        expect(edited.querySelector(".solcord-history-text")?.textContent).toContain("edited text");
+        expect(edited.querySelector(".solcord-history-versions summary")?.textContent).toBe("Show the earlier version");
+        expect(edited.querySelector(".solcord-history-versions li")?.textContent).toContain("Original");
+        expect(edited.querySelector(".solcord-history-versions li")?.textContent).toContain("original text");
+
+        await act(async () => chip(host, "Everything saved").click());
+        expect(entries(host)).toHaveLength(3);
+        expect(entries(host).find(item => item.textContent?.includes("plain message"))?.querySelector("button")).toBeNull();
+        await type(host.querySelector<HTMLInputElement>(".solcord-history-search input")!, "SECRET");
+        expect(entries(host).map(item => item.querySelector("h4")?.textContent)).toEqual(["Ben"]);
+
+        await act(async () => button(host, "Open conversation").click());
+        expect(historyCalls).toContain("open:200:102");
+        expect(host.querySelector(".solcord-history .solcord-import-status")?.textContent).toContain("not loaded");
+        expect(writes).toEqual([]);
+    });
+
+    test("off and starting states explain storage without reporting a failure", async () => {
+        const host = await mount(); await navigate(host, "Message History");
+        const intro = host.querySelector(".solcord-history-intro")!.textContent!;
+        expect(intro).toContain("Off · nothing new is being saved.");
+        expect(intro).toContain("History saved earlier stays encrypted on this computer");
+        expect(intro).not.toContain("not available");
+        expect(host.querySelector(".solcord-history .solcord-empty")?.textContent).toContain("Message History is off");
+
+        await act(async () => host.querySelector<HTMLInputElement>("input[aria-label='Save deleted and edited messages']")!.click());
+        expect(historyCalls).toEqual(["policy:enabled"]);
+        expect(state.timelinePolicy.enabled).toBe(true);
+        expect(state.timelinePolicy.scope).toBe("dm-only");
+        expect(state.timelinePolicy.serverChannelIds).toEqual([]);
+        expect(state.timelinePolicy.content).toBe("text-only");
+        const started = host.querySelector(".solcord-history-intro")!.textContent!;
+        expect(started).toContain("On · saving direct messages and group DMs.");
+        expect(started).not.toContain("not available");
+    });
+
+    test("erase and export each need a second, explicit step", async () => {
+        seedHistory(); historyPersistent = true;
+        const host = await mount(); await navigate(host, "Message History");
+        await act(async () => button(host, "Erase history…").click());
+        expect(host.querySelector("[aria-label='Confirm erase']")?.textContent).toContain("Permanently erase 3 saved messages");
+        expect(historyCalls).toEqual([]);
+        await act(async () => button(host, "Cancel").click());
+        expect(historyCalls).toEqual([]);
+        await act(async () => button(host, "Erase history…").click());
+        await act(async () => button(host, "Erase permanently").click());
+        expect(historyCalls).toEqual(["clear:false"]);
+        expect(host.querySelector(".solcord-history .solcord-import-status")?.textContent).toContain("was erased");
+        expect(entries(host)).toHaveLength(0);
+
+        await act(async () => button(host, "Export…").click());
+        expect(historyCalls).toEqual(["clear:false"]);
+        await act(async () => button(host, "Export file").click());
+        expect(historyCalls).toEqual(["clear:false", "export"]);
+        expect(host.querySelector(".solcord-history .solcord-import-status")?.textContent).toContain("keep it private");
     });
 });

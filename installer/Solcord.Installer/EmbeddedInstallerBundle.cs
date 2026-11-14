@@ -43,6 +43,7 @@ internal sealed class EmbeddedInstallerBundle : IDisposable
         Directory.CreateDirectory(privateParent);
         RejectLinkedPath(localAppData, privateParent);
         SetPrivateAcl(privateParent);
+        RemoveStaleBundles(privateParent);
         string root = Path.Combine(privateParent, $"bundle-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         SetPrivateAcl(root);
@@ -93,6 +94,35 @@ internal sealed class EmbeddedInstallerBundle : IDisposable
             // Cleanup is bounded to the three known regular files. Never recurse
             // through an entry another same-user process may have introduced.
         }
+    }
+
+    /// <summary>
+    /// A crashed or killed run leaves its extracted copy behind. Remove copies
+    /// older than an hour using the same bounded rule as Dispose: only the three
+    /// known regular files, never recursion. A running installer keeps its files
+    /// open, so its delete fails and its folder is skipped.
+    /// </summary>
+    private static void RemoveStaleBundles(string privateParent)
+    {
+        try
+        {
+            DateTime cutoff = DateTime.UtcNow.AddHours(-1);
+            foreach (string directory in Directory.EnumerateDirectories(privateParent, "bundle-*", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0 || Directory.GetLastWriteTimeUtc(directory) > cutoff) continue;
+                    foreach (string name in ExtractedFiles)
+                    {
+                        string file = Path.Combine(directory, name);
+                        if (File.Exists(file) && (File.GetAttributes(file) & FileAttributes.ReparsePoint) == 0) File.Delete(file);
+                    }
+                    if (Directory.GetFileSystemEntries(directory).Length == 0) Directory.Delete(directory);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) {/* In use or owner-changed; leave it. */}
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) {/* Cleanup never blocks setup. */}
     }
 
     private static byte[] ReadResource(Assembly assembly, string name, int maximumBytes)

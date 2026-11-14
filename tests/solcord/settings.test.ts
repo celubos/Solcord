@@ -295,12 +295,12 @@ describe("Solcord settings schema", () => {
         expect(changes).toContain("DoNotTrack mode: default → native");
         expect(changes).toContain("DoNotTrack review receipt: none → present");
         expect(changes).toContain("DoNotTrack quarantine: none → present");
-        expect(changes).toContain("Message Timeline enabled: off → on");
-        expect(changes).toContain("Message Timeline scope: dm-only → selected-channels");
-        expect(changes).toContain("Message Timeline selected channels: 0 → 1 (identifiers hidden)");
-        expect(changes).toContain("Message Timeline retention: 7-days → 90-days");
-        expect(changes).toContain("Message Timeline content: text-only → encrypted-media");
-        expect(changes).toContain("Message Timeline media budget: 1073741824 → 5368709120 bytes");
+        expect(changes).toContain("Message History enabled: off → on");
+        expect(changes).toContain("Message History scope: dm-only → selected-channels");
+        expect(changes).toContain("Message History selected channels: 0 → 1 (identifiers hidden)");
+        expect(changes).toContain("Message History retention: 7-days → 90-days");
+        expect(changes).toContain("Message History content: text-only → encrypted-media");
+        expect(changes).toContain("Message History media budget: 1073741824 → 5368709120 bytes");
         expect(changes).toContain("Power Lab: clear 1 acknowledgement(s) and disable 1 experiment(s)");
         expect(preview).not.toContain("987654321098765432");
     });

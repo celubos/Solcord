@@ -153,6 +153,11 @@ export class AddonUpdater {
         this.pending = [];
     }
 
+    /** The update source failure from the last request, so a manual check can report it instead of claiming success. */
+    get sourceError(): Error | null {
+        return AddonStore.error instanceof Error ? AddonStore.error : null;
+    }
+
     async initialize() {
         if (isSolcordAcceptanceMode()) return;
 

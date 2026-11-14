@@ -4,6 +4,9 @@
 export const TIMELINE_MAX_EVENT_BYTES = 96 * 1024;
 export const TIMELINE_MAX_APPEND_BYTES = 4 * 1024 * 1024;
 export const TIMELINE_MAX_APPEND_EVENTS = 100;
+/** Per-account stored history: the newest events a single read (restart or export) returns. Older events are removed first. */
+export const TIMELINE_MAX_STORED_EVENTS = 10_000;
+export const TIMELINE_MAX_STORED_BYTES = 32 * 1024 * 1024;
 
 const encoder = new TextEncoder();
 export function timelineSerializedBytes(value: unknown): number {return encoder.encode(JSON.stringify(value)).byteLength;}

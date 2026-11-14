@@ -14,6 +14,31 @@ import {resolveSolcordPerformancePolicy, SOLCORD_PERFORMANCE_POLICIES, SOLCORD_S
 import {SOLCORD_ADDON_GROUPS} from "./catalog";
 import {scrollSolcordSettingsTarget} from "./scroll-owner";
 import SolcordSwitch from "./switch";
+import Toasts from "@stores/toasts";
+import {applyPrivacyProfile} from "@common/solcord/privacy";
+
+// The last Apply outcome outlives the wizard instance that started it.
+let lastSetupOutcome = "";
+const setupOutcomeListeners = new Set<(message: string) => void>();
+function publishSetupOutcome(message: string) {
+    lastSetupOutcome = message;
+    for (const listener of setupOutcomeListeners) listener(message);
+}
+export function takeLastSetupOutcome(): string {
+    const message = lastSetupOutcome;
+    lastSetupOutcome = "";
+    return message;
+}
+/** Overview shows the Apply result after the wizard closes. */
+export function useLastSetupOutcome(): [string, () => void] {
+    const [message, setMessage] = React.useState(takeLastSetupOutcome);
+    React.useEffect(() => {
+        const listener = (next: string) => {setMessage(next); lastSetupOutcome = "";};
+        setupOutcomeListeners.add(listener);
+        return () => {setupOutcomeListeners.delete(listener);};
+    }, []);
+    return [message, () => setMessage("")];
+}
 
 const {useEffect, useMemo, useRef, useState} = React;
 
@@ -196,27 +221,17 @@ function PrivacyStep({draft, onChange}: {draft: SolcordSetupDraft; onChange(valu
     const friendWatch = draft.productPreferences.friendWatch;
     const privacy = draft.productPreferences.privacy;
     const safety = draft.productPreferences.safety;
+    // One definition of each profile: the Privacy panel applies the same values.
     const setPrivacyProfile = (profile: "strict" | "standard") => onChange({
         ...draft,
-        productPreferences: {
-            ...draft.productPreferences,
-            privacy: {
-                ...privacy,
-                profile,
-                telemetry: profile === "strict" ? "block" : "allow",
-                crashReporting: profile === "strict" ? "block-optional" : "allow",
-                activityDiscovery: profile === "strict" ? "block" : "allow",
-                updates: "manual",
-                migrationPending: false
-            }
-        }
+        productPreferences: {...draft.productPreferences, privacy: applyPrivacyProfile(privacy, profile)}
     });
     return <div className="solcord-wizard-body">
         <h3>Choose your privacy baseline</h3>
         <p>Strict Privacy blocks verified optional reporting. Discord essentials keep working.</p>
         <div className="solcord-choice-grid solcord-choice-grid-two">
             <label className="solcord-choice-row"><input type="radio" name="privacy-profile" checked={privacy.profile === "strict"} onChange={() => setPrivacyProfile("strict")} /><span><strong>Strict Privacy</strong><small>Recommended. Optional telemetry, crash reports, game discovery, and automatic Solcord checks stay off.</small></span></label>
-            <label className="solcord-choice-row"><input type="radio" name="privacy-profile" checked={privacy.profile !== "strict"} onChange={() => setPrivacyProfile("standard")} /><span><strong>Standard</strong><small>Discord optional reporting may run. Solcord update checks remain manual.</small></span></label>
+            <label className="solcord-choice-row"><input type="radio" name="privacy-profile" checked={privacy.profile !== "strict"} onChange={() => setPrivacyProfile("standard")} /><span><strong>Standard</strong><small>Discord optional reporting, crash reports, and activity discovery may run, and addon and theme update checks are automatic.</small></span></label>
         </div>
         <h3>Safety tools</h3>
         <div className="solcord-choice-stack">
@@ -230,9 +245,9 @@ function PrivacyStep({draft, onChange}: {draft: SolcordSetupDraft; onChange(valu
             <label className="solcord-choice-row"><SolcordSwitch label="Enable Friend Watch" checked={friendWatch.enabled} onChange={value => onChange({...draft, productPreferences: {...draft.productPreferences, friendWatch: {...friendWatch, enabled: value}}})} /><span><strong>Friend Watch</strong><small>Relationship transitions only; 30-day encrypted local retention by default. It never guesses who blocked you.</small></span></label>
             <label className="solcord-choice-row"><SolcordSwitch label="Keep Friend Watch display snapshots" disabled={!friendWatch.enabled} checked={friendWatch.includeDisplaySnapshot} onChange={value => onChange({...draft, productPreferences: {...draft.productPreferences, friendWatch: {...friendWatch, includeDisplaySnapshot: value}}})} /><span><strong>Keep display snapshots</strong><small>Store the already-loaded display name inside the encrypted account history. Turn this off to keep only an account-scoped subject key.</small></span></label>
             <label className="solcord-choice-row"><span><strong>Local notifications</strong><small>Daily shows one bounded in-app summary after a new transition; per-event is capped to prevent notification storms.</small></span><select aria-label="Friend Watch notification mode" disabled={!friendWatch.enabled} value={friendWatch.digest} onChange={event => onChange({...draft, productPreferences: {...draft.productPreferences, friendWatch: {...friendWatch, digest: event.currentTarget.value as typeof friendWatch.digest}}})}><option value="off">Off</option><option value="daily">Daily in-app</option><option value="per-event">Per event, local</option></select></label>
-            <label className="solcord-choice-row"><SolcordSwitch label="Enable Message Timeline" checked={draft.timelinePolicy.enabled} onChange={value => onChange({...draft, timelinePolicy: {...draft.timelinePolicy, enabled: value}})} /><span><strong>Message Timeline</strong><small>DM-only, text-only, seven days by default. This stores observed message edits/deletes locally.</small></span></label>
+            <label className="solcord-choice-row"><SolcordSwitch label="Save deleted and edited messages" checked={draft.timelinePolicy.enabled} onChange={value => onChange({...draft, timelinePolicy: {...draft.timelinePolicy, enabled: value}})} /><span><strong>Message History (deleted &amp; edited messages)</strong><small>Keeps a private copy of DM and group DM text that Solcord sees, so you can read it after it is deleted or edited. Encrypted on this computer only and kept 7 days unless you change it later. Server channels are never included unless you add them.</small></span></label>
             </div>
-            <p className="solcord-callout">Without Windows secure storage, private history becomes session-only.</p>
+            <p className="solcord-callout">If your system&rsquo;s secure storage is unavailable, private history is kept in memory only and erased when Discord closes.</p>
         </details>
     </div>;
 }
@@ -240,7 +255,7 @@ function PrivacyStep({draft, onChange}: {draft: SolcordSetupDraft; onChange(valu
 function ApplyStep({draft}: {draft: SolcordSetupDraft;}) {
     return <div className="solcord-apply-summary">
         <p>Apply verifies the selected files and captures a rollback point. Existing community plugins stay untouched.</p>
-        <dl className="solcord-facts"><div><dt>Preset</dt><dd>{draft.preset}</dd></div><div><dt>Performance</dt><dd>{draft.productPreferences.performanceProfile}</dd></div><div><dt>Friend Watch</dt><dd>{draft.productPreferences.friendWatch.enabled ? "consented" : "off"}</dd></div><div><dt>Message Timeline</dt><dd>{draft.timelinePolicy.enabled ? "consented" : "off"}</dd></div><div><dt>Power Lab</dt><dd>off</dd></div></dl>
+        <dl className="solcord-facts"><div><dt>Preset</dt><dd>{draft.preset}</dd></div><div><dt>Performance</dt><dd>{draft.productPreferences.performanceProfile}</dd></div><div><dt>Friend Watch</dt><dd>{draft.productPreferences.friendWatch.enabled ? "consented" : "off"}</dd></div><div><dt>Message History</dt><dd>{draft.timelinePolicy.enabled ? "on" : "off"}</dd></div><div><dt>Power Lab</dt><dd>off</dd></div></dl>
     </div>;
 }
 
@@ -263,9 +278,9 @@ function AddonStep({draft, toggle, selectRecommended}: {draft: SolcordSetupDraft
                 <legend><span>{group.title}</span><small>{group.summary}</small></legend>
                 {group.addons.map(addon => {
                     return <label key={addon.name} className="solcord-addon-choice">
-                            <SolcordSwitch label={`${selected.has(addon.name) ? "Disable" : "Enable"} ${addon.name}`} checked={selected.has(addon.name)} onChange={value => toggle(addon.name, value)} />
+                            <SolcordSwitch label={`Include ${addon.label}`} checked={selected.has(addon.name)} onChange={value => toggle(addon.name, value)} />
                             <span><strong>{addon.label}</strong><small>{addon.summary}</small></span>
-                            <span className="solcord-review-chip">Runtime check pending</span>
+                            <span className="solcord-review-chip">Checked when turned on</span>
                         </label>;
                 })}
             </fieldset>)}
@@ -331,7 +346,12 @@ export default function SetupWizard() {
     const [step, setStepState] = useState(document.onboarding.lastStep);
     const [draft, setDraftState] = useState<SolcordSetupDraft>(() => draftFrom(document));
     const [busy, setBusy] = useState(false);
-    const [status, setStatus] = useState("");
+    const [status, setStatus] = useState(takeLastSetupOutcome);
+    useEffect(() => {
+        const listener = (message: string) => {setStatus(message); lastSetupOutcome = "";};
+        setupOutcomeListeners.add(listener);
+        return () => {setupOutcomeListeners.delete(listener);};
+    }, []);
     const plan = useMemo(() => resolveSolcordSetupPlan(draft.selectedAddons, draft.addonModes), [draft.addonModes, draft.selectedAddons]);
     useEffect(() => {
         try {SolcordSettings.setSetupDraft(draft);}
@@ -372,11 +392,21 @@ export default function SetupWizard() {
         if (!window.confirm(`Apply ${plan.executableAddons.length} ready feature(s) and activate ${SOLCORD_THEMES.find(theme => theme.id === draft.selectedTheme)?.name}? Existing community plugins stay untouched; Extensions can review replacements later with a separate rollback preview.`)) return;
         setBusy(true);
         setStatus(plan.skipped.length ? `Applying the ready set; ${plan.skipped.length} unavailable choice(s) will be skipped…` : "Applying the ready set and verifying hashes…");
+        // Completing setup unmounts this wizard, and a failure remounts a fresh one,
+        // so the outcome is also published where it stays visible.
         try {
             const result = await SolcordRuntime.finishSetup(draft, undefined, {migrateProviders: false});
-            setStatus(`Finished transaction ${result.transactionId}. ${result.enabled.length} enabled; ${plan.skipped.length} skipped; ${result.quarantined.length} quarantined; ${result.providerConflicts.length} provider conflict(s).`);
+            const summary = `Setup finished: ${result.enabled.length} feature(s) turned on, ${plan.skipped.length} skipped, ${result.quarantined.length} held for review${result.providerConflicts.length ? `, ${result.providerConflicts.length} plugin conflict(s) to review in Extensions` : ""}.`;
+            publishSetupOutcome(summary);
+            setStatus(summary);
+            Toasts.success(summary, {forceShow: true, timeout: 10_000});
         }
-        catch (error) {setStatus(setupFailureMessage(error));}
+        catch (error) {
+            const message = setupFailureMessage(error);
+            publishSetupOutcome(message);
+            setStatus(message);
+            Toasts.error(message, {forceShow: true, timeout: 12_000});
+        }
         finally {
             setBusy(false);
         }
