@@ -24,13 +24,20 @@ describe("Solcord V2 product model", () => {
         expect(findSolcordWorkspaces(" ")).toEqual([...SOLCORD_WORKSPACES]);
     });
 
-    test("owns nine task-oriented Control Center workspaces and five resumable setup steps", () => {
+    test("finds Message History by the words people use for a deleted-message logger", () => {
+        for (const query of ["deleted messages", "edited", "message logger", "ghost ping", "Message History", "timeline"]) {
+            expect(findSolcordWorkspaces(query).map(workspace => workspace.id)).toEqual(["history"]);
+        }
+    });
+
+    test("owns ten task-oriented Control Center workspaces and five resumable setup steps", () => {
         expect(SOLCORD_WORKSPACES.map(workspace => workspace.id)).toEqual([
             "overview",
             "appearance",
             "performance",
             "privacy",
             "chat",
+            "history",
             "voice",
             "friends",
             "extensions",

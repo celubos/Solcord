@@ -1,4 +1,5 @@
 import type {SolcordTimelinePolicy} from "./contracts";
+import {TIMELINE_MAX_STORED_EVENTS} from "@common/solcord/timeline-limits";
 
 
 export type TimelineEventKind = "create" | "edit" | "delete" | "bulk-delete" | "recovery";
@@ -37,11 +38,141 @@ export interface TimelineMessageState {
     ghostPingAt?: number;
     purged?: boolean;
     edits: Array<{at: number; content: string;}>;
+    /** True when the bounded edit list dropped older versions; the first kept version is then not the original. */
+    editsTrimmed?: boolean;
     attachments: TimelineAttachmentMetadata[];
+}
+
+export type TimelineHistoryFilter = "changes" | "deleted" | "edited" | "ghost-pings" | "all";
+
+export interface TimelineHistoryQuery {
+    filter?: TimelineHistoryFilter;
+    channelId?: string;
+    search?: string;
+    includePurged?: boolean;
+    order?: "newest" | "oldest";
+    limit?: number;
+}
+
+export interface TimelineHistoryCounts {
+    all: number;
+    changes: number;
+    deleted: number;
+    edited: number;
+    ghostPings: number;
+}
+
+export interface TimelineHistoryPage {
+    entries: readonly TimelineMessageState[];
+    /** Records matching the filter, channel, search, and purge choices before the page limit. */
+    matched: number;
+    /** Per-filter totals for the same channel, search, and purge choices. */
+    counts: Readonly<TimelineHistoryCounts>;
+}
+
+export interface TimelineMessageVersion {
+    content: string;
+    /** When Solcord first saw this version; undefined when older versions were trimmed. */
+    observedAt?: number;
+    kind: "original" | "earliest-kept" | "edit" | "current";
+}
+
+export const TIMELINE_HISTORY_MAX_PAGE = 1_000;
+
+/**
+ * Edits store the replaced text and the time it was replaced. Present them as
+ * versions with the time each version was first observed, ending at the
+ * current (or last-known, for deleted messages) text.
+ */
+export function timelineMessageVersions(state: Pick<TimelineMessageState, "content" | "createdAt" | "edits" | "editsTrimmed">): TimelineMessageVersion[] {
+    if (!state.edits.length) return [{content: state.content, observedAt: state.createdAt, kind: "current"}];
+    const versions: TimelineMessageVersion[] = [state.editsTrimmed
+        ? {content: state.edits[0].content, kind: "earliest-kept"}
+        : {content: state.edits[0].content, observedAt: state.createdAt, kind: "original"}];
+    for (let index = 1; index < state.edits.length; index++) {
+        versions.push({content: state.edits[index].content, observedAt: state.edits[index - 1].at, kind: "edit"});
+    }
+    versions.push({content: state.content, observedAt: state.edits[state.edits.length - 1].at, kind: "current"});
+    return versions;
+}
+
+function historyCategory(state: TimelineMessageState): {deleted: boolean; edited: boolean; ghost: boolean;} {
+    return {deleted: state.deletedAt !== undefined, edited: state.edits.length > 0, ghost: state.ghostPingAt !== undefined};
+}
+
+function historyFilterMatches(filter: TimelineHistoryFilter, category: ReturnType<typeof historyCategory>): boolean {
+    switch (filter) {
+        case "all": return true;
+        case "deleted": return category.deleted;
+        case "edited": return category.edited;
+        case "ghost-pings": return category.ghost;
+        default: return category.deleted || category.edited || category.ghost;
+    }
+}
+
+function normalizeHistorySearch(value: unknown): string {
+    return typeof value === "string" ? value.trim().toLocaleLowerCase().slice(0, 200) : "";
+}
+
+function historySearchMatches(state: TimelineMessageState, search: string): boolean {
+    if (!search) return true;
+    if (state.content.toLocaleLowerCase().includes(search)) return true;
+    if (state.authorLabel?.toLocaleLowerCase().includes(search)) return true;
+    if (state.edits.some(edit => edit.content.toLocaleLowerCase().includes(search))) return true;
+    return state.attachments.some(attachment => attachment.name.toLocaleLowerCase().includes(search));
 }
 
 export type DiscordTimelineDispatchType = "MESSAGE_CREATE" | "MESSAGE_UPDATE" | "MESSAGE_DELETE" | "MESSAGE_DELETE_BULK";
 export type NormalizedDiscordTimelineEvent = Omit<TimelineEvent, "eventId" | "observedAt">;
+
+export interface TimelineConversation {
+    kind: "dm" | "group" | "server" | "unknown";
+    label: string;
+    guildId?: string;
+}
+
+interface TimelineConversationLookups {
+    channel?: {id?: unknown; type?: unknown; name?: unknown; guild_id?: unknown; recipients?: unknown; rawRecipients?: unknown;};
+    guildName?(guildId: string): unknown;
+    userName?(userId: string): unknown;
+}
+
+function displayText(value: unknown, maximum = 80): string | undefined {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    return trimmed ? trimmed.slice(0, maximum) : undefined;
+}
+
+/**
+ * Describe where a record was observed from Discord's live stores at view time.
+ * Names are never stored in the journal; an unavailable channel stays unknown.
+ */
+export function describeTimelineConversation(lookups: TimelineConversationLookups): TimelineConversation {
+    const channel = lookups.channel;
+    if (!channel || !safeId(channel.id)) return {kind: "unknown", label: "Conversation not loaded"};
+    const recipientIds = (Array.isArray(channel.recipients) ? channel.recipients : Array.isArray(channel.rawRecipients) ? channel.rawRecipients : [])
+        .map(item => typeof item === "string" ? item : item && typeof item === "object" ? (item as {id?: unknown;}).id : undefined)
+        .filter((id): id is string => Boolean(safeId(id)))
+        .slice(0, 10);
+    const names = recipientIds.map(id => {
+        try {return displayText(lookups.userName?.(id), 40);}
+        catch {return undefined;}
+    }).filter((name): name is string => Boolean(name));
+    if (channel.type === 1) return {kind: "dm", label: names[0] ? `Direct message · ${names[0]}` : "Direct message"};
+    if (channel.type === 3) {
+        const name = displayText(channel.name) ?? (names.length ? names.slice(0, 3).join(", ") + (names.length > 3 ? ` +${names.length - 3}` : "") : undefined);
+        return {kind: "group", label: name ? `Group DM · ${name}` : "Group DM"};
+    }
+    const guildId = safeId(channel.guild_id);
+    if (guildId) {
+        let guild: string | undefined;
+        try {guild = displayText(lookups.guildName?.(guildId));}
+        catch {guild = undefined;}
+        const name = displayText(channel.name);
+        return {kind: "server", guildId, label: `${name ? `#${name}` : "Server channel"}${guild ? ` · ${guild}` : ""}`};
+    }
+    return {kind: "unknown", label: displayText(channel.name) ?? "Conversation"};
+}
 
 export function resolveTimelineEventIdentity(
     event: NormalizedDiscordTimelineEvent,
@@ -69,8 +200,10 @@ const MAX_AUTHOR_CHARS = 160;
 const MAX_ATTACHMENTS = 20;
 export const MAX_TIMELINE_BULK_EVENTS = 500;
 
+// Records match the native store's readable event bound, so what a session shows
+// is what survives a restart and what an export can contain.
 const DEFAULT_JOURNAL_LIMITS = Object.freeze({
-    records: 20_000,
+    records: TIMELINE_MAX_STORED_EVENTS,
     seenEvents: 80_000,
     editsPerRecord: 100,
     snapshotRecords: 250,
@@ -316,6 +449,7 @@ export class MessageTimelineJournal {
     #limits: TimelineJournalLimits;
     #batching = false;
     #viewCache?: {key: string; value: readonly TimelineMessageState[];};
+    #queryCache?: {key: string; matched: TimelineMessageState[]; counts: Readonly<TimelineHistoryCounts>; pages: Map<number, TimelineHistoryPage>;};
     #recordViews = new WeakMap<TimelineMessageState, TimelineMessageState>();
     #statusCache?: {records: number; deleted: number; edited: number; ghostPings: number; textBytes: number;};
 
@@ -353,8 +487,28 @@ export class MessageTimelineJournal {
         const current = this.#messages.get(event.messageId);
         let changed = false;
 
-        if (event.kind === "create") {
-            if (current) this.#deleteMessage(event.messageId);
+        if (event.kind === "create" && current) {
+            // Discord never reuses message IDs. A repeated create (reconnect replay or
+            // a seed racing a live create) refreshes missing facts; it must not erase
+            // captured edits or undelete a deleted record.
+            if (current.deletedAt === undefined) {
+                const previousTextBytes = stateTextBytes(current);
+                const previousEstimatedBytes = estimatedStateBytes(current);
+                if (event.content !== undefined && safeContent(event.content) !== current.content) {
+                    current.edits.push({at: event.observedAt, content: current.content});
+                    this.#trimEdits(current);
+                    current.content = safeContent(event.content);
+                    current.updatedAt = Math.max(current.updatedAt, event.observedAt);
+                    changed = true;
+                }
+                if (!current.authorLabel && event.authorLabel) {
+                    current.authorLabel = event.authorLabel;
+                    changed = true;
+                }
+                if (changed) this.#touchMessage(current, previousTextBytes, previousEstimatedBytes);
+            }
+        }
+        else if (event.kind === "create") {
             this.#setMessage({
                 messageId: event.messageId,
                 channelId: event.channelId,
@@ -373,8 +527,8 @@ export class MessageTimelineJournal {
         else if (event.kind === "edit" && current) {
             const previousTextBytes = stateTextBytes(current);
             const previousEstimatedBytes = estimatedStateBytes(current);
-            if (event.content !== undefined && event.content !== current.content) current.edits.push({at: event.observedAt, content: current.content});
-            if (current.edits.length > this.#limits.editsPerRecord) current.edits.splice(0, current.edits.length - this.#limits.editsPerRecord);
+            if (event.content !== undefined && safeContent(event.content) !== current.content) current.edits.push({at: event.observedAt, content: current.content});
+            this.#trimEdits(current);
             if (event.content !== undefined) current.content = safeContent(event.content);
             if (event.mentionedCurrentUser !== undefined) {
                 if (current.mentionedCurrentUser && !event.mentionedCurrentUser) current.ghostPingAt = event.observedAt;
@@ -412,8 +566,11 @@ export class MessageTimelineJournal {
     prune(policy: SolcordTimelinePolicy, now = Date.now()): number {
         const before = this.#messages.size;
         if (policy.retention !== "session") {
+            // Retention counts from first capture, matching the native store, which
+            // expires each encrypted event by its own capture time. Measuring from the
+            // last update would show records in-session that a restart cannot restore.
             const cutoff = retentionCutoff(policy, now);
-            for (const [id, state] of this.#messages) if (state.updatedAt < cutoff) this.#deleteMessage(id);
+            for (const [id, state] of this.#messages) if (state.createdAt < cutoff) this.#deleteMessage(id);
         }
 
         const requestedBudget = Number(policy.textBudgetBytes);
@@ -441,20 +598,67 @@ export class MessageTimelineJournal {
             .filter(state => !channelId || state.channelId === channelId)
             .sort((left, right) => right.updatedAt - left.updatedAt)
             .slice(0, limit)
-            .map(state => {
-                const cached = this.#recordViews.get(state);
-                if (cached) return cached;
-                const copy = structuredClone(state);
-                copy.edits.forEach(Object.freeze);
-                copy.attachments.forEach(Object.freeze);
-                Object.freeze(copy.edits);
-                Object.freeze(copy.attachments);
-                Object.freeze(copy);
-                this.#recordViews.set(state, copy);
-                return copy;
-            }));
+            .map(state => this.#frozenView(state)));
         this.#viewCache = {key, value};
         return value;
+    }
+
+    #frozenView(state: TimelineMessageState): TimelineMessageState {
+        const cached = this.#recordViews.get(state);
+        if (cached) return cached;
+        const copy = structuredClone(state);
+        copy.edits.forEach(Object.freeze);
+        copy.attachments.forEach(Object.freeze);
+        Object.freeze(copy.edits);
+        Object.freeze(copy.attachments);
+        Object.freeze(copy);
+        this.#recordViews.set(state, copy);
+        return copy;
+    }
+
+    /**
+     * Filtered, searchable history over every retained record (not only the
+     * snapshot window). Matching work is cached until the journal changes; a
+     * larger page reuses the same match list and frozen record views.
+     */
+    query(raw: TimelineHistoryQuery = {}): TimelineHistoryPage {
+        const filter: TimelineHistoryFilter = raw.filter && ["changes", "deleted", "edited", "ghost-pings", "all"].includes(raw.filter) ? raw.filter : "changes";
+        const channelId = safeId(raw.channelId);
+        const search = normalizeHistorySearch(raw.search);
+        const includePurged = raw.includePurged !== false;
+        const order = raw.order === "oldest" ? "oldest" : "newest";
+        const limit = typeof raw.limit === "number" && Number.isSafeInteger(raw.limit) && raw.limit > 0 ? Math.min(TIMELINE_HISTORY_MAX_PAGE, raw.limit) : 50;
+        const key = `${filter}\u0000${channelId ?? ""}\u0000${search}\u0000${includePurged}\u0000${order}`;
+        if (this.#queryCache?.key !== key) {
+            const counts: TimelineHistoryCounts = {all: 0, changes: 0, deleted: 0, edited: 0, ghostPings: 0};
+            const matched: TimelineMessageState[] = [];
+            for (const state of this.#messages.values()) {
+                if (channelId && state.channelId !== channelId) continue;
+                if (!includePurged && state.purged) continue;
+                if (!historySearchMatches(state, search)) continue;
+                const category = historyCategory(state);
+                counts.all++;
+                if (category.deleted) counts.deleted++;
+                if (category.edited) counts.edited++;
+                if (category.ghost) counts.ghostPings++;
+                if (category.deleted || category.edited || category.ghost) counts.changes++;
+                if (historyFilterMatches(filter, category)) matched.push(state);
+            }
+            matched.sort((left, right) => order === "oldest"
+                ? left.updatedAt - right.updatedAt || left.messageId.localeCompare(right.messageId)
+                : right.updatedAt - left.updatedAt || right.messageId.localeCompare(left.messageId));
+            this.#queryCache = {key, matched, counts: Object.freeze(counts), pages: new Map()};
+        }
+        const cache = this.#queryCache;
+        const cached = cache.pages.get(limit);
+        if (cached) return cached;
+        const page: TimelineHistoryPage = Object.freeze({
+            entries: Object.freeze(cache.matched.slice(0, limit).map(state => this.#frozenView(state))),
+            matched: cache.matched.length,
+            counts: cache.counts
+        });
+        cache.pages.set(limit, page);
+        return page;
     }
 
     has(messageId: string): boolean {
@@ -507,8 +711,14 @@ export class MessageTimelineJournal {
         this.#recordViews.delete(state);
         this.#textBytes += stateTextBytes(state) - previousTextBytes;
         this.#estimatedBytes += estimatedStateBytes(state) - previousEstimatedBytes;
-        this.#messages.delete(state.messageId);
-        this.#messages.set(state.messageId, state);
+        // Map order stays capture order: budget eviction removes the oldest-captured
+        // record first, the same order in which the native store drops events.
+    }
+
+    #trimEdits(state: TimelineMessageState): void {
+        if (state.edits.length <= this.#limits.editsPerRecord) return;
+        state.edits.splice(0, state.edits.length - this.#limits.editsPerRecord);
+        state.editsTrimmed = true;
     }
 
     #deleteMessage(messageId: string): void {
@@ -524,7 +734,7 @@ export class MessageTimelineJournal {
         this.#eventsByMessage.delete(messageId);
     }
 
-    #invalidateViews(): void {this.#viewCache = undefined; this.#statusCache = undefined;}
+    #invalidateViews(): void {this.#viewCache = undefined; this.#statusCache = undefined; this.#queryCache = undefined;}
 
     #eventWasSeen(eventId: string): boolean {
         const messageId = this.#seenEvents.get(eventId);

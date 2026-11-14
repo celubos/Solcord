@@ -8,6 +8,7 @@ export type SolcordWorkspaceId =
     | "performance"
     | "privacy"
     | "chat"
+    | "history"
     | "voice"
     | "friends"
     | "extensions"
@@ -165,6 +166,7 @@ export const SOLCORD_WORKSPACES = Object.freeze([
     {id: "performance", label: "Performance", summary: "Choose a resource profile and inspect local cost."},
     {id: "privacy", label: "Privacy & Safety", summary: "Tracking protection, private data, links, and uploads."},
     {id: "chat", label: "Chat & Composer", summary: "Writing, drafts, and message tools."},
+    {id: "history", label: "Message History", summary: "Deleted and edited messages Solcord saw, stored only on this computer."},
     {id: "voice", label: "Voice & Activities", summary: "Calls, Activities, streams, and experiments."},
     {id: "friends", label: "Friends & Spaces", summary: "People, servers, notes, and reminders."},
     {id: "extensions", label: "Extensions", summary: "Built-ins, community software, and optional migration."},
@@ -173,6 +175,7 @@ export const SOLCORD_WORKSPACES = Object.freeze([
 
 /** Feature aliases supplement route labels without expanding normal page copy. */
 const SOLCORD_WORKSPACE_SEARCH_TERMS: Partial<Record<SolcordWorkspaceId, string>> = {
+    history: "deleted edited message logger timeline ghost ping removed messages edit history",
     voice: "fake deafen fakedeafen power lab audience guard voice note audio console"
 };
 

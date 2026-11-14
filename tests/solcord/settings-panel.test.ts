@@ -54,7 +54,7 @@ describe("Solcord Control Center clarity", () => {
     test("uses a stable vertical information architecture", () => {
         expect(panel).toContain("{label: \"Start\", ids: [\"overview\"]}");
         expect(panel).toContain("{label: \"Personalize\", ids: [\"appearance\", \"performance\"]}");
-        expect(panel).toContain("{label: \"Features\", ids: [\"privacy\", \"chat\", \"voice\", \"friends\"]}");
+        expect(panel).toContain("{label: \"Features\", ids: [\"privacy\", \"chat\", \"history\", \"voice\", \"friends\"]}");
         expect(panel).toContain("{label: \"System\", ids: [\"extensions\", \"recovery\"]}");
         expect(panel).toContain("placeholder=\"Find a setting\"");
     });
@@ -364,10 +364,12 @@ describe("Solcord Control Center clarity", () => {
         expect(panel).toMatch(/aria-label=\{`\$\{item\.title\}: \$\{stateLabel\[item\.maturity\]\}\. \$\{item\.detail\}`\}/);
     });
 
-    test("does not report a storage failure before Message Timeline is enabled", () => {
-        expect(timeline).toContain("Not in use while Timeline is off");
-        expect(timeline).toContain("Session only by choice");
-        expect(timeline).toContain("Session only · encrypted persistence unavailable");
+    test("does not report a storage failure before Message History is enabled or while it starts", () => {
+        // Behavior is exercised through the production React tree in panel-react.test.tsx.
+        expect(timeline).toContain("if (!policy.enabled) return \"off\";");
+        expect(timeline).toContain("if (!health || health.status === \"starting\" || health.status === \"stopped\") return \"starting\";");
+        expect(timeline).toContain("\"session-choice\": \"Kept in memory only, by your choice.");
+        expect(timeline).toContain("\"memory-fallback\": \"Secure storage is not available on this system");
         expect(timeline).not.toContain("session only · secure storage unavailable or disabled");
     });
 

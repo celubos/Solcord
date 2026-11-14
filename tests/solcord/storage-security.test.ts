@@ -1298,9 +1298,12 @@ describe("Solcord Message Timeline storage security", () => {
     });
 
     test("returns the newest bounded suffix and explicitly reports export truncation", async () => {
+        // A store written under a larger bound (for example by an earlier version)
+        // must still read as an honest, truncated newest-first suffix.
+        const writer = new SolcordTimelineStorage({readEvents: 2});
         const timeline = new SolcordTimelineStorage({readEvents: 1});
         const now = Date.now();
-        await timeline.append("111222333", timelineRequest({
+        await writer.append("111222333", timelineRequest({
             events: [
                 timelineEvent({eventId: "evt-older", observedAt: now - 10, content: "older"}),
                 timelineEvent({eventId: "evt-newer", observedAt: now, content: "newer"})
@@ -1316,6 +1319,72 @@ describe("Solcord Message Timeline storage security", () => {
         expect(read.omittedSegments).toBe(1);
         expect(read.unreadableSegments).toBe(0);
         expect(read.retentionApplied).toBeTrue();
+    });
+
+    test("append keeps stored history within the readable bound, so restart and export stay complete", async () => {
+        const timeline = new SolcordTimelineStorage({readEvents: 3});
+        const now = Date.now();
+        const events = Array.from({length: 5}, (_, index) => timelineEvent({eventId: `cap-${index}`, messageId: String(500 + index), observedAt: now - 10 + index, content: `capacity ${index}`}));
+        expect(await timeline.append("111222333", timelineRequest({events, policy: {retention: "manual"}}))).toEqual({stored: 5, persistent: true, retentionApplied: true});
+        expect(fs.readdirSync(firstTimelineStore()).filter(file => file.endsWith(".scseg"))).toHaveLength(3);
+        const read = await new SolcordTimelineStorage({readEvents: 3}).read("111222333", {policy: {retention: "manual"}});
+        expect(read.complete).toBeTrue();
+        expect(read.truncated).toBeFalse();
+        expect(read.events.map(event => event.eventId)).toEqual(["cap-2", "cap-3", "cap-4"]);
+    });
+
+    test("append and retention expiry never re-read or decrypt existing segments", async () => {
+        const timeline = new SolcordTimelineStorage();
+        const now = Date.now();
+        const old = Array.from({length: 40}, (_, index) => timelineEvent({eventId: `old-${index}`, messageId: String(700 + index), observedAt: now - 3 * 86_400_000 + index}));
+        const recent = Array.from({length: 40}, (_, index) => timelineEvent({eventId: `recent-${index}`, messageId: String(800 + index), observedAt: now - 1_000 + index}));
+        await timeline.append("111222333", timelineRequest({events: [...old, ...recent], policy: {retention: "manual"}}));
+        const store = firstTimelineStore();
+        expect(fs.readdirSync(store).filter(file => file.endsWith(".scseg"))).toHaveLength(80);
+
+        const readFileSync = fs.readFileSync;
+        const segmentReads: string[] = [];
+        const writable = fs as unknown as {readFileSync: typeof fs.readFileSync;};
+        writable.readFileSync = ((file: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+            if (String(file).endsWith(".scseg")) segmentReads.push(String(file));
+            return (readFileSync as unknown as (target: unknown, ...values: unknown[]) => unknown)(file, ...args);
+        }) as typeof fs.readFileSync;
+        try {
+            const appended = await timeline.append("111222333", timelineRequest({events: [timelineEvent({eventId: "newest", messageId: "999", observedAt: now})], policy: {retention: "24-hours"}}));
+            expect(appended).toEqual({stored: 1, persistent: true, retentionApplied: true});
+        }
+        finally {writable.readFileSync = readFileSync;}
+        expect(segmentReads).toEqual([]);
+        expect(fs.readdirSync(store).filter(file => file.endsWith(".scseg"))).toHaveLength(41);
+        const read = await new SolcordTimelineStorage().read("111222333", {policy: {retention: "24-hours"}});
+        expect(read.complete).toBeTrue();
+        expect(read.events).toHaveLength(41);
+        expect(read.events.some(event => event.eventId.startsWith("old-"))).toBeFalse();
+    });
+
+    test("a retention sweep while capture is off never creates a store, key, or data folder", async () => {
+        const sweeper = new SolcordTimelineStorage();
+        expect(await sweeper.append("111222333", {events: [], policy: {retention: "7-days"}})).toEqual({stored: 0, persistent: true, retentionApplied: true});
+        expect(fs.existsSync(path.join(appDataPath, "BetterDiscord"))).toBeFalse();
+
+        const writer = new SolcordTimelineStorage();
+        const seeded = [
+            timelineEvent({eventId: "expired", messageId: "1", observedAt: Date.now() - 8 * 86_400_000}),
+            timelineEvent({eventId: "fresh", messageId: "2", observedAt: Date.now() - 1_000})
+        ];
+        await writer.append("111222333", timelineRequest({events: seeded, policy: {retention: "manual"}}));
+        const root = path.join(appDataPath, "BetterDiscord", "solcord-timeline-v1");
+        const storesBefore = fs.readdirSync(root).filter(entry => entry.startsWith("store-"));
+        // Another account with no history must not gain a store or data key.
+        expect(await new SolcordTimelineStorage().append("444555666", {events: [], policy: {retention: "7-days"}})).toEqual({stored: 0, persistent: true, retentionApplied: true});
+        expect(fs.readdirSync(root).filter(entry => entry.startsWith("store-"))).toEqual(storesBefore);
+
+        expect(await new SolcordTimelineStorage().append("111222333", {events: [], policy: {retention: "7-days"}})).toEqual({stored: 0, persistent: true, retentionApplied: true});
+        const read = await new SolcordTimelineStorage().read("111222333", {policy: {retention: "manual"}});
+        expect(read.events.map(event => event.eventId)).toEqual(["fresh"]);
+
+        expect(await new SolcordTimelineStorage().append("111222333", {events: [], policy: {retention: "24-hours"}})).toEqual({stored: 0, persistent: true, retentionApplied: true});
+        expect((await new SolcordTimelineStorage().read("111222333", {policy: {retention: "manual"}})).events.map(event => event.eventId)).toEqual(["fresh"]);
     });
 
     test("fails closed to session-only when a wrapped key is corrupted", async () => {

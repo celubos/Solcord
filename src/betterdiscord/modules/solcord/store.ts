@@ -595,15 +595,15 @@ export function previewSolcordImportChanges(current: SolcordSettingsDocument, ca
 
     const previousPolicy = current.timelinePolicy;
     const nextPolicy = candidate.timelinePolicy;
-    if (previousPolicy.enabled !== nextPolicy.enabled) changes.push(`Message Timeline enabled: ${booleanLabel(previousPolicy.enabled)} → ${booleanLabel(nextPolicy.enabled)}`);
-    if (previousPolicy.scope !== nextPolicy.scope) changes.push(`Message Timeline scope: ${previousPolicy.scope} → ${nextPolicy.scope}`);
+    if (previousPolicy.enabled !== nextPolicy.enabled) changes.push(`Message History enabled: ${booleanLabel(previousPolicy.enabled)} → ${booleanLabel(nextPolicy.enabled)}`);
+    if (previousPolicy.scope !== nextPolicy.scope) changes.push(`Message History scope: ${previousPolicy.scope} → ${nextPolicy.scope}`);
     if (JSON.stringify(previousPolicy.serverChannelIds) !== JSON.stringify(nextPolicy.serverChannelIds)) {
-        changes.push(`Message Timeline selected channels: ${previousPolicy.serverChannelIds.length} → ${nextPolicy.serverChannelIds.length} (identifiers hidden)`);
+        changes.push(`Message History selected channels: ${previousPolicy.serverChannelIds.length} → ${nextPolicy.serverChannelIds.length} (identifiers hidden)`);
     }
-    if (previousPolicy.retention !== nextPolicy.retention) changes.push(`Message Timeline retention: ${previousPolicy.retention} → ${nextPolicy.retention}`);
-    if (previousPolicy.content !== nextPolicy.content) changes.push(`Message Timeline content: ${previousPolicy.content} → ${nextPolicy.content}`);
-    if (previousPolicy.textBudgetBytes !== nextPolicy.textBudgetBytes) changes.push(`Message Timeline text budget: ${previousPolicy.textBudgetBytes} → ${nextPolicy.textBudgetBytes} bytes`);
-    if (previousPolicy.mediaBudgetBytes !== nextPolicy.mediaBudgetBytes) changes.push(`Message Timeline media budget: ${previousPolicy.mediaBudgetBytes} → ${nextPolicy.mediaBudgetBytes} bytes`);
+    if (previousPolicy.retention !== nextPolicy.retention) changes.push(`Message History retention: ${previousPolicy.retention} → ${nextPolicy.retention}`);
+    if (previousPolicy.content !== nextPolicy.content) changes.push(`Message History content: ${previousPolicy.content} → ${nextPolicy.content}`);
+    if (previousPolicy.textBudgetBytes !== nextPolicy.textBudgetBytes) changes.push(`Message History text budget: ${previousPolicy.textBudgetBytes} → ${nextPolicy.textBudgetBytes} bytes`);
+    if (previousPolicy.mediaBudgetBytes !== nextPolicy.mediaBudgetBytes) changes.push(`Message History media budget: ${previousPolicy.mediaBudgetBytes} → ${nextPolicy.mediaBudgetBytes} bytes`);
     if (JSON.stringify(current.productPreferences) !== JSON.stringify(candidate.productPreferences)) changes.push("Control Center appearance, safety, or People preferences");
 
     const resetPowerLab = defaultPowerLab();
@@ -723,7 +723,7 @@ export function previewSetupChanges(document: SolcordSettingsDocument, rawDraft:
         if (document.curatedAddons[name].mode !== draft.addonModes[name]) changes.push(`${name}.mode: ${document.curatedAddons[name].mode} → ${draft.addonModes[name]}`);
         if (document.curatedAddons[name].provider !== draft.addonProviders[name]) changes.push(`${name}.provider: ${document.curatedAddons[name].provider} → ${draft.addonProviders[name]}`);
     }
-    if (JSON.stringify(document.timelinePolicy) !== JSON.stringify(draft.timelinePolicy)) changes.push("Message Timeline policy");
+    if (JSON.stringify(document.timelinePolicy) !== JSON.stringify(draft.timelinePolicy)) changes.push("Message History policy");
     if (JSON.stringify(document.productPreferences) !== JSON.stringify(draft.productPreferences)) changes.push("Control Center product preferences");
     return changes;
 }
@@ -1138,10 +1138,10 @@ class SolcordStore extends Store {
         const policy = normalizeTimelinePolicy(rawPolicy);
         if (JSON.stringify(policy) === JSON.stringify(this.#document.timelinePolicy)) return;
         this.#commit(() => {
-            this.#capture("Before changing Message Timeline policy");
+            this.#capture("Before changing Message History policy");
             this.#document.timelinePolicy = policy;
             this.#document.modules["message-timeline"].enabled = policy.enabled;
-            this.#appendLedger("setting", `Message Timeline policy changed (${policy.enabled ? `${policy.scope}, ${policy.retention}, ${policy.content}` : "off"}).`);
+            this.#appendLedger("setting", `Message History policy changed (${policy.enabled ? `${policy.scope}, ${policy.retention}, ${policy.content}` : "off"}).`);
         });
     }
 

@@ -4,12 +4,14 @@ import type {SolcordTimelinePolicy} from "../../src/betterdiscord/modules/solcor
 import {
     boundedTimelineMessageIds,
     channelIsInTimelineScope,
+    describeTimelineConversation,
     MessageTimelineJournal,
     normalizeDiscordTimelineDispatch,
     normalizeTimelineAccountId,
     normalizeTimelineEvent,
     TimelineAccountGuard,
     timelineEventAccountMatches,
+    timelineMessageVersions,
     type TimelineEvent
 } from "../../src/betterdiscord/modules/solcord/message-timeline";
 
@@ -294,6 +296,135 @@ describe("Message Timeline model", () => {
         withMetadata.apply(create, policy({content: "text-and-metadata"}), 1);
         expect(textOnly.snapshot()[0].attachments).toEqual([]);
         expect(withMetadata.snapshot()[0].attachments).toEqual([attachment]);
+    });
+
+    test("a repeated create for a known message keeps its edit history and deleted state", () => {
+        const journal = new MessageTimelineJournal();
+        const activePolicy = policy({retention: "manual"});
+        journal.apply(event("create", "create", 1, "100", "first"), activePolicy, 1);
+        journal.apply(event("edit", "edit", 2, "100", "second"), activePolicy, 2);
+        // A reconnect replay or seed race repeats the create with the current text.
+        expect(journal.apply(event("replayed-create", "create", 3, "100", "second"), activePolicy, 3)).toBeFalse();
+        expect(journal.snapshot()[0]).toMatchObject({content: "second", edits: [{at: 2, content: "first"}]});
+
+        journal.apply(event("delete", "delete", 4, "100"), activePolicy, 4);
+        expect(journal.apply(event("late-create", "create", 5, "100", "resurrected?"), activePolicy, 5)).toBeFalse();
+        expect(journal.snapshot()[0]).toMatchObject({content: "second", deletedAt: 4, edits: [{at: 2, content: "first"}]});
+
+        // A create carrying different text than the record is an observed change.
+        journal.apply(event("create-b", "create", 6, "101", "alpha"), activePolicy, 6);
+        expect(journal.apply(event("create-b-again", "create", 7, "101", "beta"), activePolicy, 7)).toBeTrue();
+        expect(journal.snapshot().find(item => item.messageId === "101")).toMatchObject({content: "beta", edits: [{at: 7, content: "alpha"}], createdAt: 6});
+    });
+
+    test("retention counts from first capture so a session never shows what a restart cannot restore", () => {
+        const sevenDays = policy({retention: "7-days"});
+        const created = 100 * DAY;
+        const journal = new MessageTimelineJournal();
+        journal.apply(event("create", "create", created, "100", "kept briefly"), sevenDays, created);
+        journal.apply(event("delete", "delete", created + 6 * DAY, "100"), sevenDays, created + 6 * DAY);
+        expect(journal.status().deleted).toBe(1);
+        // The native store expires the create event by its own capture time; the
+        // journal must drop the record at the same moment instead of 6 days later.
+        expect(journal.prune(sevenDays, created + 7 * DAY + 1)).toBe(1);
+        expect(journal.status().records).toBe(0);
+
+        const restarted = new MessageTimelineJournal();
+        restarted.hydrate([event("delete", "delete", created + 6 * DAY, "100")], sevenDays, created + 7 * DAY + 1);
+        expect(restarted.status().records).toBe(0);
+    });
+
+    test("budget eviction removes the oldest-captured record first, like the native store", () => {
+        const journal = new MessageTimelineJournal({records: 2});
+        const activePolicy = policy({retention: "manual"});
+        journal.apply(event("old", "create", 1, "100", "old"), activePolicy, 1);
+        journal.apply(event("mid", "create", 2, "101", "mid"), activePolicy, 2);
+        journal.apply(event("old-delete", "delete", 3, "100"), activePolicy, 3);
+        journal.apply(event("new", "create", 4, "102", "new"), activePolicy, 4);
+        expect(journal.snapshot().map(item => item.messageId).sort()).toEqual(["101", "102"]);
+    });
+
+    test("history queries cover every retained record, not only the newest snapshot window", () => {
+        const journal = new MessageTimelineJournal();
+        const activePolicy = policy({retention: "manual"});
+        const events: TimelineEvent[] = [];
+        for (let index = 0; index < 600; index++) events.push({...event(`c-${index}`, "create", index + 1, String(1_000 + index), `message ${index}`), channelId: index % 2 ? "201" : "200"});
+        events.push({...event("delete-old", "delete", 700, "1003"), channelId: "201"});
+        events.push({...event("edit-old", "edit", 701, "1005", "message 5 corrected"), channelId: "201"});
+        events.push({...event("bulk-old", "bulk-delete", 702, "1007"), channelId: "201"});
+        events.push({...event("ghost", "create", 703, "2000", "@you"), mentionedCurrentUser: true});
+        events.push({...event("ghost-delete", "delete", 704, "2000")});
+        for (let index = 0; index < 300; index++) events.push(event(`late-${index}`, "create", 800 + index, String(3_000 + index), `later ${index}`));
+        journal.hydrate(events, activePolicy, 2_000);
+
+        // The legacy 250-record view is entirely newer messages and misses every change.
+        expect(journal.view().some(item => item.deletedAt !== undefined || item.edits.length > 0)).toBeFalse();
+        const changes = journal.query({filter: "changes"});
+        expect(changes.entries.map(item => item.messageId)).toEqual(["2000", "1007", "1005", "1003"]);
+        expect(changes.counts).toEqual({all: 901, changes: 4, deleted: 3, edited: 1, ghostPings: 1});
+        expect(journal.query({filter: "deleted", includePurged: false}).entries.map(item => item.messageId)).toEqual(["2000", "1003"]);
+        expect(journal.query({filter: "edited"}).entries.map(item => item.messageId)).toEqual(["1005"]);
+        expect(journal.query({filter: "ghost-pings"}).entries.map(item => item.messageId)).toEqual(["2000"]);
+        expect(journal.query({filter: "changes", channelId: "201"}).entries.map(item => item.messageId)).toEqual(["1007", "1005", "1003"]);
+        expect(journal.query({filter: "changes", channelId: "200"}).entries.map(item => item.messageId)).toEqual(["2000"]);
+        expect(journal.query({filter: "all", search: "CORRECTED"}).entries.map(item => item.messageId)).toEqual(["1005"]);
+        expect(journal.query({filter: "all", search: "message 5"}).entries.map(item => item.messageId)).toContain("1005");
+        expect(journal.query({filter: "changes", order: "oldest"}).entries.map(item => item.messageId)).toEqual(["1003", "1005", "1007", "2000"]);
+
+        const firstPage = journal.query({filter: "all", limit: 50});
+        expect(firstPage.entries).toHaveLength(50);
+        expect(firstPage.matched).toBe(901);
+        expect(journal.query({filter: "all", limit: 50})).toBe(firstPage);
+        const larger = journal.query({filter: "all", limit: 100});
+        expect(larger.entries.slice(0, 50)).toEqual([...firstPage.entries]);
+        expect(larger.entries[0]).toBe(firstPage.entries[0]);
+        expect(Object.isFrozen(larger.entries[0])).toBeTrue();
+        expect(journal.query({filter: "all", limit: 50_000}).entries).toHaveLength(901);
+
+        journal.apply(event("delete-new", "delete", 2_001, "3299"), activePolicy, 2_001);
+        const after = journal.query({filter: "all", limit: 50});
+        expect(after).not.toBe(firstPage);
+        expect(journal.query({filter: "changes"}).counts.deleted).toBe(4);
+    });
+
+    test("edit history is presented as versions with the time each version was first seen", () => {
+        const journal = new MessageTimelineJournal({editsPerRecord: 2});
+        const activePolicy = policy({retention: "manual"});
+        journal.apply(event("create", "create", 10, "100", "v1"), activePolicy, 10);
+        journal.apply(event("edit-1", "edit", 20, "100", "v2"), activePolicy, 20);
+        expect(timelineMessageVersions(journal.snapshot()[0])).toEqual([
+            {content: "v1", observedAt: 10, kind: "original"},
+            {content: "v2", observedAt: 20, kind: "current"}
+        ]);
+        journal.apply(event("edit-2", "edit", 30, "100", "v3"), activePolicy, 30);
+        expect(timelineMessageVersions(journal.snapshot()[0])).toEqual([
+            {content: "v1", observedAt: 10, kind: "original"},
+            {content: "v2", observedAt: 20, kind: "edit"},
+            {content: "v3", observedAt: 30, kind: "current"}
+        ]);
+        journal.apply(event("edit-3", "edit", 40, "100", "v4"), activePolicy, 40);
+        const trimmed = journal.snapshot()[0];
+        expect(trimmed.editsTrimmed).toBeTrue();
+        expect(timelineMessageVersions(trimmed)).toEqual([
+            {content: "v2", kind: "earliest-kept"},
+            {content: "v3", observedAt: 30, kind: "edit"},
+            {content: "v4", observedAt: 40, kind: "current"}
+        ]);
+        expect(timelineMessageVersions({content: "only", createdAt: 5, edits: []})).toEqual([{content: "only", observedAt: 5, kind: "current"}]);
+    });
+
+    test("conversation labels come from live stores and fail closed when unavailable", () => {
+        const names = new Map([["11", "Ana"], ["12", "Ben"], ["13", "Cy"], ["14", "Dee"]]);
+        const userName = (id: string) => names.get(id);
+        expect(describeTimelineConversation({channel: {id: "1", type: 1, recipients: ["11"]}, userName})).toEqual({kind: "dm", label: "Direct message · Ana"});
+        expect(describeTimelineConversation({channel: {id: "1", type: 1, rawRecipients: [{id: "12"}]}, userName})).toEqual({kind: "dm", label: "Direct message · Ben"});
+        expect(describeTimelineConversation({channel: {id: "2", type: 3, name: "", recipients: ["11", "12", "13", "14"]}, userName})).toEqual({kind: "group", label: "Group DM · Ana, Ben, Cy +1"});
+        expect(describeTimelineConversation({channel: {id: "2", type: 3, name: "Trip", recipients: []}, userName})).toEqual({kind: "group", label: "Group DM · Trip"});
+        expect(describeTimelineConversation({channel: {id: "3", type: 0, name: "general", guild_id: "9"}, guildName: () => "Home"})).toEqual({kind: "server", guildId: "9", label: "#general · Home"});
+        expect(describeTimelineConversation({channel: {id: "3", type: 0, name: "general", guild_id: "9"}, guildName: () => {throw new Error("store drift");}})).toEqual({kind: "server", guildId: "9", label: "#general"});
+        expect(describeTimelineConversation({channel: {id: "1", type: 1, recipients: ["11"]}, userName: () => {throw new Error("store drift");}})).toEqual({kind: "dm", label: "Direct message"});
+        expect(describeTimelineConversation({channel: undefined})).toEqual({kind: "unknown", label: "Conversation not loaded"});
+        expect(describeTimelineConversation({channel: {id: "../1", type: 1}})).toEqual({kind: "unknown", label: "Conversation not loaded"});
     });
 
     test("returns defensive snapshots and clear resets records and event idempotency", () => {

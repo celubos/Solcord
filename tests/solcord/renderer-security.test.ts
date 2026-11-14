@@ -496,7 +496,12 @@ describe("Solcord renderer security contracts", () => {
     test("bounds Timeline records, dedupe state, bulk expansion, and snapshots", () => {
         const timeline = source("src/betterdiscord/modules/solcord/message-timeline.ts");
         const runtime = source("src/betterdiscord/modules/solcord/runtime.ts");
-        expect(timeline).toContain("records: 20_000");
+        const limits = source("src/common/solcord/timeline-limits.ts");
+        // Session records match the native readable bound, so restart and export agree with the view.
+        expect(timeline).toContain("records: TIMELINE_MAX_STORED_EVENTS");
+        expect(limits).toContain("export const TIMELINE_MAX_STORED_EVENTS = 10_000;");
+        expect(timeline).toContain("export const TIMELINE_HISTORY_MAX_PAGE = 1_000;");
+        expect(timeline).toContain("Math.min(TIMELINE_HISTORY_MAX_PAGE, raw.limit)");
         expect(timeline).toContain("seenEvents: 80_000");
         expect(timeline).toContain("editsPerRecord: 100");
         expect(timeline).toContain("estimatedStateBytes");
@@ -532,8 +537,11 @@ describe("Solcord renderer security contracts", () => {
         const timelinePanel = source("src/betterdiscord/ui/solcord/timeline.tsx");
         expect(runtime).toContain("result.complete && remaining === 0 ? \"complete\" : \"incomplete\"");
         expect(runtime).toContain("if (outcome.status === \"complete\")");
-        expect(timelinePanel).toContain("SolcordRuntime.clearTimeline(true)");
-        expect(timelinePanel).toContain("Renderer history remains visible until cleanup is confirmed complete.");
+        // Opaque-store recovery is a separate, explicit second confirmation, and
+        // visible history is retained unless native clear reports completion.
+        expect(timelinePanel).toContain("await SolcordRuntime.clearTimeline(clearOpaqueStores)");
+        expect(timelinePanel).toContain("onClick={() => erase(true)}>Erase all stores</ActionButton>");
+        expect(timelinePanel).toContain("Your visible history was kept so nothing is misreported.");
         expect(runtime).toContain("result.complete && preserved === 0 && addonStatesRestored ? \"complete\" : \"partial\"");
     });
 
@@ -544,9 +552,12 @@ describe("Solcord renderer security contracts", () => {
         expect(runtime).toContain("describeSolcordStreamShieldResolution(resolution, automaticAvailable, source())");
         expect(streamShield).toContain("structural store match; live transition acceptance remains pending");
         expect(streamShield).not.toContain("verified Go Live store connected");
-        expect(timelinePanel).toContain("Persistent segments are encrypted when secure storage is available");
+        // Encryption is claimed only for the confirmed persistent state; fallback and export limits are explicit.
+        expect(timelinePanel).toContain("return persistent ? \"encrypted\" : \"memory-fallback\";");
+        expect(timelinePanel).toContain("Secure storage is not available on this system, so history is kept in memory only");
         expect(timelinePanel).not.toContain("A private, encrypted journal");
-        expect(timelinePanel).toContain("complete bounded local event set only when its read succeeds");
+        expect(timelinePanel).toContain("No file was written, because part of the saved history could not be read");
+        expect(timelinePanel).toContain("It cannot recover messages deleted before Solcord saw them");
     });
 
     test("separates code maturity, running status, and the bounded profile payload", () => {
@@ -556,7 +567,7 @@ describe("Solcord renderer security contracts", () => {
         expect(panel).toContain("Degraded means part of a running tool drifted or could not clean up completely");
         expect(panel).not.toContain("Ready modules are connected to Discord now");
         expect(panel).toContain("Profiles save Solcord module settings");
-        expect(panel).toContain("They do not capture Timeline policy or curated-addon choices");
+        expect(panel).toContain("They do not capture Message History policy or curated-addon choices");
         expect(panel).toContain("Save module state");
         expect(panel).not.toContain("Save current state");
         expect(runtime).toContain("Profiles preview, snapshot, apply, and roll back module settings");

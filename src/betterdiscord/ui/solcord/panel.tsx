@@ -35,7 +35,7 @@ const {useEffect, useRef, useState} = React;
 const WORKSPACE_GROUPS: ReadonlyArray<{label: string; ids: SolcordWorkspaceId[];}> = [
     {label: "Start", ids: ["overview"]},
     {label: "Personalize", ids: ["appearance", "performance"]},
-    {label: "Features", ids: ["privacy", "chat", "voice", "friends"]},
+    {label: "Features", ids: ["privacy", "chat", "history", "voice", "friends"]},
     {label: "System", ids: ["extensions", "recovery"]}
 ];
 
@@ -223,7 +223,7 @@ function ProfilesAndHistory() {
                 </div>
                 <details className="solcord-secondary-tools">
                     <summary>Import, export, or create a profile</summary>
-                    <p>Profiles save Solcord module settings only. They do not capture Timeline policy or curated-addon choices.</p>
+                    <p>Profiles save Solcord module settings only. They do not capture Message History policy or curated-addon choices.</p>
                     <label className="solcord-file-import">Import settings JSON
                         <input type="file" accept="application/json,.json" onChange={event => {
                             const file = event.currentTarget.files?.[0];
@@ -1234,7 +1234,7 @@ function AboutSolcord() {
         <div className="solcord-about-grid">
             <p><strong>Why it exists.</strong> Solcord keeps the BetterDiscord plugin and theme ecosystem while tightening recovery behavior and restoring Discord Activities through a bounded same-package preload policy.</p>
             <p><strong>What it does not do.</strong> It does not grant Nitro, forge entitlements, extract tokens, backfill messages, access hidden channels, send on your behalf, send Solcord telemetry, or enable the global unrestricted preload override.</p>
-            <p><strong>Privacy.</strong> Module state, snapshots, and diagnostics stay local. The private Message Timeline runs only after opt-in, is DM-only by default, and uses encrypted persistence when safeStorage is available. Sanitized diagnostics omit message content, server names, account identifiers, and absolute paths.</p>
+            <p><strong>Privacy.</strong> Module state, snapshots, and diagnostics stay local. Private Message History (deleted and edited messages) runs only after opt-in, is DM-only by default, and uses encrypted persistence when safeStorage is available. Sanitized diagnostics omit message content, server names, account identifiers, and absolute paths.</p>
             <p><strong>Maturity.</strong> Automated and synthetic checks can prove policy behavior; only the owner’s post-launch Codenames and second-Activity checks can complete live human acceptance.</p>
         </div>
         <p className="solcord-attribution">Based on BetterDiscord. Upstream contributors, Apache-2.0 licensing, ecosystem-compatible identifiers, and fork lineage are preserved.</p>
@@ -1605,8 +1605,9 @@ export default function SolcordPanel() {
                 </>}
                 {workspace === "appearance" && <><AppearanceWorkspace /><BuiltInFeatureSwitches scope="appearance" /></>}
                 {workspace === "performance" && <><PerformanceProfileControls /><PerformanceControls /></>}
-                {workspace === "privacy" && <><PrivacyProtectionPanel /><BuiltInFeatureSwitches scope="privacy" /><StreamShieldControls /><LinkWorkbench />{productPreferences.safety.attachmentGuard && <AttachmentGuardWorkbench />}<ScreenshotScrubber /><MessageTimelinePanel /></>}
+                {workspace === "privacy" && <><PrivacyProtectionPanel /><BuiltInFeatureSwitches scope="privacy" /><StreamShieldControls /><LinkWorkbench />{productPreferences.safety.attachmentGuard && <AttachmentGuardWorkbench />}<ScreenshotScrubber /><div className="solcord-all-clear"><strong>Deleted and edited messages</strong><span>Message History has its own section with search, filters, export, and erase controls.</span><ActionButton onClick={() => setWorkspace("history")}>Open Message History</ActionButton></div></>}
                 {workspace === "chat" && <><BaselineToolsPanel /><BuiltInFeatureSwitches scope="chat" /><NativeSuitePanel key="chat" scope="chat" /><ReturnLaterPanel /></>}
+                {workspace === "history" && <MessageTimelinePanel />}
                 {workspace === "voice" && <><ActivityBridge /><BuiltInFeatureSwitches scope="voice" /><FakeDeafenControls /><NativeSuitePanel key="voice" scope="voice" /><StreamAudienceGuardControls /></>}
                 {workspace === "friends" && <><FriendWatchPanel /><BuiltInFeatureSwitches scope="friends" /><NativeSuitePanel key="friends" scope="friends" /></>}
                 {workspace === "extensions" && <>
