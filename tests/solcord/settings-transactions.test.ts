@@ -54,6 +54,22 @@ describe("Solcord settings transactions", () => {
         expect(restarted.snapshot().updateLedger.at(-1)?.version).toBe(SOLCORD_PRODUCT_IDENTITY.numericVersion);
     });
 
+    test("setup rollback survives many later edits and a restart because its snapshot is pinned", () => {
+        const store = createStore();
+        const transactionId = "setup-0123456789abcdef";
+        const record = store.completeSetup(normalizeSetupDraft(undefined), {}, {id: transactionId, priorAddonStates: {}, priorThemeStates: {}});
+        for (let index = 0; index < 30; index++) store.setEnabled("stream-shield", index % 2 === 0);
+        expect(store.snapshot().snapshots).toHaveLength(20);
+        expect(store.snapshotById(record.snapshotId)).toBeDefined();
+
+        const restarted = createStore();
+        restarted.initialize();
+        expect(restarted.snapshot().snapshots).toHaveLength(20);
+        expect(restarted.snapshotById(record.snapshotId)).toBeDefined();
+        expect(restarted.abortSetupCompletion(transactionId)).toBeTrue();
+        expect(restarted.snapshot().onboarding.status).toBe("pending");
+    });
+
     test("a normalized no-op creates no snapshot, disk write, or change event", () => {
         const store = createStore();
         const before = store.snapshot();

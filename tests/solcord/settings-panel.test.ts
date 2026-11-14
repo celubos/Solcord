@@ -221,10 +221,13 @@ describe("Solcord Control Center clarity", () => {
         expect(runtime).toContain("Patcher.after(\"Solcord~ReturnLaterRoute\", window.history, \"pushState\"");
         expect(runtime).toContain("Patcher.after(\"Solcord~ReturnLaterRoute\", window.history, \"replaceState\"");
         expect(runtime).toContain("this.#returnRouteMemory.clear();");
-        expect(runtime).toContain("window.location.assign(target);");
+        // Opening a reminder routes inside Discord; a full page load would drop the in-memory list.
+        expect(runtime).toContain("return route ? this.#navigateInDiscord(route) : false;");
+        expect(runtime).not.toContain("window.location.assign(");
         expect(panel).toContain("SolcordRuntime.snoozeReturnLater(item.id");
         expect(panel).toContain("SolcordRuntime.completeReturnLater(item.id)");
         expect(panel).toContain("SolcordRuntime.openReturnLater(item.id)");
+        expect(panel).toContain("That reminder could not be opened");
         expect(panel).toContain("choose Save current DM or channel for later");
     });
 
@@ -344,7 +347,7 @@ describe("Solcord Control Center clarity", () => {
 
     test("leads Privacy with the explicit profile and content-free capability report", () => {
         const privacy = readFileSync(resolve(import.meta.dir, "../../src/betterdiscord/ui/solcord/privacy.tsx"), "utf8");
-        expect(panel).toContain("<PrivacyProtectionPanel /><BuiltInFeatureSwitches scope=\"privacy\" /><StreamShieldControls />");
+        expect(panel).toContain("<PrivacyProtectionPanel /><BuiltInFeatureSwitches scope=\"privacy\" /><SafetyToolSwitches /><StreamShieldControls />");
         expect(privacy).toContain("Use Strict Privacy");
         expect(privacy).toContain("Check for updates");
         expect(privacy).toContain("privacyCapabilityStateLabel(capability.state)");

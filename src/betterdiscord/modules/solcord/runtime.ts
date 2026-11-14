@@ -41,7 +41,7 @@ import {refreshSolcordFakeDeafenCurrentChannelRow} from "./fake-deafen-row-refre
 import {normalizeDiscordRelationships, planSolcordFriendWatchNotices, reconcileSolcordRelationships, SolcordFriendWatchAccountBarrier, SolcordFriendWatchJournal, type SolcordFriendWatchNoticeState, type SolcordOwnerRelationshipAction, type SolcordRelationshipEvent, type SolcordRelationshipSnapshot} from "@common/solcord/friend-watch";
 import {inspectSolcordDomain, SolcordDomainMemory, type SolcordDomainDecision, type SolcordDomainMemoryRecord, type SolcordDomainRisk} from "@common/solcord/domain-memory";
 import {inspectSolcordAttachment, inspectSolcordLocalAttachment, type SolcordAttachmentInspection} from "@common/solcord/attachment-guard";
-import {solcordReturnLaterTarget, SolcordReturnLaterJournal, SolcordReturnRouteMemory, type SolcordReturnLaterItem} from "@common/solcord/return-later";
+import {normalizeSolcordReturnRoute, SolcordReturnLaterJournal, SolcordReturnRouteMemory, type SolcordReturnLaterItem} from "@common/solcord/return-later";
 import {filterSolcordCommands} from "@common/solcord/command-deck";
 import {currentSolcordPeopleObjectId, resolveSolcordPeopleObject, type SolcordPeopleObjectResolution} from "@common/solcord/people-spaces";
 import {audienceGuardHealthMaturity, isAudienceGuardStartAction, isAudienceGuardStopAction, normalizeAudienceGuardEntries, normalizeAudienceGuardPrivatePolicy, SolcordStreamAudienceGuard, type SolcordAudienceGuardArmReadiness, type SolcordAudienceGuardPrivatePolicy, type SolcordAudienceGuardStatus} from "./stream-audience-guard";
@@ -884,15 +884,8 @@ class SolcordRuntimeStore extends Store {
         if (!id) return false;
         const conversation = this.timelineConversation(id);
         if (conversation.kind === "unknown") return false;
-        const transitionTo = getByStrings<(path: string) => void>(["transitionTo - Transitioning to"], {searchExports: true, cacheId: "solcord-timeline-transitionTo"});
-        if (typeof transitionTo !== "function") return false;
         const message = normalizeTimelineAccountId(messageId);
-        try {
-            SettingsRenderer.closeSolcordSurfaces();
-            transitionTo(`/channels/${conversation.guildId ?? "@me"}/${id}${message ? `/${message}` : ""}`);
-            return true;
-        }
-        catch {return false;}
+        return this.#navigateInDiscord(`/channels/${conversation.guildId ?? "@me"}/${id}${message ? `/${message}` : ""}`);
     }
 
     timelineCurrentChannel(): {eligible: boolean; included: boolean; channelId?: string;} {
@@ -1982,6 +1975,9 @@ class SolcordRuntimeStore extends Store {
         await this.#refreshAddonIntegrity("pre-rollback");
         const transaction = SolcordSettings.latestSetupTransaction();
         if (!transaction) return {status: "unavailable", removed: 0, preserved: 0};
+        // Confirm the settings half of the rollback exists before touching files,
+        // so a missing snapshot cannot leave files removed and settings unchanged.
+        if (!SolcordSettings.snapshotById(transaction.snapshotId)) return {status: "unavailable", removed: 0, preserved: 0};
         let providerArchiveRestored = true;
         if (transaction.providerArchiveTransactionId) {
             try {
@@ -2386,10 +2382,23 @@ class SolcordRuntimeStore extends Store {
 
     openReturnLater(id: string): boolean {
         const item = this.#returnLater.snapshot().find(candidate => candidate.id === id);
-        const target = item ? solcordReturnLaterTarget(item.route) : undefined;
-        if (!target) return false;
-        window.location.assign(target);
-        return true;
+        const route = item ? normalizeSolcordReturnRoute(item.route) : undefined;
+        // In-app routing keeps Discord loaded; a full page load would discard the
+        // in-memory reminders and leave PTB/Canary for discord.com.
+        return route ? this.#navigateInDiscord(route) : false;
+    }
+
+    /** Route inside the running Discord client after closing Solcord and Discord settings. */
+    #navigateInDiscord(route: string): boolean {
+        if (!/^\/channels\/(?:@me|\d{1,32})\/\d{1,32}(?:\/\d{1,32})?$/.test(route)) return false;
+        const transitionTo = getByStrings<(path: string) => void>(["transitionTo - Transitioning to"], {searchExports: true, cacheId: "solcord-transitionTo"});
+        if (typeof transitionTo !== "function") return false;
+        try {
+            SettingsRenderer.closeSolcordSurfaces();
+            transitionTo(route);
+            return true;
+        }
+        catch {return false;}
     }
 
     exportDiagnostics(): void {

@@ -38,6 +38,24 @@ const MAX_PROFILES = 50;
 const MAX_MIGRATION_ENTRIES = 30;
 const MAX_SETUP_TRANSACTIONS = 10;
 
+/**
+ * Keep the newest snapshots within the limit, but never evict one that a setup
+ * transaction needs for its rollback. Ordinary edits capture snapshots often;
+ * evicting the setup snapshot made "Roll back latest setup" fail after files
+ * had already been removed.
+ */
+export function retainSnapshots<T extends {id: string;}>(snapshots: readonly T[], pinned: ReadonlySet<string>): T[] {
+    let excess = snapshots.length - MAX_SNAPSHOTS;
+    if (excess <= 0) return [...snapshots];
+    return snapshots.filter(snapshot => {
+        if (excess > 0 && !pinned.has(snapshot.id)) {
+            excess--;
+            return false;
+        }
+        return true;
+    });
+}
+
 export const SOLCORD_THEMES: Array<{id: SolcordThemeId; name: string; fileName: string;}> = [
     {id: "solcord-default", name: "Solcord Default", fileName: "Solcord-Default.theme.css"},
     {id: "obsidian-thread", name: "Obsidian Thread", fileName: "Solcord-ObsidianThread.theme.css"},
@@ -427,8 +445,12 @@ export function normalizeSolcordDocument(raw: unknown): SolcordSettingsDocument 
                 activePlugins: normalizeAddonFileNames(snapshot.activePlugins, "plugin"),
                 activeThemes: normalizeAddonFileNames(snapshot.activeThemes, "theme")
             } satisfies SolcordSnapshot];
-        }).slice(-MAX_SNAPSHOTS)
+        })
         : [];
+    const pinnedSnapshotIds = new Set(Array.isArray(record.setupTransactions)
+        ? record.setupTransactions.filter(isRecord).map(entry => entry.snapshotId).filter((id): id is string => typeof id === "string")
+        : []);
+    snapshots.splice(0, snapshots.length, ...retainSnapshots(snapshots, pinnedSnapshotIds));
 
     const updateLedger = Array.isArray(record.updateLedger)
         ? record.updateLedger.filter(isRecord).flatMap(entry => {
@@ -939,7 +961,7 @@ class SolcordStore extends Store {
             } : {})
         };
         this.#document.snapshots.push(snapshot);
-        this.#document.snapshots.splice(0, Math.max(0, this.#document.snapshots.length - MAX_SNAPSHOTS));
+        this.#document.snapshots = retainSnapshots(this.#document.snapshots, new Set(this.#document.setupTransactions.map(transaction => transaction.snapshotId)));
         return clone(snapshot);
     }
 

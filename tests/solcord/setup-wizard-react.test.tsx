@@ -20,6 +20,12 @@ const manager = {addonList: [], getAddon: () => undefined, resolveAddon: () => u
 mock.module("@modules/solcord/store", () => ({"default": store, SOLCORD_PRESET_ADDONS, SOLCORD_THEMES}));
 mock.module("@modules/pluginmanager", () => ({"default": manager}));
 mock.module("@modules/thememanager", () => ({"default": manager}));
+let finishFailure: Error | undefined;
+const toasts: Array<{kind: string; text: string; forceShow?: boolean;}> = [];
+mock.module("@stores/toasts", () => ({"default": {
+    success: (text: string, options: {forceShow?: boolean;} = {}) => toasts.push({kind: "success", text, forceShow: options.forceShow}),
+    error: (text: string, options: {forceShow?: boolean;} = {}) => toasts.push({kind: "error", text, forceShow: options.forceShow})
+}}));
 mock.module("@modules/solcord/runtime", () => ({"default": {
     addChangeListener: () => {},
 removeChangeListener: () => {},
@@ -27,11 +33,15 @@ removeChangeListener: () => {},
 activityHealth: () => ({status: "fixture"}),
 driftResults: () => [],
     acknowledgeFirstSetupIntent: async () => {},
-    finishSetup: async () => {applied++; return {transactionId: "fixture", enabled: [], quarantined: [], providerConflicts: []};}
+    finishSetup: async () => {
+        applied++;
+        if (finishFailure) throw finishFailure;
+        return {transactionId: "fixture", enabled: ["One"], quarantined: [], providerConflicts: []};
+    }
 }}));
 const {default: SetupWizard} = await import("../../src/betterdiscord/ui/solcord/setup-wizard");
 let root: Root | undefined;
-afterEach(async () => {if (root) await act(async () => root!.unmount()); root = undefined; document.body.replaceChildren(); listeners.clear(); saveFailure = false; applied = 0; documentState = normalizeSolcordDocument(undefined);});
+afterEach(async () => {if (root) await act(async () => root!.unmount()); root = undefined; document.body.replaceChildren(); listeners.clear(); saveFailure = false; applied = 0; finishFailure = undefined; toasts.length = 0; documentState = normalizeSolcordDocument(undefined);});
 
 async function mount() {
     const host = document.createElement("div"); document.body.append(host);
@@ -60,6 +70,34 @@ describe("production First Setup React tree", () => {
         finally {window.confirm = confirm;}
         await act(async () => root!.render(null));
         expect(listeners.size).toBe(0);
+    });
+
+    test("Apply reports its result and its failure where they stay visible after the wizard closes", async () => {
+        const confirm = window.confirm;
+        window.confirm = () => true;
+        try {
+            for (const failure of [undefined, new Error("fixture apply failure")]) {
+                finishFailure = failure;
+                documentState = normalizeSolcordDocument(undefined);
+                const host = await mount();
+                const next = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Continue")!;
+                for (let step = 0; step < 4; step++) await act(async () => next().click());
+                const apply = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Apply")!;
+                await act(async () => apply.click());
+                const last = toasts.at(-1)!;
+                expect(last.forceShow).toBeTrue();
+                if (failure) {expect(last.kind).toBe("error");}
+                else {
+                    expect(last.kind).toBe("success");
+                    expect(last.text).toContain("Setup finished: 1 feature(s) turned on");
+                }
+                expect(host.querySelector("[role=\"status\"]")?.textContent).toBe(last.text);
+                await act(async () => root!.unmount()); root = undefined; document.body.replaceChildren();
+                // A remounted wizard (setup reset to pending after a failure) consumed the published outcome already.
+            }
+        }
+        finally {window.confirm = confirm;}
+        expect(applied).toBe(2);
     });
 
     test("a failed durable step save keeps the current step and displays recovery feedback", async () => {

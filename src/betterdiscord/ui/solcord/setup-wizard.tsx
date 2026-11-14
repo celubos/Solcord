@@ -14,6 +14,31 @@ import {resolveSolcordPerformancePolicy, SOLCORD_PERFORMANCE_POLICIES, SOLCORD_S
 import {SOLCORD_ADDON_GROUPS} from "./catalog";
 import {scrollSolcordSettingsTarget} from "./scroll-owner";
 import SolcordSwitch from "./switch";
+import Toasts from "@stores/toasts";
+import {applyPrivacyProfile} from "@common/solcord/privacy";
+
+// The last Apply outcome outlives the wizard instance that started it.
+let lastSetupOutcome = "";
+const setupOutcomeListeners = new Set<(message: string) => void>();
+function publishSetupOutcome(message: string) {
+    lastSetupOutcome = message;
+    for (const listener of setupOutcomeListeners) listener(message);
+}
+export function takeLastSetupOutcome(): string {
+    const message = lastSetupOutcome;
+    lastSetupOutcome = "";
+    return message;
+}
+/** Overview shows the Apply result after the wizard closes. */
+export function useLastSetupOutcome(): [string, () => void] {
+    const [message, setMessage] = React.useState(takeLastSetupOutcome);
+    React.useEffect(() => {
+        const listener = (next: string) => {setMessage(next); lastSetupOutcome = "";};
+        setupOutcomeListeners.add(listener);
+        return () => {setupOutcomeListeners.delete(listener);};
+    }, []);
+    return [message, () => setMessage("")];
+}
 
 const {useEffect, useMemo, useRef, useState} = React;
 
@@ -196,27 +221,17 @@ function PrivacyStep({draft, onChange}: {draft: SolcordSetupDraft; onChange(valu
     const friendWatch = draft.productPreferences.friendWatch;
     const privacy = draft.productPreferences.privacy;
     const safety = draft.productPreferences.safety;
+    // One definition of each profile: the Privacy panel applies the same values.
     const setPrivacyProfile = (profile: "strict" | "standard") => onChange({
         ...draft,
-        productPreferences: {
-            ...draft.productPreferences,
-            privacy: {
-                ...privacy,
-                profile,
-                telemetry: profile === "strict" ? "block" : "allow",
-                crashReporting: profile === "strict" ? "block-optional" : "allow",
-                activityDiscovery: profile === "strict" ? "block" : "allow",
-                updates: "manual",
-                migrationPending: false
-            }
-        }
+        productPreferences: {...draft.productPreferences, privacy: applyPrivacyProfile(privacy, profile)}
     });
     return <div className="solcord-wizard-body">
         <h3>Choose your privacy baseline</h3>
         <p>Strict Privacy blocks verified optional reporting. Discord essentials keep working.</p>
         <div className="solcord-choice-grid solcord-choice-grid-two">
             <label className="solcord-choice-row"><input type="radio" name="privacy-profile" checked={privacy.profile === "strict"} onChange={() => setPrivacyProfile("strict")} /><span><strong>Strict Privacy</strong><small>Recommended. Optional telemetry, crash reports, game discovery, and automatic Solcord checks stay off.</small></span></label>
-            <label className="solcord-choice-row"><input type="radio" name="privacy-profile" checked={privacy.profile !== "strict"} onChange={() => setPrivacyProfile("standard")} /><span><strong>Standard</strong><small>Discord optional reporting may run. Solcord update checks remain manual.</small></span></label>
+            <label className="solcord-choice-row"><input type="radio" name="privacy-profile" checked={privacy.profile !== "strict"} onChange={() => setPrivacyProfile("standard")} /><span><strong>Standard</strong><small>Discord optional reporting, crash reports, and activity discovery may run, and addon and theme update checks are automatic.</small></span></label>
         </div>
         <h3>Safety tools</h3>
         <div className="solcord-choice-stack">
@@ -331,7 +346,12 @@ export default function SetupWizard() {
     const [step, setStepState] = useState(document.onboarding.lastStep);
     const [draft, setDraftState] = useState<SolcordSetupDraft>(() => draftFrom(document));
     const [busy, setBusy] = useState(false);
-    const [status, setStatus] = useState("");
+    const [status, setStatus] = useState(takeLastSetupOutcome);
+    useEffect(() => {
+        const listener = (message: string) => {setStatus(message); lastSetupOutcome = "";};
+        setupOutcomeListeners.add(listener);
+        return () => {setupOutcomeListeners.delete(listener);};
+    }, []);
     const plan = useMemo(() => resolveSolcordSetupPlan(draft.selectedAddons, draft.addonModes), [draft.addonModes, draft.selectedAddons]);
     useEffect(() => {
         try {SolcordSettings.setSetupDraft(draft);}
@@ -372,11 +392,21 @@ export default function SetupWizard() {
         if (!window.confirm(`Apply ${plan.executableAddons.length} ready feature(s) and activate ${SOLCORD_THEMES.find(theme => theme.id === draft.selectedTheme)?.name}? Existing community plugins stay untouched; Extensions can review replacements later with a separate rollback preview.`)) return;
         setBusy(true);
         setStatus(plan.skipped.length ? `Applying the ready set; ${plan.skipped.length} unavailable choice(s) will be skipped…` : "Applying the ready set and verifying hashes…");
+        // Completing setup unmounts this wizard, and a failure remounts a fresh one,
+        // so the outcome is also published where it stays visible.
         try {
             const result = await SolcordRuntime.finishSetup(draft, undefined, {migrateProviders: false});
-            setStatus(`Finished transaction ${result.transactionId}. ${result.enabled.length} enabled; ${plan.skipped.length} skipped; ${result.quarantined.length} quarantined; ${result.providerConflicts.length} provider conflict(s).`);
+            const summary = `Setup finished: ${result.enabled.length} feature(s) turned on, ${plan.skipped.length} skipped, ${result.quarantined.length} held for review${result.providerConflicts.length ? `, ${result.providerConflicts.length} plugin conflict(s) to review in Extensions` : ""}.`;
+            publishSetupOutcome(summary);
+            setStatus(summary);
+            Toasts.success(summary, {forceShow: true, timeout: 10_000});
         }
-        catch (error) {setStatus(setupFailureMessage(error));}
+        catch (error) {
+            const message = setupFailureMessage(error);
+            publishSetupOutcome(message);
+            setStatus(message);
+            Toasts.error(message, {forceShow: true, timeout: 12_000});
+        }
         finally {
             setBusy(false);
         }

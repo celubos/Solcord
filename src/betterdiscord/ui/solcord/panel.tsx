@@ -13,7 +13,7 @@ import type {SolcordVoiceNotePhase} from "@modules/solcord/native-suite";
 import type {SolcordModuleId, SolcordSetupDraft} from "@modules/solcord/contracts";
 import type {LinkInspection} from "@modules/solcord/link-lens";
 
-import SetupWizard from "./setup-wizard";
+import SetupWizard, {useLastSetupOutcome} from "./setup-wizard";
 import MessageTimelinePanel from "./timeline";
 import PrivacyProtectionPanel from "./privacy";
 import {CatalogBrowser, CuratedAddonSet} from "./addon-catalog";
@@ -28,6 +28,7 @@ import PreferenceSlider from "./slider";
 import AccessibilityOptions from "./accessibility-options";
 import PreferenceTextField from "./text-field";
 import ActionButton from "./action-button";
+import DraftNumberField from "./number-field";
 import {SolcordActionErrorContext, useSolcordAction, useSolcordResultScope, useSolcordWrite} from "./use-action";
 
 const {useEffect, useRef, useState} = React;
@@ -43,6 +44,12 @@ function timestamp(value?: number | string): string {
     if (!value) return "never";
     const date = new Date(value);
     return Number.isNaN(date.valueOf()) ? "unknown" : date.toLocaleString();
+}
+
+function SetupOutcomeNotice() {
+    const [message, dismiss] = useLastSetupOutcome();
+    if (!message) return null;
+    return <div className="solcord-setup-reminder" role="status"><span><strong>Setup result</strong><small>{message}</small></span><button type="button" className="solcord-action solcord-action-neutral" onClick={dismiss}>Dismiss</button></div>;
 }
 
 function Section({title, summary, children}: {title: string; summary?: string; children: React.ReactNode;}) {
@@ -107,9 +114,12 @@ function PluginRecovery() {
     const requestedUnavailable = state.integrity.records.filter(record => record.kind === "addon" && record.status === "missing" && state.curated[record.name]?.selected && !isSolcordBuiltInAddon(record.name, state.curated[record.name]?.mode));
     const retry = async (id: string) => {
         setRetrying(id);
-        const succeeded = await SolcordRuntime.retryQuarantinedAddon(id);
-        setRetryStatus(succeeded ? `${id} passed a fresh integrity audit and started.` : `${id} stayed quarantined because integrity or startup validation did not pass.`);
-        setRetrying(undefined);
+        try {
+            const succeeded = await SolcordRuntime.retryQuarantinedAddon(id);
+            setRetryStatus(succeeded ? `${id} passed a fresh integrity audit and started.` : `${id} stayed quarantined because integrity or startup validation did not pass.`);
+        }
+        catch {setRetryStatus(`${id} could not be checked right now. Nothing was enabled; try again in a moment.`);}
+        finally {setRetrying(undefined);}
     };
     const needsReview = state.integrity.summary.attention + state.integrity.summary.unavailable;
     if (!needsReview && !quarantined.length) {
@@ -261,20 +271,27 @@ function ProfilesAndHistory() {
 
 function StreamShieldControls() {
     const document = useStateFromStores(SolcordSettings, () => SolcordSettings.readonlySnapshot());
+    const enabled = document.modules["stream-shield"].enabled;
     const shield = document.modules["stream-shield"].values;
     const setting = useSolcordWrite((id: SolcordModuleId, key: string, value: unknown) => SolcordRuntime.setValue(id, key, value));
-    return <Section title="Privacy Mode" summary="Preview local redaction before sharing your screen.">
+    // Redaction choices only take effect while the module runs; keep them visibly
+    // inactive instead of saving switches that silently do nothing.
+    const option = (key: string, label: string) => <label key={key}><SolcordSwitch label={label} disabled={!enabled} checked={shield[key] === true} onChange={value => setting("stream-shield", key, value)} /> {label}</label>;
+    return <Section title="Privacy Mode" summary="Hide server, channel, and DM names on your screen before you share it.">
         <div className="solcord-control-grid">
-            <label><SolcordSwitch label="Stream Shield preview" checked={shield.previewActive === true} onChange={value => setting("stream-shield", "previewActive", value)} /> Stream Shield preview</label>
-            <label><SolcordSwitch label="Stream Shield manual state" checked={shield.manualActive === true} onChange={value => setting("stream-shield", "manualActive", value)} /> Stream Shield manual state</label>
-            <label><SolcordSwitch label="Redact guild identity" checked={shield.redactGuilds === true} onChange={value => setting("stream-shield", "redactGuilds", value)} /> Redact guild identity</label>
-            <label><SolcordSwitch label="Redact channel names" checked={shield.redactChannels === true} onChange={value => setting("stream-shield", "redactChannels", value)} /> Redact channel names</label>
-            <label><SolcordSwitch label="Redact DM identity" checked={shield.redactDMs === true} onChange={value => setting("stream-shield", "redactDMs", value)} /> Redact DM identity</label>
-            <label><SolcordSwitch label="Redact notifications" checked={shield.redactNotifications === true} onChange={value => setting("stream-shield", "redactNotifications", value)} /> Redact notifications</label>
-            <label><SolcordSwitch label="Redact local notes" checked={shield.redactNotes === true} onChange={value => setting("stream-shield", "redactNotes", value)} /> Redact local notes</label>
-            <label><SolcordSwitch label="Redact account area" checked={shield.redactAccount === true} onChange={value => setting("stream-shield", "redactAccount", value)} /> Redact account area</label>
+            <label><SolcordSwitch label="Turn on Privacy Mode tools" checked={enabled} onChange={value => SolcordRuntime.setEnabled("stream-shield", value)} /> Turn on Privacy Mode tools</label>
+            {option("previewActive", "Preview redaction")}
+            {option("manualActive", "Privacy Mode on now")}
+            {option("redactGuilds", "Hide server names and icons")}
+            {option("redactChannels", "Hide channel names")}
+            {option("redactDMs", "Hide DM names")}
+            {option("redactNotifications", "Hide notification text")}
+            {option("redactNotes", "Hide local notes")}
+            {option("redactAccount", "Hide your account area")}
         </div>
-        <p className="solcord-key-hint"><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> toggles Privacy Mode when Stream Shield is enabled.</p>
+        <p className="solcord-key-hint">{enabled
+            ? <><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> turns Privacy Mode on or off.</>
+            : "Turn on Privacy Mode tools to choose what is hidden and to use the Ctrl + Alt + Shift + S shortcut."}</p>
     </Section>;
 }
 
@@ -356,11 +373,11 @@ function StreamAudienceGuardAccountControls({state}: {state: ReturnType<typeof r
             <ActionButton onClick={() => add()} disabled={!state.settings.enabled || entries.length >= 100 || !userId.trim()}>Add locally</ActionButton>
         </div>
         {entries.length > 0 ? <div className="solcord-audience-list" aria-label="Denied stream audience">
-            {entries.map(entry => <div key={entry.userId} className="solcord-audience-row"><div><strong>{entry.label || `Discord user •${entry.userId.slice(-4)}`}</strong><small>Account-private entry · ID ending {entry.userId.slice(-4)}</small></div><ActionButton disabled={state.runtime.armed} onClick={() => SolcordRuntime.setAudienceGuardEntries(entries.filter(item => item.userId !== entry.userId), state.accountGeneration)}>Remove</ActionButton></div>)}
+            {entries.map(entry => <div key={entry.userId} className="solcord-audience-row"><div><strong>{entry.label || `Discord user •${entry.userId.slice(-4)}`}</strong><small>Account-private entry · ID ending {entry.userId.slice(-4)}</small></div><ActionButton disabled={state.runtime.armed} onClick={async () => {if (!await SolcordRuntime.setAudienceGuardEntries(entries.filter(item => item.userId !== entry.userId), state.accountGeneration)) setActionStatus("That entry could not be removed from private storage. Try again.");}}>Remove</ActionButton></div>)}
         </div> : <p className="solcord-empty">No denied users are stored for this Discord account.</p>}
         <div className="solcord-actions">
             {state.runtime.armed ? <ActionButton tone="danger" onClick={() => {SolcordRuntime.disarmAudienceGuard(); setActionStatus("Audience Guard disarmed.");}}>Disarm</ActionButton> : <ActionButton tone="accent" disabled={!state.armReadiness.ready} onClick={arm}>Arm for this call</ActionButton>}
-            <ActionButton tone="danger" disabled={!entries.length || state.runtime.armed} onClick={() => {if (accountIsCurrent() && window.confirm("Clear this account's private Stream Audience Guard denylist?")) return SolcordRuntime.clearAudienceGuardEntries(state.accountGeneration);}}>Clear private list</ActionButton>
+            <ActionButton tone="danger" disabled={!entries.length || state.runtime.armed} onClick={async () => {if (accountIsCurrent() && window.confirm("Clear this account's private Stream Audience Guard denylist?")) setActionStatus(await SolcordRuntime.clearAudienceGuardEntries(state.accountGeneration) ? "This account's private denylist was cleared." : "The private denylist was not cleared. Try again.");}}>Clear private list</ActionButton>
         </div>
         <p className="solcord-key-hint">{storageMessage} {state.runtime.detail}</p>
         {actionStatus && <p role="status" className="solcord-import-status">{actionStatus}</p>}
@@ -847,7 +864,7 @@ function NativeSuiteAccountPanel({scope, state}: {scope: NativeSuiteScope; state
             {unavailableStatuses.length > 0 && <details className="solcord-native-unavailable-list"><summary>{unavailableStatuses.length} unavailable on this Discord build</summary>{unavailableStatuses.map(item => <div key={item.id}><strong>{item.title}</strong><span>{item.detail}</span></div>)}</details>}
         </>}
         {scope !== "status" && <>
-            {scope === "voice" && <div className="solcord-setting-list"><label className="solcord-setting-row"><span><strong>Voice Health</strong><small>Samples cached connection quality every five seconds while enabled. Never records audio.</small></span><SolcordSwitch label="Enable Voice Health" checked={nativePreferences.voiceHealthEnabled} onChange={value => updateNativePreferences({...nativePreferences, voiceHealthEnabled: value})} /></label><details className="solcord-secondary-tools"><summary>Voice indicator surfaces</summary><div className="solcord-control-grid">{([["memberList", "Member list"], ["dmList", "DM list"], ["peopleList", "Friends list"], ["highlightCurrentChannel", "Highlight current call"], ["statusIcons", "Speaking/status detail"], ["currentUser", "Show my indicator"]] as const).map(([key, label]) => <label key={key}><SolcordSwitch label={label} checked={nativePreferences.voiceActivity[key]} onChange={value => updateNativePreferences({...nativePreferences, voiceActivity: {...nativePreferences.voiceActivity, [key]: value}})} /> {label}</label>)}</div>{voiceContext && <div className="solcord-actions">{peopleSnapshot?.ignoredVoiceChannelIds.includes(voiceContext.channelId) ? <ActionButton onClick={() => {controller?.includeVoiceChannel(voiceContext.channelId); setActionStatus("Voice indicators restored for this call.");}}>Show this call</ActionButton> : <ActionButton onClick={() => {controller?.ignoreVoiceChannel(voiceContext.channelId); setActionStatus("Voice indicators hidden for this call on this account.");}}>Hide this call</ActionButton>}{voiceContext.guildId && (peopleSnapshot?.ignoredVoiceGuildIds.includes(voiceContext.guildId) ? <ActionButton onClick={() => {controller?.includeVoiceGuild(voiceContext.guildId!); setActionStatus("Voice indicators restored for this server.");}}>Show this server</ActionButton> : <ActionButton onClick={() => {controller?.ignoreVoiceGuild(voiceContext.guildId!); setActionStatus("Voice indicators hidden for this server on this account.");}}>Hide this server</ActionButton>)}</div>}</details></div>}
+            {scope === "voice" && <div className="solcord-setting-list"><label className="solcord-setting-row"><span><strong>Voice Health</strong><small>Samples cached connection quality every five seconds while enabled. Never records audio.</small></span><SolcordSwitch label="Enable Voice Health" checked={nativePreferences.voiceHealthEnabled} onChange={value => updateNativePreferences({...nativePreferences, voiceHealthEnabled: value})} /></label><details className="solcord-secondary-tools"><summary>Voice indicator surfaces</summary><div className="solcord-control-grid">{([["memberList", "Member list"], ["dmList", "DM list"], ["peopleList", "Friends list"], ["highlightCurrentChannel", "Highlight current call"], ["statusIcons", "Speaking/status detail"], ["currentUser", "Show my indicator"]] as const).map(([key, label]) => <label key={key}><SolcordSwitch label={label} checked={nativePreferences.voiceActivity[key]} onChange={value => updateNativePreferences({...nativePreferences, voiceActivity: {...nativePreferences.voiceActivity, [key]: value}})} /> {label}</label>)}</div>{voiceContext && <div className="solcord-actions">{peopleSnapshot?.ignoredVoiceChannelIds.includes(voiceContext.channelId) ? <ActionButton onClick={() => {controller?.includeVoiceChannel(voiceContext.channelId); setPeopleSnapshot(controller?.peopleSnapshot()); setActionStatus("Voice indicators restored for this call.");}}>Show this call</ActionButton> : <ActionButton onClick={() => {controller?.ignoreVoiceChannel(voiceContext.channelId); setPeopleSnapshot(controller?.peopleSnapshot()); setActionStatus("Voice indicators hidden for this call on this account.");}}>Hide this call</ActionButton>}{voiceContext.guildId && (peopleSnapshot?.ignoredVoiceGuildIds.includes(voiceContext.guildId) ? <ActionButton onClick={() => {controller?.includeVoiceGuild(voiceContext.guildId!); setPeopleSnapshot(controller?.peopleSnapshot()); setActionStatus("Voice indicators restored for this server.");}}>Show this server</ActionButton> : <ActionButton onClick={() => {controller?.ignoreVoiceGuild(voiceContext.guildId!); setPeopleSnapshot(controller?.peopleSnapshot()); setActionStatus("Voice indicators hidden for this server on this account.");}}>Hide this server</ActionButton>)}</div>}</details></div>}
             {attentionScopeStatus.length > 0 && <div className="solcord-native-context-status" role="list" aria-label={`${sectionTitle} needing attention`}>{attentionScopeStatus.map(item => <div role="listitem" key={item.id}><span>{item.title}</span><strong className={`solcord-capability solcord-capability-${item.maturity}`}>{stateLabel[item.maturity]}</strong><small>{item.detail}</small></div>)}</div>}
             {scopeStatus.every(item => item.maturity === "off") && <p className="solcord-empty">No built-in tools are on. Use the switches above to enable only what you want.</p>}
             {!usableScopeStatus.length && unsupportedScopeStatus.length > 0 && <p className="solcord-empty">These tools are unavailable on this Discord build, so no inactive controls are shown.</p>}
@@ -856,10 +873,10 @@ function NativeSuiteAccountPanel({scope, state}: {scope: NativeSuiteScope; state
                 <div className="solcord-catalog-tools">
                     <label>Reply modifier<select value={nativePreferences.composer.doubleClickReplyModifier} onChange={event => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, doubleClickReplyModifier: event.currentTarget.value as typeof nativePreferences.composer.doubleClickReplyModifier}})}><option value="none">None</option><option value="ctrl">Ctrl</option><option value="shift">Shift</option><option value="alt">Alt</option></select></label>
                     <label>Split boundary<select value={nativePreferences.composer.splitBoundary} onChange={event => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, splitBoundary: event.currentTarget.value as typeof nativePreferences.composer.splitBoundary}})}><option value="balanced">Newlines, then words</option><option value="newlines">Prefer newlines</option></select></label>
-                    <label>Part limit<input type="number" min="1000" max="4000" value={nativePreferences.composer.splitLimit} onChange={event => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, splitLimit: Number(event.currentTarget.value)}})} /></label>
-                    <label>Maximum parts<input type="number" min="0" max="20" value={nativePreferences.composer.maxSplitParts} onChange={event => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, maxSplitParts: Number(event.currentTarget.value)}})} /></label>
-                    <label>Text-file threshold<input type="number" min="0" max="64000" value={nativePreferences.composer.attachmentThreshold} onChange={event => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, attachmentThreshold: Number(event.currentTarget.value)}})} /></label>
-                    <label>Counter warning %<input type="number" min="50" max="100" value={nativePreferences.composer.counterWarningPercent} onChange={event => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, counterWarningPercent: Number(event.currentTarget.value)}})} /></label>
+                    <DraftNumberField label="Part limit" min={1000} max={4000} value={nativePreferences.composer.splitLimit} onCommit={value => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, splitLimit: value}})} />
+                    <DraftNumberField label="Maximum parts" min={0} max={20} value={nativePreferences.composer.maxSplitParts} onCommit={value => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, maxSplitParts: value}})} />
+                    <DraftNumberField label="Text-file threshold" min={0} max={64000} value={nativePreferences.composer.attachmentThreshold} onCommit={value => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, attachmentThreshold: value}})} />
+                    <DraftNumberField label="Counter warning %" min={50} max={100} value={nativePreferences.composer.counterWarningPercent} onCommit={value => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, counterWarningPercent: value}})} />
                     <label>Timestamp tooltip<select value={nativePreferences.composer.timestampFormat} onChange={event => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, timestampFormat: event.currentTarget.value as typeof nativePreferences.composer.timestampFormat}})}><option value="full">Full</option><option value="compact">Compact</option><option value="iso">ISO</option></select></label>
                     <label className="solcord-setting-row"><span><strong>Preserve blank lines</strong></span><SolcordSwitch label="Preserve blank lines" checked={nativePreferences.composer.preserveBlankLines} onChange={value => updateNativePreferences({...nativePreferences, composer: {...nativePreferences.composer, preserveBlankLines: value}})} /></label>
                 </div>
@@ -986,6 +1003,21 @@ function PerformanceControls() {
     return <Section title="Performance HUD" summary="Bounded local samples report event-loop and owned-resource measurements only while the overlay is visible.">
         <label><SolcordSwitch label="Show the local performance overlay" checked={values.showOverlay === true} onChange={value => SolcordRuntime.setValue("performance-hud", "showOverlay", value)} /> Show the local performance overlay</label>
         <p className="solcord-key-hint">When hidden, the sampler owns no recurring timer. <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>K</kbd> opens Command Deck.</p>
+    </Section>;
+}
+
+/** Setup offers these once; they stay reachable here afterwards. */
+function SafetyToolSwitches() {
+    const safety = useStateFromStores(SolcordSettings, () => SolcordSettings.slice("productPreferences").safety);
+    const update = useSolcordWrite((patch: {linkLens?: boolean; attachmentGuard?: boolean;}) => {
+        const current = SolcordSettings.slice("productPreferences");
+        return SolcordRuntime.setProductPreferences({...current, safety: {...current.safety, ...patch}});
+    });
+    return <Section title="Safety tools" summary="Local checks before you open a link or upload a file. Nothing is sent anywhere.">
+        <div className="solcord-control-grid">
+            <label><SolcordSwitch label="Review links before opening them" checked={safety.linkLens} onChange={value => update({linkLens: value})} /> Review links before opening them (Link Lens)</label>
+            <label><SolcordSwitch label="Review files before uploading them" checked={safety.attachmentGuard} onChange={value => update({attachmentGuard: value})} /> Review files before uploading them</label>
+        </div>
     </Section>;
 }
 
@@ -1199,9 +1231,7 @@ function ScreenshotScrubber() {
         </div>
         <fieldset className="solcord-region-grid" disabled={!loaded || loading}>
             <legend>Keyboard redaction region (percent)</legend>
-            {(["x", "y", "width", "height"] as const).map(key => <label key={key}>{key === "x" || key === "y" ? key.toUpperCase() : key}
-                <input type="number" min={key === "width" || key === "height" ? 1 : 0} max={key === "x" || key === "y" ? 99 : 100} value={region[key]} onChange={event => setRegionValue(key, event.currentTarget.value)} />
-            </label>)}
+            {(["x", "y", "width", "height"] as const).map(key => <DraftNumberField key={key} label={key === "x" || key === "y" ? key.toUpperCase() : key} min={key === "width" || key === "height" ? 1 : 0} max={key === "x" || key === "y" ? 99 : 100} value={region[key]} onCommit={value => setRegionValue(key, String(value))} />)}
             <ActionButton onClick={applyTypedRegion} disabled={!loaded}>Apply {mode}</ActionButton>
         </fieldset>
         <canvas
@@ -1405,6 +1435,7 @@ function AppearanceWorkspace() {
 
 function FriendWatchPanel() {
     const state = useStateFromStores([SolcordSettings, SolcordRuntime], () => ({preferences: SolcordSettings.slice("productPreferences"), events: SolcordRuntime.friendWatchEvents(), persistent: SolcordRuntime.friendWatchPersistent()}));
+    const [friendStatus, setFriendStatus] = useState("");
     const policy = state.preferences.friendWatch;
     const storageDescription = !policy.enabled
         ? "Off. No relationship history is stored."
@@ -1426,7 +1457,8 @@ function FriendWatchPanel() {
                 <label className="solcord-setting-row"><span><strong>Retention</strong><small>Older entries are removed automatically.</small></span><select value={policy.retentionDays} onChange={event => update({retentionDays: Number(event.currentTarget.value) as 7 | 30 | 90})}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select></label>
                 <label className="solcord-setting-row"><span><strong>Notifications</strong><small>Local summaries only.</small></span><select value={policy.digest} onChange={event => update({digest: event.currentTarget.value as typeof policy.digest})}><option value="off">Off</option><option value="daily">Daily</option><option value="per-event">Per event</option></select></label>
             </div></details>
-            {state.events.length > 0 && <div className="solcord-actions"><ActionButton onClick={() => SolcordRuntime.exportFriendWatch("json")}>Export JSON</ActionButton><ActionButton onClick={() => SolcordRuntime.exportFriendWatch("csv")}>Export CSV</ActionButton><ActionButton tone="danger" onClick={() => {if (window.confirm("Clear this account's local Friend Watch history?")) return SolcordRuntime.clearFriendWatch();}}>Clear history</ActionButton></div>}
+            {state.events.length > 0 && <div className="solcord-actions"><ActionButton onClick={async () => setFriendStatus(await SolcordRuntime.exportFriendWatch("json") ? "Friend Watch JSON export downloaded." : "The export could not be written. Try again after Discord finishes signing in.")}>Export JSON</ActionButton><ActionButton onClick={async () => setFriendStatus(await SolcordRuntime.exportFriendWatch("csv") ? "Friend Watch CSV export downloaded." : "The export could not be written. Try again after Discord finishes signing in.")}>Export CSV</ActionButton><ActionButton tone="danger" onClick={async () => {if (window.confirm("Clear this account's local Friend Watch history?")) setFriendStatus(await SolcordRuntime.clearFriendWatch() ? "Friend Watch history was cleared for this account." : "Friend Watch history was not cleared. Try again.");}}>Clear history</ActionButton></div>}
+            {friendStatus && <p role="status" className="solcord-import-status">{friendStatus}</p>}
             <div className="solcord-people-history" aria-label="Friend Watch relationship history">{state.events.slice(-100).reverse().map(event => <article key={event.eventId}><div><strong>{event.transition === "reconciled" ? "Account scope" : event.displayLabel ?? `Local relationship •${(event.subjectKey ?? event.subjectId).slice(-4)}`}</strong><span>{event.label}</span></div><small>{timestamp(event.observedAt)} · {event.source} · {event.confidence}</small></article>)}{!state.events.length && <p className="solcord-empty">No relationship change has been observed yet.</p>}</div>
         </>}
     </Section>;
@@ -1450,7 +1482,7 @@ function ReturnLaterPanel() {
         </div>
         {status && <p role="status" className="solcord-import-status">{status}</p>}
         <p className="solcord-key-hint">From any specific DM or channel, press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>K</kbd> and choose Save current DM or channel for later. Routes and labels stay only in memory for this account.</p>
-        <div className="solcord-people-history" aria-label="Return Later reminders">{items.map(item => <article key={item.id}><div><strong>{item.label}</strong><span>Due {timestamp(item.dueAt)}</span></div><div className="solcord-actions"><ActionButton onClick={() => SolcordRuntime.openReturnLater(item.id)}>Open</ActionButton><ActionButton onClick={() => SolcordRuntime.snoozeReturnLater(item.id, 24 * 60 * 60 * 1_000)}>Snooze one day</ActionButton><ActionButton onClick={() => SolcordRuntime.completeReturnLater(item.id)}>Complete</ActionButton></div></article>)}{!items.length && <p className="solcord-empty">No session reminder is due. Open a DM or channel and save that view when you want to return.</p>}</div>
+        <div className="solcord-people-history" aria-label="Return Later reminders">{items.map(item => <article key={item.id}><div><strong>{item.label}</strong><span>Due {timestamp(item.dueAt)}</span></div><div className="solcord-actions"><ActionButton onClick={() => {if (!SolcordRuntime.openReturnLater(item.id)) setStatus("That reminder could not be opened. Discord's in-app navigation is unavailable or the saved view is no longer valid.");}}>Open</ActionButton><ActionButton onClick={() => {if (!SolcordRuntime.snoozeReturnLater(item.id, 24 * 60 * 60 * 1_000)) setStatus("That reminder was not snoozed. It may have already been completed.");}}>Snooze one day</ActionButton><ActionButton onClick={() => {if (!SolcordRuntime.completeReturnLater(item.id)) setStatus("That reminder was not completed. It may have already been removed.");}}>Complete</ActionButton></div></article>)}{!items.length && <p className="solcord-empty">No session reminder is due. Open a DM or channel and save that view when you want to return.</p>}</div>
     </Section>;
 }
 
@@ -1601,11 +1633,12 @@ export default function SolcordPanel() {
                 <header className="solcord-workspace-heading"><h2 tabIndex={-1}>{selectedWorkspace.label}</h2><p>{selectedWorkspace.summary}</p></header>
                 {workspace === "overview" && <>
                     {onboarding.status === "skipped" && <div className="solcord-setup-reminder"><span><strong>Setup is saved for later.</strong><small>Nothing changed. Resume whenever you are ready.</small></span><ActionButton onClick={openSetup}>Resume</ActionButton></div>}
+                    <SetupOutcomeNotice />
                     <SessionPulse openWorkspace={setWorkspace} openSetup={openSetup} />
                 </>}
                 {workspace === "appearance" && <><AppearanceWorkspace /><BuiltInFeatureSwitches scope="appearance" /></>}
                 {workspace === "performance" && <><PerformanceProfileControls /><PerformanceControls /></>}
-                {workspace === "privacy" && <><PrivacyProtectionPanel /><BuiltInFeatureSwitches scope="privacy" /><StreamShieldControls /><LinkWorkbench />{productPreferences.safety.attachmentGuard && <AttachmentGuardWorkbench />}<ScreenshotScrubber /><div className="solcord-all-clear"><strong>Deleted and edited messages</strong><span>Message History has its own section with search, filters, export, and erase controls.</span><ActionButton onClick={() => setWorkspace("history")}>Open Message History</ActionButton></div></>}
+                {workspace === "privacy" && <><PrivacyProtectionPanel /><BuiltInFeatureSwitches scope="privacy" /><SafetyToolSwitches /><StreamShieldControls /><LinkWorkbench />{productPreferences.safety.attachmentGuard && <AttachmentGuardWorkbench />}<ScreenshotScrubber /><div className="solcord-all-clear"><strong>Deleted and edited messages</strong><span>Message History has its own section with search, filters, export, and erase controls.</span><ActionButton onClick={() => setWorkspace("history")}>Open Message History</ActionButton></div></>}
                 {workspace === "chat" && <><BaselineToolsPanel /><BuiltInFeatureSwitches scope="chat" /><NativeSuitePanel key="chat" scope="chat" /><ReturnLaterPanel /></>}
                 {workspace === "history" && <MessageTimelinePanel />}
                 {workspace === "voice" && <><ActivityBridge /><BuiltInFeatureSwitches scope="voice" /><FakeDeafenControls /><NativeSuitePanel key="voice" scope="voice" /><StreamAudienceGuardControls /></>}
