@@ -362,10 +362,10 @@ function StreamAudienceGuardAccountControls({state}: {state: ReturnType<typeof r
             <span className={`solcord-status solcord-status-${state.runtime.phase === "armed" ? "active" : state.runtime.phase === "attention" || state.runtime.phase === "unavailable" ? "failed" : "starting"}`}>{state.runtime.phase}</span>
         </div>
         <div className="solcord-control-grid">
-            <label><SolcordSwitch label="Enable Stream Audience Guard adapter" checked={state.settings.enabled} onChange={value => SolcordRuntime.setEnabled("stream-audience-guard", value)} /> Enable validated adapter</label>
-            <label><SolcordSwitch label="Prevent stream start" checked={state.settings.values.preventStart === true} disabled={!state.settings.enabled || state.runtime.armed} onChange={value => setMode("preventStart", value)} /> Prevent Start</label>
-            <label><SolcordSwitch label="Stop stream when a denied user joins" checked={state.settings.values.stopOnJoin === true} disabled={!state.settings.enabled || state.runtime.armed} onChange={value => setMode("stopOnJoin", value)} /> Stop on Join</label>
-            <label><SolcordSwitch label="Stop stream when a denied user watches" checked={state.settings.values.stopOnWatch === true} disabled={!state.settings.enabled || state.runtime.armed} onChange={value => setMode("stopOnWatch", value)} /> Stop on Watch</label>
+            <label><SolcordSwitch label="Turn on Stream Audience Guard" checked={state.settings.enabled} onChange={value => SolcordRuntime.setEnabled("stream-audience-guard", value)} /> Turn on Stream Audience Guard</label>
+            <label><SolcordSwitch label="Prevent stream start" checked={state.settings.values.preventStart === true} disabled={!state.settings.enabled || state.runtime.armed} onChange={value => setMode("preventStart", value)} /> Prevent stream start</label>
+            <label><SolcordSwitch label="Stop stream when a denied user joins" checked={state.settings.values.stopOnJoin === true} disabled={!state.settings.enabled || state.runtime.armed} onChange={value => setMode("stopOnJoin", value)} /> Stop stream when a denied user joins</label>
+            <label><SolcordSwitch label="Stop stream when a denied user watches" checked={state.settings.values.stopOnWatch === true} disabled={!state.settings.enabled || state.runtime.armed} onChange={value => setMode("stopOnWatch", value)} /> Stop stream when a denied user watches</label>
         </div>
         <div className="solcord-inline-field solcord-audience-add">
             <input value={userId} inputMode="numeric" maxLength={20} placeholder="Discord user ID" aria-label="Denied Discord user ID" onChange={event => setUserId(event.currentTarget.value.replace(/\D/g, ""))} />

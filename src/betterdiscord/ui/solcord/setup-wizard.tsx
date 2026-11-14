@@ -278,9 +278,9 @@ function AddonStep({draft, toggle, selectRecommended}: {draft: SolcordSetupDraft
                 <legend><span>{group.title}</span><small>{group.summary}</small></legend>
                 {group.addons.map(addon => {
                     return <label key={addon.name} className="solcord-addon-choice">
-                            <SolcordSwitch label={`${selected.has(addon.name) ? "Disable" : "Enable"} ${addon.name}`} checked={selected.has(addon.name)} onChange={value => toggle(addon.name, value)} />
+                            <SolcordSwitch label={`Include ${addon.label}`} checked={selected.has(addon.name)} onChange={value => toggle(addon.name, value)} />
                             <span><strong>{addon.label}</strong><small>{addon.summary}</small></span>
-                            <span className="solcord-review-chip">Runtime check pending</span>
+                            <span className="solcord-review-chip">Checked when turned on</span>
                         </label>;
                 })}
             </fieldset>)}
