@@ -891,9 +891,15 @@ internal sealed class InstallerForm : Form
         using var timer = new System.Windows.Forms.Timer {Interval = 10};
         timer.Tick += (_, _) => ticks++;
         timer.Start();
+        // Warm the synchronous status path first so a slow CI runner's first-call
+        // JIT and font work are not mistaken for engine work on the UI thread.
+        form.SetState("Ready", "Warm-up", "Warm-up", StateTone.Protected, null);
+        form.UpdateInteractionState();
+        // The engine work takes 1.5 s; returning within 0.75 s proves it ran off the UI thread.
         var returned = System.Diagnostics.Stopwatch.StartNew();
-        form.RunAction("Fixture delayed engine", () => {Thread.Sleep(350); return "Fixture operation completed.";});
-        if (returned.ElapsedMilliseconds > 150 || !form._busy) throw new InvalidDataException("installer-responsiveness: engine work blocked the UI handler");
+        form.RunAction("Fixture delayed engine", () => {Thread.Sleep(1500); return "Fixture operation completed.";});
+        long handlerMs = returned.ElapsedMilliseconds;
+        if (handlerMs > 750 || !form._busy) throw new InvalidDataException($"installer-responsiveness: engine work blocked the UI handler ({handlerMs} ms, busy={form._busy})");
         var closing = new FormClosingEventArgs(CloseReason.UserClosing, false);
         form.OnFormClosing(closing);
         if (!closing.Cancel) throw new InvalidDataException("installer-responsiveness: close bypassed the active transaction");
@@ -953,7 +959,8 @@ internal sealed class InstallerForm : Form
         using var release = new ManualResetEventSlim();
         var returned = System.Diagnostics.Stopwatch.StartNew();
         Task previous = form.RefreshInstallationStateAsync(_ => {release.Wait(2000); return new(false, false, true, false, false);});
-        if (returned.ElapsedMilliseconds > 150 || form._primaryAction.Enabled || form._verifyAction.Enabled || form._actions.Values.Any(action => action.Button.Enabled))
+        // The check blocks for up to 2 s; returning within 0.75 s proves it ran off the UI thread.
+        if (returned.ElapsedMilliseconds > 750 || form._primaryAction.Enabled || form._verifyAction.Enabled || form._actions.Values.Any(action => action.Button.Enabled))
             throw new InvalidDataException("installer-target-readiness: old-target action remained available during a new check");
         if (!form._refreshTargetsAction.Enabled || !form._closeAction.Enabled)
             throw new InvalidDataException("installer-target-readiness: read-only check trapped refresh or Close");
