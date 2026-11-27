@@ -15,8 +15,8 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 | Persistent tracked files | 765 |
 | Text files scanned | 750 |
 | Binary files classified | 15 |
-| Text lines scanned | 150,466 |
-| Custom Solcord lines | 68,528 |
+| Text lines scanned | 150,485 |
+| Custom Solcord lines | 68,542 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -28,7 +28,7 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | TODO / FIXME / HACK | 30 | 4 |
 | Timer calls | 87 | 47 |
 | Mutation observers | 28 | 21 |
-| DOM queries | 380 | 282 |
+| DOM queries | 381 | 282 |
 | Webpack discovery calls | 87 | 12 |
 | Patch calls | 31 | 11 |
 | Synchronous filesystem calls | 1,150 | 1,008 |
@@ -42,14 +42,14 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 1 | `src/betterdiscord/modules/solcord/runtime.ts` | 5,165 | 313.2 KiB |
 | 2 | `src/betterdiscord/modules/solcord/native-suite.ts` | 2,340 | 143.5 KiB |
 | 3 | `tests/solcord/storage-security.test.ts` | 1,664 | 99.4 KiB |
-| 4 | `src/betterdiscord/ui/solcord/panel.tsx` | 1,659 | 160.5 KiB |
+| 4 | `src/betterdiscord/ui/solcord/panel.tsx` | 1,659 | 160.7 KiB |
 | 5 | `scripts/prepare-solcord-disposable-acceptance.ts` | 1,630 | 75.8 KiB |
 | 6 | `tests/solcord/native-suite-security.test.ts` | 1,488 | 78.2 KiB |
-| 7 | `src/betterdiscord/styles/solcord.css` | 1,338 | 100.2 KiB |
+| 7 | `src/betterdiscord/styles/solcord.css` | 1,339 | 100.4 KiB |
 | 8 | `bun.lock` | 1,301 | 140.2 KiB |
 | 9 | `src/betterdiscord/modules/solcord/store.ts` | 1,224 | 64.6 KiB |
 | 10 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,222 | 82.5 KiB |
-| 11 | `CHANGELOG.md` | 1,221 | 48.8 KiB |
+| 11 | `CHANGELOG.md` | 1,222 | 49.0 KiB |
 | 12 | `tests/solcord/disposable-acceptance.test.ts` | 1,211 | 58.4 KiB |
 | 13 | `tests/common/i18n.test.ts` | 1,170 | 46.4 KiB |
 | 14 | `installer/Solcord.Installer/InstallerForm.cs` | 1,152 | 70.2 KiB |
@@ -67,10 +67,10 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 1 | `src/betterdiscord/modules/solcord/runtime.ts` | 5,165 | 313.2 KiB |
 | 2 | `src/betterdiscord/modules/solcord/native-suite.ts` | 2,340 | 143.5 KiB |
 | 3 | `tests/solcord/storage-security.test.ts` | 1,664 | 99.4 KiB |
-| 4 | `src/betterdiscord/ui/solcord/panel.tsx` | 1,659 | 160.5 KiB |
+| 4 | `src/betterdiscord/ui/solcord/panel.tsx` | 1,659 | 160.7 KiB |
 | 5 | `scripts/prepare-solcord-disposable-acceptance.ts` | 1,630 | 75.8 KiB |
 | 6 | `tests/solcord/native-suite-security.test.ts` | 1,488 | 78.2 KiB |
-| 7 | `src/betterdiscord/styles/solcord.css` | 1,338 | 100.2 KiB |
+| 7 | `src/betterdiscord/styles/solcord.css` | 1,339 | 100.4 KiB |
 | 8 | `src/betterdiscord/modules/solcord/store.ts` | 1,224 | 64.6 KiB |
 | 9 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,222 | 82.5 KiB |
 | 10 | `tests/solcord/disposable-acceptance.test.ts` | 1,211 | 58.4 KiB |

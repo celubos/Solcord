@@ -8,6 +8,7 @@
 - Setup keeps a current copy of itself with a **Solcord Setup** Start menu entry and a **Solcord** entry in Settings → Apps; uninstall removes them.
 - The Solcord shortcut uses Discord's current launcher, and a shortcut orphaned by an interrupted older Setup is repaired instead of blocking updates to it.
 - Consolidated duplicated installer path-safety, atomic-write and channel code.
+- Control Center: readable light-mode privacy states, plain-language privacy and status text, a neutral Fake Deafen "off" state, the current workspace in narrow layouts, and fixed logo spacing, option affordance and scrollbar colours.
 
 ## 2.0.2 - Message History and Discord updates
 
