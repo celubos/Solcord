@@ -61,7 +61,7 @@
 .solcord-control-center-dialog-header h2 { margin: 0; font: 600 16px var(--font-primary, sans-serif); color: var(--sc-text); }
 .solcord-control-center-dialog-header button { min-height: 32px; padding: 6px 12px; color: var(--sc-text); background: var(--interactive-background-hover, var(--background-modifier-hover, transparent)); border: 1px solid var(--border-subtle, #555555); border-radius: 4px; cursor: pointer; }
 .solcord-control-center-dialog-header button:focus-visible { outline: 2px solid var(--sc-focus, #4ECDC4); outline-offset: 2px; }
-.solcord-control-center-dialog-content { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
+.solcord-control-center-dialog-content { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; scrollbar-color: var(--sc-border-strong) transparent; }
 .solcord-panel.solcord-density-compact { --sc-space-3: 9px; --sc-space-4: 12px; --sc-space-5: 18px; }
 .solcord-panel.solcord-density-compact .solcord-workspace-nav button { min-height: 32px; padding-block: 6px; }
 .solcord-panel.solcord-density-compact .solcord-section { padding-block: 14px 16px; }
@@ -515,7 +515,7 @@ html[data-solcord-effective-motion="subtle"] .solcord-panel :is(button, input, s
 .solcord-workspace-heading h2 { margin: 0 0 8px; font-family: var(--font-primary, var(--sc-font-body)); font-size: clamp(20px, 2.4vw, 24px); font-weight: 700; line-height: 1.15; letter-spacing: -0.015em; }
 .solcord-workspace-heading p { max-width: 64ch; margin: 0; color: var(--sc-muted); font-size: 13px; line-height: 1.45; }
 .solcord-segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: var(--sc-space-3) 0; }
-.solcord-segmented button { display: grid; gap: 6px; min-height: 72px; padding: 11px 12px; color: var(--sc-text); background: transparent; border: 0; border-radius: 4px; text-align: left; cursor: pointer; }
+.solcord-segmented button { display: grid; gap: 6px; min-height: 72px; padding: 11px 12px; color: var(--sc-text); background: transparent; border: 0; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--sc-border); text-align: left; cursor: pointer; }
 .solcord-segmented button:hover { background: var(--sc-surface-1); }
 .solcord-segmented button[aria-checked="true"] { background: color-mix(in srgb, var(--sc-accent) 12%, var(--sc-surface-1)); box-shadow: inset 0 -3px var(--sc-accent); }
 .solcord-segmented small { color: var(--sc-muted); line-height: 1.35; }
@@ -651,6 +651,7 @@ html[data-solcord-mode="solcord-light"] .solcord-local-overlay select option { c
 .solcord-status-failed,
 .solcord-status-quarantined { color: var(--solcord-danger-text, var(--solcord-coral)); }
 .solcord-status-starting { color: var(--solcord-warning-text, var(--solcord-amber)); }
+.solcord-status-idle { color: var(--sc-muted); }
 .solcord-maturity { color: var(--text-muted); }
 .solcord-toggle { display: grid; justify-items: center; gap: 5px; min-width: 50px; font-size: 11px; color: var(--text-muted); }
 .solcord-actions,
@@ -1182,9 +1183,9 @@ button.solcord-fake-deafen-button:disabled { cursor: wait; opacity: 0.58; }
 .solcord-privacy-capabilities > div > span:first-child { display: grid; gap: 2px; text-transform: capitalize; }
 .solcord-privacy-capabilities small { color: var(--sc-muted); text-transform: none; }
 .solcord-privacy-state { font-size: 12px; font-weight: 750; letter-spacing: 0.01em; line-height: 1.25; }
-.solcord-privacy-state-protected { color: color-mix(in srgb, var(--sc-success) 58%, var(--sc-text)); }
+.solcord-privacy-state-protected { color: var(--sc-app-positive, var(--text-feedback-positive, color-mix(in srgb, var(--sc-success) 58%, var(--sc-text)))); }
 .solcord-privacy-state-needsreview,
-.solcord-privacy-state-degraded { color: color-mix(in srgb, var(--sc-warning) 58%, var(--sc-text)); }
+.solcord-privacy-state-degraded { color: var(--sc-app-warning, var(--text-feedback-warning, color-mix(in srgb, var(--sc-warning) 58%, var(--sc-text)))); }
 .solcord-privacy-state-unsupported { color: var(--sc-muted); }
 .solcord-experimental { margin-top: 18px; padding-top: 14px; border: 0; border-top: 1px solid var(--sc-border); }
 .solcord-experimental > .solcord-eyebrow { margin: 0 0 4px; color: var(--sc-warning); }
@@ -1240,7 +1241,7 @@ button.solcord-fake-deafen-button:disabled { cursor: wait; opacity: 0.58; }
 
 @container solcord-panel (max-width: 520px) {
     .solcord-panel { padding-right: 14px; padding-left: 14px; }
-    .solcord-header { align-items: flex-start; gap: 12px; }
+    .solcord-header { grid-template-columns: 48px minmax(0, 1fr); align-items: flex-start; gap: 12px; }
     .solcord-mark { width: 48px; height: 48px; flex-basis: 48px; }
     .solcord-header h1 { font-size: 25px; }
     .solcord-panel::after { width: 100%; height: 190px; opacity: 0.035; }

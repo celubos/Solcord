@@ -12,11 +12,11 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 
 | Measure | Count |
 | --- | ---: |
-| Persistent tracked files | 760 |
-| Text files scanned | 745 |
+| Persistent tracked files | 765 |
+| Text files scanned | 750 |
 | Binary files classified | 15 |
-| Text lines scanned | 149,571 |
-| Custom Solcord lines | 67,697 |
+| Text lines scanned | 150,466 |
+| Custom Solcord lines | 68,528 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -33,7 +33,7 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | Patch calls | 31 | 11 |
 | Synchronous filesystem calls | 1,150 | 1,008 |
 | Console calls | 86 | 65 |
-| Empty catch blocks | 6 | 4 |
+| Empty catch blocks | 8 | 6 |
 
 ## Largest maintainable files
 

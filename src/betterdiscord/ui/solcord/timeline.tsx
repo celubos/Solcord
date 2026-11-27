@@ -70,7 +70,7 @@ function storageState(policy: SolcordTimelinePolicy, persistent: boolean, health
 const STORAGE_COPY: Record<StorageState, string> = {
     "off": "Nothing new is being saved. History saved earlier stays encrypted on this computer, hidden, until it expires or you erase it.",
     "starting": "Opening this account's encrypted history…",
-    "encrypted": "Saved only on this computer, never uploaded. Each saved event is encrypted with AES-256-GCM, and its key is protected by your system's secure storage (Electron safeStorage). Files live in Solcord's data folder under solcord-timeline-v1.",
+    "encrypted": "Saved only on this computer, never uploaded. Each saved event is encrypted with AES-256-GCM, and its key is protected by your system's secure storage. Files live in Solcord's data folder under solcord-timeline-v1.",
     "session-choice": "Kept in memory only, by your choice. Nothing is written to disk, and history is erased when Discord closes.",
     "memory-fallback": "Secure storage is not available on this system, so history is kept in memory only and is erased when Discord closes. Nothing unencrypted is written to disk.",
     "attention": "Message History needs attention. Open Extensions › Technical details for the exact status, or turn it off and on again."

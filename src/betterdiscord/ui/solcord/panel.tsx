@@ -1000,9 +1000,9 @@ function BaselineToolsPanel() {
 
 function PerformanceControls() {
     const values = useStateFromStores(SolcordSettings, () => SolcordSettings.snapshot().modules["performance-hud"].values);
-    return <Section title="Performance HUD" summary="Bounded local samples report event-loop and owned-resource measurements only while the overlay is visible.">
+    return <Section title="Performance HUD" summary="Shows how hard Solcord is working, measured on this computer and only while the overlay is open.">
         <label><SolcordSwitch label="Show the local performance overlay" checked={values.showOverlay === true} onChange={value => SolcordRuntime.setValue("performance-hud", "showOverlay", value)} /> Show the local performance overlay</label>
-        <p className="solcord-key-hint">When hidden, the sampler owns no recurring timer. <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>K</kbd> opens Command Deck.</p>
+        <p className="solcord-key-hint">When the overlay is hidden, it stops measuring completely. <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>K</kbd> opens Command Deck.</p>
     </Section>;
 }
 
@@ -1294,13 +1294,13 @@ function SessionPulse({openWorkspace, openSetup}: {openWorkspace(workspace: Solc
     const attentionSignals = prioritizeSolcordPulse([
         ...(state.recovery ? [{id: "recovery", priority: 100, tone: "danger" as const, label: "Safe Start is active", detail: "Optional Solcord capabilities are held off until you retry normal startup.", action: "Open recovery"}] : []),
         ...(failed || quarantined ? [{id: "addons", priority: 90, tone: "danger" as const, label: "Add-ons need attention", detail: `${failed} failed · ${quarantined} quarantined`, action: "Review add-ons"}] : []),
-        ...(state.activity?.status === "attention" ? [{id: "activity", priority: 85, tone: "attention" as const, label: "Activity Bridge needs review", detail: "The bounded compatibility ledger reported attention.", action: "Inspect Activity Bridge"}] : []),
-        ...(drift?.status === "failed" || drift?.status === "quarantined" ? [{id: "drift", priority: 80, tone: "attention" as const, label: "Discord adapter drift", detail: drift.detail, action: "Open diagnostics"}] : []),
+        ...(state.activity?.status === "attention" ? [{id: "activity", priority: 85, tone: "attention" as const, label: "Activity Bridge needs review", detail: "A Discord change affected Activities. Open it to see what still works.", action: "Inspect Activity Bridge"}] : []),
+        ...(drift?.status === "failed" || drift?.status === "quarantined" ? [{id: "drift", priority: 80, tone: "attention" as const, label: "A Discord update changed something Solcord uses", detail: drift.detail, action: "Open diagnostics"}] : []),
         ...(state.document.onboarding.status === "pending" ? [{id: "setup", priority: 75, tone: "attention" as const, label: "Finish setup", detail: "Your saved setup is ready to continue. Nothing has changed yet.", action: "Continue"}] : []),
         ...(state.dueReminders ? [{id: "return-later", priority: 65, tone: "attention" as const, label: "Return Later is due", detail: `${state.dueReminders} local reminder(s) are ready.`, action: "Review reminders"}] : []),
         ...(state.relationshipChanges ? [{id: "friend-watch", priority: 60, tone: "ok" as const, label: "Relationship history updated", detail: `${state.relationshipChanges} local change(s)`, action: "Open People"}] : [])
     ]);
-    const signals = attentionSignals.length ? attentionSignals : [{id: "healthy", priority: 1, tone: "ok" as const, label: "All clear", detail: "No Solcord action needs attention."}];
+    const signals = attentionSignals.length ? attentionSignals : [{id: "healthy", priority: 1, tone: "ok" as const, label: "All clear", detail: "Nothing needs your attention. Use the search above to jump to any setting."}];
     return <Section title="Right now">
         <div className="solcord-pulse-list">{signals.map(signal => <article key={signal.id} className={`solcord-pulse solcord-pulse-${signal.tone}`}><div><strong>{signal.label}</strong><p>{signal.detail}</p></div>{signal.action && <ActionButton onClick={() => signal.id === "setup" ? openSetup() : openWorkspace(signal.id === "activity" ? "voice" : signal.id === "return-later" ? "chat" : signal.id === "friend-watch" ? "friends" : "recovery")}>{signal.action}</ActionButton>}</article>)}</div>
     </Section>;
@@ -1549,7 +1549,7 @@ function FakeDeafenControls() {
     const experiment = SOLCORD_POWER_LAB.find(candidate => candidate.id === "fake-deafen")!;
     const adapterWaiting = state.status.phase !== "attention" && (state.status.pending === true || (state.status.phase === "ready" && !state.status.accountBound));
     return <Section title="Fake Deafen" summary="A direct built-in control beside Discord's normal Deafen button.">
-        <div className="solcord-power-control"><div><span className={`solcord-status solcord-status-${communityProvider || (!adapterWaiting && state.status.phase === "armed") ? "active" : state.status.phase === "attention" ? "failed" : "starting"}`}>{communityProvider ? "community plugin active" : adapterWaiting ? "waiting" : state.status.phase}</span><p>{communityProvider ? "Solcord leaves the separate plugin untouched and does not stack a second gateway patch." : state.status.detail}</p></div><SolcordSwitch label="Keep Fake Deafen adapter ready" checked={state.consent.enabled} disabled={communityProvider} onChange={toggleFakeDeafen} /></div>
+        <div className="solcord-power-control"><div><span className={`solcord-status solcord-status-${communityProvider || (!adapterWaiting && state.status.phase === "armed") ? "active" : state.status.phase === "attention" ? "failed" : adapterWaiting ? "starting" : "idle"}`}>{communityProvider ? "community plugin active" : adapterWaiting ? "waiting" : state.status.phase}</span><p>{communityProvider ? "Solcord leaves the separate plugin untouched and does not stack a second gateway patch." : state.status.detail}</p></div><SolcordSwitch label="Keep Fake Deafen adapter ready" checked={state.consent.enabled} disabled={communityProvider} onChange={toggleFakeDeafen} /></div>
         <p className="solcord-key-hint">In a voice call, use the <strong>F</strong>-badged button immediately beside normal Deafen. One click turns Fake Deafen on; the next click restores normal voice state. There is no per-call confirmation.</p>
         <dl className="solcord-facts" aria-label="Your voice state">
             <div><dt>Your deafened icon</dt><dd>{state.status.ownRowIndicator ? "Ready" : "Not available yet"}</dd></div>
@@ -1626,7 +1626,7 @@ export default function SolcordPanel() {
                     const items = visibleWorkspaces.filter(item => group.ids.includes(item.id));
                     return items.length ? <section key={group.label} aria-label={group.label}><p>{group.label}</p>{items.map(item => <button key={item.id} type="button" aria-current={workspace === item.id ? "page" : undefined} onClick={() => navigateFromSearch(item.id)}><strong>{item.label}</strong></button>)}</section> : null;
                 })}{!visibleWorkspaces.length && <p className="solcord-nav-empty">No matching setting</p>}</div>
-                <details className="solcord-workspace-menu"><summary aria-label={`Change workspace. Current workspace: ${selectedWorkspace.label}`}>Workspaces</summary><div>{SOLCORD_WORKSPACES.map(item => <button key={item.id} type="button" aria-current={workspace === item.id ? "page" : undefined} onClick={event => navigateFromCompactMenu(event, item.id)}>{item.label}</button>)}</div></details>
+                <details className="solcord-workspace-menu"><summary aria-label={`Change workspace. Current workspace: ${selectedWorkspace.label}`}>Workspace: {selectedWorkspace.label}</summary><div>{SOLCORD_WORKSPACES.map(item => <button key={item.id} type="button" aria-current={workspace === item.id ? "page" : undefined} onClick={event => navigateFromCompactMenu(event, item.id)}>{item.label}</button>)}</div></details>
             </nav>
             <div ref={workspaceRef} className="solcord-workspace" data-workspace={workspace}>
                 {workspace === "overview" && onboarding.status === "pending" ? <SetupWizard /> : <>

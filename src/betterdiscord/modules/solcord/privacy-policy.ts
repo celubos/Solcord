@@ -139,10 +139,10 @@ export class SolcordPrivacyPolicyAdapter {
                 dataClass,
                 state,
                 summary: state === "Protected"
-                    ? `${protectedCount} validated optional emission surface${protectedCount === 1 ? "" : "s"} blocked.`
+                    ? `Blocked in ${protectedCount === 1 ? "the one place" : `all ${protectedCount} places`} Solcord knows Discord sends this.`
                     : state === "Degraded"
-                        ? `${protectedCount} of ${specs.length} validated surfaces blocked; the remainder drifted.`
-                        : "The optional surface did not match its validated structure; no broad network patch was installed."
+                        ? `Blocked in ${protectedCount} of ${specs.length} known places. A Discord update changed the others, so they are not blocked yet.`
+                        : "A Discord update changed how this works, so Solcord could not block it safely and left it alone."
             });
             this.#record(dataClass, state === "Protected" ? "block" : "hold", state === "Protected" ? "applied" : "adapter-drift");
         }
