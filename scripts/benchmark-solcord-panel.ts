@@ -21,7 +21,9 @@ const prefix = fixture.slice(0, boundary)
     .replaceAll("\"react-dom/client\"", JSON.stringify(join(project, "node_modules/react-dom/client.js")));
 const reportPath = join(output, "panel-benchmark.json");
 const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], {cwd: project, encoding: "utf8", windowsHide: true}).trim();
-const sourcePaths = ["src/betterdiscord/ui/solcord/panel.tsx", "src/betterdiscord/ui/solcord/privacy.tsx", "tests/solcord/panel-react.test.tsx"];
+const sourcePaths = ["src/betterdiscord/ui/solcord/panel.tsx", "src/betterdiscord/ui/solcord/privacy.tsx", "src/betterdiscord/ui/solcord/timeline.tsx", "tests/solcord/panel-react.test.tsx"];
+// Keep in step with the labels navigated below.
+const WORKSPACE_COUNT = 10;
 const sourceFiles = sourcePaths.map(path => ({path, sha256: createHash("sha256").update(readFileSync(join(project, path))).digest("hex")}));
 const generated = `import {PropertySymbol} from ${JSON.stringify(join(project, "node_modules/happy-dom/lib/index.js"))};
 ${prefix}
@@ -34,7 +36,8 @@ test("repeated production panel navigation performance and teardown", async () =
     const record = (name: string, elapsed: number) => {const values = durations.get(name) ?? []; values.push(elapsed); durations.set(name, values);};
     const sampleMemory = (cycle: number) => {Bun.gc(true); const usage = process.memoryUsage(); memory.push({cycle, rssBytes: usage.rss, heapUsedBytes: usage.heapUsed});};
     sampleMemory(0);
-    const labels = ["Appearance & Accessibility", "Performance", "Privacy & Safety", "Chat & Composer", "Voice & Activities", "Friends & Spaces", "Extensions", "Recovery", "Overview"];
+    const labels = ["Appearance & Accessibility", "Performance", "Privacy & Safety", "Chat & Composer", "Message History", "Voice & Activities", "Friends & Spaces", "Extensions", "Recovery", "Overview"];
+    expect(labels).toHaveLength(${WORKSPACE_COUNT});
     for (let cycle = 1; cycle <= ${cycles}; cycle++) {
         let started = performance.now();
         const host = await mount(); await flushFrames();
@@ -59,7 +62,7 @@ test("repeated production panel navigation performance and teardown", async () =
         if (cycle % 10 === 0) sampleMemory(cycle);
     }
     const records = [...durations].map(([name, values]) => {values.sort((left, right) => left - right); return {name, samples: values.length, medianMs: values[Math.floor(values.length * 0.5)], p95Ms: values[Math.floor(values.length * 0.95)], maximumMs: values.at(-1)};});
-    const report = {pass: true, sourceCommit: ${JSON.stringify(sourceCommit)}, sourceFiles: ${JSON.stringify(sourceFiles)}, runtime: Bun.version, platform: process.platform, cycles: ${cycles}, workspaceTransitions: ${cycles * 9}, records, maximumSubscriptions, remainingSubscriptions: [...subscriptions.values()].reduce((sum, listeners) => sum + listeners.size, 0), finalPendingAnimationFrames: frames.size, mutationRequests: writes, fixtureQueryCacheResets, maximumFixtureQueryDependencies, memory, nonclaims: ["Actual production React tree with the qualified controlled host interfaces in Happy DOM; not Chromium layout or signed-in Discord latency.", "Per-transition times include React act and controlled focus-frame flush, without native/network work.", "Memory samples are forced-GC process endpoints during ${cycles} cycles, not the independent 30-minute backend soak.", "Happy DOM selector caches are cleared only after real teardown, empty DOM and zero-subscription assertions; this is fixture maintenance, not product cleanup."]};
+    const report = {pass: true, sourceCommit: ${JSON.stringify(sourceCommit)}, sourceFiles: ${JSON.stringify(sourceFiles)}, runtime: Bun.version, platform: process.platform, cycles: ${cycles}, workspaceTransitions: ${cycles * WORKSPACE_COUNT}, records, maximumSubscriptions, remainingSubscriptions: [...subscriptions.values()].reduce((sum, listeners) => sum + listeners.size, 0), finalPendingAnimationFrames: frames.size, mutationRequests: writes, fixtureQueryCacheResets, maximumFixtureQueryDependencies, memory, nonclaims: ["Actual production React tree with the qualified controlled host interfaces in Happy DOM; not Chromium layout or signed-in Discord latency.", "Per-transition times include React act and controlled focus-frame flush, without native/network work.", "Memory samples are forced-GC process endpoints during ${cycles} cycles, not the independent 30-minute backend soak.", "Happy DOM selector caches are cleared only after real teardown, empty DOM and zero-subscription assertions; this is fixture maintenance, not product cleanup."]};
     expect(report.finalPendingAnimationFrames).toBe(0);
     await Bun.write(${JSON.stringify(reportPath)}, JSON.stringify(report, null, 2) + "\\n");
 }, 60000);
@@ -75,4 +78,4 @@ catch (error) {
     writeFileSync(join(output, "failure.log"), `${failure.stdout ?? ""}\n${failure.stderr ?? ""}\n${failure.message}`);
     throw error;
 }
-console.log(`PASS: ${cycles} production-panel lifecycles / ${cycles * 9} workspace transitions; ${reportPath}`);
+console.log(`PASS: ${cycles} production-panel lifecycles / ${cycles * WORKSPACE_COUNT} workspace transitions; ${reportPath}`);

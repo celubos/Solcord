@@ -15,6 +15,8 @@ const embeddedBundle = fs.readFileSync(path.join(root, "installer/Solcord.Instal
 const selfTest = fs.readFileSync(path.join(root, "installer/Solcord.Installer/Program.cs"), "utf8");
 const installerForm = fs.readFileSync(path.join(root, "installer/Solcord.Installer/InstallerForm.cs"), "utf8");
 const launcher = fs.readFileSync(path.join(root, "installer/Solcord.Installer/SolcordLauncher.cs"), "utf8");
+const setupRegistration = fs.readFileSync(path.join(root, "installer/Solcord.Installer/SetupRegistration.cs"), "utf8");
+const fileSafety = fs.readFileSync(path.join(root, "installer/Solcord.Installer/FileSafety.cs"), "utf8");
 const installerProject = fs.readFileSync(path.join(root, "installer/Solcord.Installer/Solcord.Installer.csproj"), "utf8");
 const installerReadme = fs.readFileSync(path.join(root, "installer/README.md"), "utf8");
 const fullCi = fs.readFileSync(path.join(root, ".github/workflows/solcord-ci.yml"), "utf8");
@@ -162,7 +164,7 @@ describe("Solcord installer security contracts", () => {
         expect(installerForm).not.toContain("BuildSignalPath");
         expect(installerForm).not.toContain("All operations");
         expect(installerForm).toContain("Solcord Setup");
-        expect(installerForm).toContain("\"Recovery\"");
+        expect(installerForm).toContain("\"More options\"");
         expect(installerForm).toContain("_maintenanceList.Dock = DockStyle.Top");
         expect(installerForm).toContain("NewLabel(\"Discord app\"");
         expect(installerForm).toContain("$\"{target.Channel} · {target.Version}\"");
@@ -184,7 +186,7 @@ describe("Solcord installer security contracts", () => {
         expect(installerForm).toContain("_recommendedKey");
         expect(installerForm).toContain("_targets.TabIndex = 0");
         expect(installerForm).toContain("_verifyAction.TabIndex = 5");
-        expect(installerForm).toContain("Open recovery folder");
+        expect(installerForm).toContain("Open backups folder");
         expect(installerForm).toContain("MinimumSize = new Size(0, 44)");
         expect(installerForm).toContain("Height = 36");
         expect(installerForm).toContain("Color.White");
@@ -280,15 +282,48 @@ describe("Solcord installer security contracts", () => {
         expect(launcher).toContain("Launch Discord with Solcord");
         expect(launcher).toContain("launcher.json");
         expect(launcher).toContain("An unrecognized Solcord launcher entry already exists");
-        expect(launcher).toContain("EnsureSafePath(channelRoot, launchTarget)");
+        expect(launcher).toContain("EnsureSafePath(channelRoot, candidate)");
+        expect(launcher).toContain("!IsSolcordShortcut(shortcutPath)) throw new InvalidDataException(\"An unrecognized Solcord launcher entry already exists.\")");
+        expect(launcher).toContain("else if (!IsSolcordShortcut(shortcutPath)) return;");
+        expect(launcher).toContain("return (setupExecutable, \"--launch\", Path.GetDirectoryName(setupExecutable)!);");
         expect(launcher).toContain("Marshal.FinalReleaseComObject");
         expect(engine).toContain("SolcordLauncher.Ensure");
         expect(engine).toContain("SolcordLauncher.Remove");
         const rollback = engine.slice(engine.indexOf("internal string RollBack"), engine.indexOf("internal string Uninstall"));
         expect(rollback).toContain("SolcordLauncher.Remove(_roamingAppData)");
         expect(rollback).toContain("state.PreviousLauncherRecorded");
-        expect(installerForm).toContain("The previous installation and its ownership record were restored");
+        expect(installerForm).toContain("The previous version was restored from its backup");
         expect(installerProject).toContain("Solcord.Installer.Resources.solcord.ico");
+    });
+
+    test("keeps one owned Setup copy with Start and Settings entries, removed only when they are Setup's own", () => {
+        expect(setupRegistration).toContain("Registry.CurrentUser");
+        expect(setupRegistration).not.toContain("Registry.LocalMachine");
+        expect(setupRegistration).toContain("\"SolcordSetup.exe\"");
+        expect(setupRegistration).toContain("--uninstall");
+        // Removal is ownership-checked and never recursive.
+        expect(setupRegistration).toContain("if (IsRegistered()) Registry.CurrentUser.DeleteSubKey(_uninstallKey, throwOnMissingSubKey: false);");
+        expect(setupRegistration).not.toContain("DeleteSubKeyTree");
+        expect(setupRegistration).toContain("string.Equals(SolcordLauncher.ShortcutTarget(ShortcutPath), SetupExecutable, StringComparison.OrdinalIgnoreCase)) File.Delete(ShortcutPath)");
+        expect(setupRegistration).not.toMatch(/rmdir \/s|recursive: true/);
+        expect(fileSafety).toContain("internal static void RejectLinkedPath");
+        // Self-tests use a disposable registry key and never the real apps entry.
+        expect(selfTest).toContain("Software\\Solcord.SelfTest\\");
+        expect(selfTest).toContain("new SetupRegistration(local, roaming, testKey)");
+        expect(installerForm).toContain("SetupRegistration? registration = null");
+    });
+
+    test("the Start Menu entry re-attaches Solcord after a Discord update without ever closing Discord", () => {
+        expect(selfTest).toContain("args.Contains(\"--launch\"");
+        expect(selfTest).toContain("TryLaunchVerified(engine)");
+        expect(installerForm).toContain("RunningDiscordChannelsSafe().Count > 0) return;");
+        expect(installerForm).toContain("if (!_discordUpdatedState || _recommendedKey is not (\"repair\" or \"update\")");
+        // Prompts are skipped only for this healing path, which already refuses while Discord runs.
+        expect(installerForm).toContain("if (running.Count > 0 && (!confirm ||");
+        expect(launcher).toContain("Path.Combine(channelRoot, $\"{target.ProcessName}.exe\"), Path.Combine(channelRoot, \"Update.exe\")");
+        // An older Setup never changes a newer installation.
+        expect(engine).toContain("internal bool InstalledPackageIsNewer()");
+        expect(installerForm).toContain("if (status.NewerInstalled) {ShowNewerInstalled(status.InstalledLabel); return;}");
     });
 
     test("supports a bounded noninteractive update for an explicitly selected Discord channel", () => {

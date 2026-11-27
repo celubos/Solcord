@@ -4,7 +4,7 @@ import path from "path";
 import {app, safeStorage} from "electron";
 
 import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
-import {TIMELINE_MAX_EVENT_BYTES, TIMELINE_MAX_APPEND_BYTES, TIMELINE_MAX_APPEND_EVENTS} from "@common/solcord/timeline-limits";
+import {TIMELINE_MAX_EVENT_BYTES, TIMELINE_MAX_APPEND_BYTES, TIMELINE_MAX_APPEND_EVENTS, TIMELINE_MAX_STORED_BYTES, TIMELINE_MAX_STORED_EVENTS} from "@common/solcord/timeline-limits";
 
 
 interface TimelineEvent {
@@ -43,8 +43,8 @@ const TEXT_BUDGET_BYTES = 262_144_000;
 const MAX_EVENT_BYTES = TIMELINE_MAX_EVENT_BYTES;
 const MAX_APPEND_BYTES = TIMELINE_MAX_APPEND_BYTES;
 const MAX_APPEND_EVENTS = TIMELINE_MAX_APPEND_EVENTS;
-const MAX_READ_BYTES = 32 * 1024 * 1024;
-const MAX_READ_EVENTS = 10_000;
+const MAX_READ_BYTES = TIMELINE_MAX_STORED_BYTES;
+const MAX_READ_EVENTS = TIMELINE_MAX_STORED_EVENTS;
 const MAX_SEGMENT_BYTES = 160 * 1024;
 const MAX_WRAPPED_KEY_BYTES = 8 * 1024;
 const STORE_DIRECTORY = /^store-[0-9a-f]{40}$/;
@@ -155,6 +155,14 @@ function retentionCutoff(retention: TimelinePolicy["retention"], now = Date.now(
     return duration === Number.POSITIVE_INFINITY ? 0 : now - duration;
 }
 
+/** Segment names begin with the zero-padded capture time written by append. */
+function segmentObservedAt(file: string): number | undefined {
+    const match = /^(\d{16})-/.exec(path.basename(file));
+    if (!match) return;
+    const value = Number(match[1]);
+    return Number.isSafeInteger(value) ? value : undefined;
+}
+
 export class SolcordTimelineStorage {
     #identityKey?: Buffer;
     #persistenceFailure?: string;
@@ -162,6 +170,8 @@ export class SolcordTimelineStorage {
     #queue = Promise.resolve();
     #readBytes: number;
     #readEvents: number;
+    /** Per-store segment sizes, so append-time capacity checks do not stat or decrypt every file. */
+    #segmentSizes = new Map<string, Map<string, number>>();
 
     constructor(limits: TimelineStorageLimits = {}) {
         const readBytes = limits.readBytes ?? MAX_READ_BYTES;
@@ -192,6 +202,21 @@ export class SolcordTimelineStorage {
                 return {...this.#appendSession(accountScope, request), retentionApplied: opaque.complete};
             }
 
+            if (request.events.length === 0) {
+                // Retention-only sweep (policy change, or capture switched off). It
+                // never creates a store or unwraps a data key, and expiry uses names.
+                try {
+                    const existing = this.#accountDirectory(accountScope, false);
+                    if (!existing) return {stored: 0, persistent: true, retentionApplied: true};
+                    this.#cleanupTemporaryFiles(existing);
+                    return {stored: 0, persistent: true, retentionApplied: this.#pruneFiles(existing, request.policy).complete};
+                }
+                catch {
+                    this.#disablePersistence();
+                    return {...this.#appendSession(accountScope, request), retentionApplied: false};
+                }
+            }
+
             let directory: string;
             let key: Buffer;
             try {
@@ -207,22 +232,26 @@ export class SolcordTimelineStorage {
 
             const written: string[] = [];
             try {
+                const sizes = this.#segmentSizes.get(directory);
                 for (const event of request.events) {
                     const payload = Buffer.from(JSON.stringify(event), "utf8");
                     try {
                         const envelope = this.#encrypt(key, payload);
                         const sequence = `${String(event.observedAt).padStart(16, "0")}-${crypto.randomBytes(8).toString("hex")}.scseg`;
                         const target = path.join(directory, sequence);
-                        this.#atomicWrite(target, `${JSON.stringify(envelope)}\n`);
+                        const serialized = `${JSON.stringify(envelope)}\n`;
+                        this.#atomicWrite(target, serialized);
                         written.push(target);
+                        sizes?.set(target, Buffer.byteLength(serialized, "utf8"));
                     }
                     finally {payload.fill(0);}
                 }
-                const prune = this.#pruneFiles(directory, request.policy, key);
+                const prune = this.#pruneFiles(directory, request.policy);
                 return {stored: request.events.length, persistent: true, retentionApplied: prune.complete};
             }
             catch {
                 for (const file of written) this.#removeWrittenSegment(file, directory);
+                this.#segmentSizes.delete(directory);
                 this.#disablePersistence();
                 return {...this.#appendSession(accountScope, request), retentionApplied: false};
             }
@@ -463,6 +492,7 @@ export class SolcordTimelineStorage {
         let cleared = memoryCount;
         let remaining = unsafe;
         for (const directory of directories) {
+            this.#segmentSizes.delete(directory);
             try {
                 this.#assertExistingSafeDirectory(directory);
                 const entries = fs.readdirSync(directory, {withFileTypes: true}).sort((left, right) => {
@@ -620,6 +650,17 @@ export class SolcordTimelineStorage {
         // Read newest-first so a bounded read/export is a contiguous recent suffix rather
         // than an arbitrary old prefix. Reverse once before returning chronological events.
         for (const file of this.#segmentFiles(directory).reverse()) {
+            const namedAt = segmentObservedAt(file);
+            if (namedAt !== undefined && namedAt < cutoff) {
+                // Expired by its capture-time name: delete without decrypting.
+                try {fs.unlinkSync(file); this.#segmentSizes.get(directory)?.delete(file);}
+                catch {retentionApplied = false;}
+                continue;
+            }
+            if (readBoundReached) {
+                omittedSegments++;
+                continue;
+            }
             let plaintext: Buffer | undefined;
             try {
                 const stat = fs.lstatSync(file);
@@ -643,7 +684,7 @@ export class SolcordTimelineStorage {
                     continue;
                 }
 
-                if (readBoundReached || events.length >= this.#readEvents || bytes + stat.size > this.#readBytes) {
+                if (events.length >= this.#readEvents || bytes + stat.size > this.#readBytes) {
                     readBoundReached = true;
                     omittedSegments++;
                     continue;
@@ -671,47 +712,75 @@ export class SolcordTimelineStorage {
         };
     }
 
-    #pruneFiles(directory: string, policy: TimelinePolicy, key: Buffer): TimelinePruneResult {
+    /**
+     * Append-time retention and capacity. Expiry uses the capture time in each
+     * segment name, so this never decrypts or re-reads stored messages. Capacity
+     * matches the bounded read: keep the newest segments that a read can return
+     * and remove older ones, so stored history never becomes invisible residue
+     * that blocks a complete export.
+     */
+    #pruneFiles(directory: string, policy: TimelinePolicy): TimelinePruneResult {
         const cutoff = retentionCutoff(policy.retention);
         let removed = 0;
         let complete = true;
-        for (const file of this.#segmentFiles(directory)) {
-            let plaintext: Buffer | undefined;
+        const files = this.#segmentFiles(directory);
+        const sizes = this.#segmentSizeCache(directory, files);
+        const remove = (file: string) => {
             try {
-                const stat = fs.lstatSync(file);
-                if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > MAX_SEGMENT_BYTES) {
-                    complete = false;
-                    continue;
-                }
-                const envelope = JSON.parse(fs.readFileSync(file, "utf8")) as TimelineEnvelope;
-                plaintext = this.#decrypt(key, envelope);
-                const event = normalizeEvent(JSON.parse(plaintext.toString("utf8")));
-                if (!event) {
-                    complete = false;
-                    continue;
-                }
-                if (event.observedAt < cutoff) {
-                    fs.unlinkSync(file);
-                    removed++;
-                }
-            }
-            catch {complete = false;}
-            finally {plaintext?.fill(0);}
-        }
-
-        const remaining = this.#segmentFiles(directory).map(file => ({file, stat: fs.lstatSync(file)})).filter(item => item.stat.isFile() && !item.stat.isSymbolicLink());
-        let total = remaining.reduce((sum, item) => sum + item.stat.size, 0);
-        for (const item of remaining) {
-            if (total <= TEXT_BUDGET_BYTES) break;
-            try {
-                fs.unlinkSync(item.file);
-                total -= item.stat.size;
+                fs.unlinkSync(file);
+                sizes.delete(file);
                 removed++;
             }
             catch {complete = false;}
+        };
+
+        const retained: string[] = [];
+        for (const file of files) {
+            const namedAt = segmentObservedAt(file);
+            if (namedAt !== undefined && namedAt < cutoff) remove(file);
+            else retained.push(file);
+        }
+
+        let kept = 0;
+        let bytes = 0;
+        let full = false;
+        for (let index = retained.length - 1; index >= 0; index--) {
+            const file = retained[index];
+            const size = sizes.get(file);
+            if (size === undefined || size <= 0 || size > MAX_SEGMENT_BYTES) {
+                // Unreadable residue is reported, never silently counted as history.
+                complete = false;
+                continue;
+            }
+            if (full || kept >= this.#readEvents || bytes + size > this.#readBytes) {
+                full = true;
+                remove(file);
+                continue;
+            }
+            kept++;
+            bytes += size;
         }
         if (!this.#removeEmptyAccountStore(directory)) complete = false;
         return {removed, complete};
+    }
+
+    #segmentSizeCache(directory: string, files: readonly string[]): Map<string, number> {
+        let sizes = this.#segmentSizes.get(directory);
+        if (!sizes) {
+            sizes = new Map();
+            this.#segmentSizes.set(directory, sizes);
+        }
+        const present = new Set(files);
+        for (const file of sizes.keys()) if (!present.has(file)) sizes.delete(file);
+        for (const file of files) {
+            if (sizes.has(file)) continue;
+            try {
+                const stat = fs.lstatSync(file);
+                sizes.set(file, stat.isFile() && !stat.isSymbolicLink() ? stat.size : -1);
+            }
+            catch {sizes.set(file, -1);}
+        }
+        return sizes;
     }
 
     #removeEmptyAccountStore(directory: string): boolean {
@@ -733,6 +802,7 @@ export class SolcordTimelineStorage {
             }
             if (fs.readdirSync(directory).length > 0) return false;
             fs.rmdirSync(directory);
+            this.#segmentSizes.delete(directory);
             return true;
         }
         catch (error) {
@@ -743,9 +813,9 @@ export class SolcordTimelineStorage {
 
     #pruneMemory(events: TimelineEvent[], policy: TimelinePolicy): TimelineEvent[] {
         const cutoff = retentionCutoff(policy.retention);
-        const filtered = events.filter(event => policy.retention === "session" || event.observedAt >= cutoff).slice(-MAX_READ_EVENTS);
+        const filtered = events.filter(event => policy.retention === "session" || event.observedAt >= cutoff).slice(-this.#readEvents);
         let bytes = filtered.reduce((sum, event) => sum + Buffer.byteLength(JSON.stringify(event), "utf8"), 0);
-        while (bytes > TEXT_BUDGET_BYTES && filtered.length) {
+        while (bytes > Math.min(TEXT_BUDGET_BYTES, this.#readBytes) && filtered.length) {
             const removed = filtered.shift();
             if (!removed) break;
             bytes -= Buffer.byteLength(JSON.stringify(removed), "utf8");

@@ -143,7 +143,8 @@ describe("Solcord beginner-first setup UI", () => {
         expect(WIZARD_SOURCE).toContain("catalog candidates still need a runtime or security gate");
         expect(WIZARD_SOURCE).toContain("Anything unavailable stays off.");
         expect(WIZARD_SOURCE).toContain(">Recommended</button>");
-        expect(WIZARD_SOURCE).toContain("Runtime check pending");
+        expect(WIZARD_SOURCE).toContain("Checked when turned on");
+        expect(WIZARD_SOURCE).toContain(["<SolcordSwitch label={`Include $", "{addon.label}`}"].join(""));
         expect(WIZARD_SOURCE).not.toContain("{decision.statusLabel}");
         expect(WIZARD_CSS).toContain(".solcord-addon-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 22px;");
         expect(WIZARD_CSS).toContain("padding: 4px 0 0; border: 0;");

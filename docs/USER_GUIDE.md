@@ -9,8 +9,9 @@ Open Discord **User Settings**, then **Solcord Suite**. The Control Center uses 
 | Overview | Current problems and a reminder to finish setup |
 | Appearance & Accessibility | Theme, background, accent, density, motion, and reading controls |
 | Performance | Lean, Balanced, or Visual profiles and optional diagnostics |
-| Privacy & Safety | Tracking controls, local data, link and attachment review |
+| Privacy & Safety | Tracking controls, Privacy Mode for screen sharing, link and file review |
 | Chat & Composer | Writing tools, previews, translation, and media |
+| Message History | Deleted and edited messages Solcord saw, with search, export, and erase |
 | Voice & Activities | Call tools, audio, Activity Bridge, and Experimental features |
 | Friends & Spaces | DM pins, server presentation, Focus Channels, and Friend Watch |
 | Extensions | Existing addons, quarantine, and optional duplicate-plugin migration |
@@ -30,7 +31,7 @@ Use a still background if motion distracts you. Reset appearance from the same w
 
 A switch changes a feature's requested state. Its nearby status explains whether the current Discord build can run it. A failed save restores the previous setting and reports the error.
 
-Text fields preserve incomplete edits while you type. Where shown, use **Apply**, **Save**, or **Review** to finish a change. Number and range controls are limited to their supported values.
+Text fields preserve incomplete edits while you type. Where shown, use **Apply**, **Save**, or **Review** to finish a change. Number fields save when you leave the field or press Enter; a value outside the supported range is adjusted and the field says so.
 
 If a change does not take effect, read the status before clicking again. Repeated clicks must not start duplicate actions.
 
@@ -49,7 +50,9 @@ Consent, compatibility, enabled state, and storage durability are different fact
 
 ## Privacy-sensitive features
 
-Friend Watch, Message Timeline, private notes, Audience Guard, and experiments require their own opt-in. Check retention and clear/export controls before enabling history.
+Friend Watch, Message History, private notes, Audience Guard, and experiments require their own opt-in. Check retention and clear/export controls before enabling history. [How Message History works](MESSAGE_HISTORY.md).
+
+**Privacy Mode** (Privacy & Safety) hides server, channel, and DM names on your own screen before you share it. Turn on **Privacy Mode tools** first; then choose what to hide and use Ctrl + Alt + Shift + S to switch it on or off.
 
 Audience Guard remains unarmed until you choose **Arm for this call**. It cannot prevent every frame from reaching a denied viewer. [Read its limits](STREAM_AUDIENCE_GUARD.md).
 
@@ -63,6 +66,6 @@ In **Extensions**, **Replace duplicate plugins** previews the exact source files
 
 ## First Setup and recovery
 
-First Setup can be deferred and resumed. Updates and repairs do not reset completed onboarding. Reopen setup through **Recovery** when you want to change the initial choices.
+First Setup can be deferred and resumed. Updates and repairs do not reset completed onboarding. Reopen setup through **Recovery** when you want to change the initial choices. After **Apply**, the result (or the reason it stopped) appears on **Overview**.
 
 Use **Recovery** for settings snapshots. Use the installer for a core **Repair** or **Roll back**. These are different operations. [Troubleshooting](../SUPPORT.md) explains which one to use.

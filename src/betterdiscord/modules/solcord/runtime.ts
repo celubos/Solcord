@@ -13,7 +13,7 @@ import SettingsRenderer from "@ui/settings";
 import Modals from "@ui/modals";
 import DiscordModules from "@modules/discordmodules";
 import {getInternalInstance} from "@utils/react";
-import {Filters, getByKeys, getLazy, getLazyBySource, getModule, getStore, getWithKey} from "@webpack";
+import {Filters, getByKeys, getByStrings, getLazy, getLazyBySource, getModule, getStore, getWithKey} from "@webpack";
 
 import type {PrivacyCapabilityRecord, PrivacyDecisionReceipt, PrivacyProfile, SolcordCuratedAddonState, SolcordMaturity, SolcordModuleHealth, SolcordModuleId, SolcordPowerExperimentId} from "./contracts";
 import {SolcordDisposalScope} from "./disposal";
@@ -23,7 +23,7 @@ import {runReversiblePatchCanary, runStructuralProbes, type StructuralProbeResul
 import {inspectLink, interceptLinkActivation, LinkReviewLifecycle, type LinkInspection} from "./link-lens";
 import {BoundedPerformanceSampler, type PerformanceSample} from "./performance";
 import {evaluateCrashGuard, type CrashGuardDocument} from "./crash-guard";
-import {channelIsInTimelineScope, MessageTimelineJournal, normalizeDiscordTimelineDispatch, normalizeTimelineAccountId, resolveTimelineEventIdentity, timelineAuthorPolicyAllows, TimelineAccountGuard, timelineEventAccountMatches, type DiscordTimelineDispatchType, type TimelineAccountIdentity, type TimelineEvent, type TimelineMessageState} from "./message-timeline";
+import {channelIsInTimelineScope, describeTimelineConversation, MessageTimelineJournal, normalizeDiscordTimelineDispatch, normalizeTimelineAccountId, resolveTimelineEventIdentity, timelineAuthorPolicyAllows, TimelineAccountGuard, timelineEventAccountMatches, type DiscordTimelineDispatchType, type TimelineAccountIdentity, type TimelineConversation, type TimelineEvent, type TimelineHistoryPage, type TimelineHistoryQuery, type TimelineMessageState} from "./message-timeline";
 import {planLargeMessage} from "./message-splitter";
 import {configureReviewedExecutionOwnership, integrityBlocksExecution, integrityFailureReason, integrityRecordIsAccepted, integrityRequiresQuarantine, normalizeIntegrityAudit, reviewBlocksEnable, summarizeIntegrity, unavailableIntegrityRecords, type AddonIntegrityKind, type AddonIntegrityRecord, type AddonIntegritySummary, type ReviewedExecutionOwnership} from "./integrity";
 import {SOLCORD_CATALOG_INDEX, SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-trust.generated";
@@ -41,7 +41,7 @@ import {refreshSolcordFakeDeafenCurrentChannelRow} from "./fake-deafen-row-refre
 import {normalizeDiscordRelationships, planSolcordFriendWatchNotices, reconcileSolcordRelationships, SolcordFriendWatchAccountBarrier, SolcordFriendWatchJournal, type SolcordFriendWatchNoticeState, type SolcordOwnerRelationshipAction, type SolcordRelationshipEvent, type SolcordRelationshipSnapshot} from "@common/solcord/friend-watch";
 import {inspectSolcordDomain, SolcordDomainMemory, type SolcordDomainDecision, type SolcordDomainMemoryRecord, type SolcordDomainRisk} from "@common/solcord/domain-memory";
 import {inspectSolcordAttachment, inspectSolcordLocalAttachment, type SolcordAttachmentInspection} from "@common/solcord/attachment-guard";
-import {solcordReturnLaterTarget, SolcordReturnLaterJournal, SolcordReturnRouteMemory, type SolcordReturnLaterItem} from "@common/solcord/return-later";
+import {normalizeSolcordReturnRoute, SolcordReturnLaterJournal, SolcordReturnRouteMemory, type SolcordReturnLaterItem} from "@common/solcord/return-later";
 import {filterSolcordCommands} from "@common/solcord/command-deck";
 import {currentSolcordPeopleObjectId, resolveSolcordPeopleObject, type SolcordPeopleObjectResolution} from "@common/solcord/people-spaces";
 import {audienceGuardHealthMaturity, isAudienceGuardStartAction, isAudienceGuardStopAction, normalizeAudienceGuardEntries, normalizeAudienceGuardPrivatePolicy, SolcordStreamAudienceGuard, type SolcordAudienceGuardArmReadiness, type SolcordAudienceGuardPrivatePolicy, type SolcordAudienceGuardStatus} from "./stream-audience-guard";
@@ -186,7 +186,7 @@ const FEATURE_META: Record<SolcordModuleId, {name: string; risk: SolcordModuleHe
     "settings-time-machine": {name: "Settings Time Machine + Update Ledger", risk: "standard", maturity: "ready", detail: "Bounded snapshots and migration records are active."},
     "accessibility-toolkit": {name: "Accessibility Toolkit", risk: "standard", maturity: "ready", detail: "Local presentation controls apply immediately and restore completely on disable."},
     "friend-watch": {name: "Friend Watch", risk: "experimental", maturity: "preview", detail: "Disabled until separate consent. Uses only the already-loaded relationship store and never polls Discord."},
-    "message-timeline": {name: "Message Timeline", risk: "experimental", maturity: "preview", detail: "Observed-message journal is disabled until setup consent is completed."}
+    "message-timeline": {name: "Message History", risk: "experimental", maturity: "preview", detail: "Off. Turn it on in Message History to save deleted and edited messages."}
 };
 
 const FEATURE_IDS = Object.keys(FEATURE_META) as SolcordModuleId[];
@@ -566,6 +566,9 @@ class SolcordRuntimeStore extends Store {
         const privateUserStore = getStore("UserStore") as {getCurrentUser?: () => {id?: string;} | undefined; addChangeListener?: (listener: () => void) => void; removeChangeListener?: (listener: () => void) => void;} | undefined;
         this.#observePrivateUiAccount();
         await this.#loadPeopleState();
+        // Expire saved Message History on schedule even while capture is off.
+        this.#rootScope.timeout(() => {void this.sweepTimelineRetention();}, 60_000);
+        this.#rootScope.interval(() => {void this.sweepTimelineRetention();}, 30 * 60_000);
         const reducedMotionQuery = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
         if (reducedMotionQuery) {
             const onReducedMotionChange = () => {
@@ -851,13 +854,48 @@ class SolcordRuntimeStore extends Store {
         return {...this.#timeline.status(), persistent: this.#timelinePersistent};
     }
 
-    timelineCurrentChannel(): {eligible: boolean; included: boolean;} {
+    /** Filtered Message History page over every retained record for the active account. */
+    timelineHistory(query: TimelineHistoryQuery): TimelineHistoryPage {
+        if (this.#timeline.prune(SolcordSettings.slice("timelinePolicy"))) this.#timelineRetentionDirty = true;
+        return this.#timeline.query(query);
+    }
+
+    /** Resolve a conversation label from Discord's live stores; nothing is stored. */
+    timelineConversation(channelId: string): TimelineConversation {
+        const channelStore = getStore("ChannelStore") as {getChannel?: (id: string) => Record<string, unknown> | undefined;} | undefined;
+        const guildStore = getStore("GuildStore") as {getGuild?: (id: string) => {name?: unknown;} | undefined;} | undefined;
+        const userStore = getStore("UserStore") as {getUser?: (id: string) => {globalName?: unknown; global_name?: unknown; username?: unknown;} | undefined;} | undefined;
+        let channel: Record<string, unknown> | undefined;
+        try {channel = normalizeTimelineAccountId(channelId) ? channelStore?.getChannel?.(channelId) : undefined;}
+        catch {channel = undefined;}
+        return describeTimelineConversation({
+            channel,
+            guildName: id => guildStore?.getGuild?.(id)?.name,
+            userName: id => {
+                const user = userStore?.getUser?.(id);
+                return user?.globalName ?? user?.global_name ?? user?.username;
+            }
+        });
+    }
+
+    /** Close Solcord and Discord settings, then open the conversation near the recorded message. */
+    openTimelineConversation(channelId: string, messageId?: string): boolean {
+        const id = normalizeTimelineAccountId(channelId);
+        if (!id) return false;
+        const conversation = this.timelineConversation(id);
+        if (conversation.kind === "unknown") return false;
+        const message = normalizeTimelineAccountId(messageId);
+        return this.#navigateInDiscord(`/channels/${conversation.guildId ?? "@me"}/${id}${message ? `/${message}` : ""}`);
+    }
+
+    timelineCurrentChannel(): {eligible: boolean; included: boolean; channelId?: string;} {
         const selectedChannelStore = getStore("SelectedChannelStore") as {getChannelId?: () => string | undefined;} | undefined;
         const channelStore = getStore("ChannelStore") as {getChannel?: (id: string) => {id?: string; guild_id?: string; type?: number;} | undefined;} | undefined;
         const channelId = selectedChannelStore?.getChannelId?.();
         const channel = typeof channelId === "string" ? channelStore?.getChannel?.(channelId) : undefined;
         const eligible = Boolean(channel && typeof channel.id === "string" && /^\d{1,32}$/.test(channel.id) && typeof channel.guild_id === "string");
-        return {eligible, included: eligible && SolcordSettings.snapshot().timelinePolicy.serverChannelIds.includes(channel!.id!)};
+        const selected = normalizeTimelineAccountId(channel?.id);
+        return {eligible, included: eligible && SolcordSettings.snapshot().timelinePolicy.serverChannelIds.includes(channel!.id!), ...(selected ? {channelId: selected} : {})};
     }
 
     async setCurrentChannelInTimeline(included: boolean): Promise<boolean> {
@@ -905,6 +943,26 @@ class SolcordRuntimeStore extends Store {
         const next = SolcordSettings.slice("timelinePolicy");
         if (this.#started && current.enabled !== next.enabled) await this.#synchronizeFeatures(["message-timeline"]);
         else this.#timelinePolicyChanged?.();
+        if (!next.enabled && (current.enabled || current.retention !== next.retention)) await this.sweepTimelineRetention();
+    }
+
+    /**
+     * Saved history keeps expiring while capture is off. The running capture
+     * applies retention itself; otherwise ask native storage for a name-based
+     * sweep that never creates a store or key for an account without history.
+     */
+    async sweepTimelineRetention(): Promise<boolean> {
+        const policy = SolcordSettings.slice("timelinePolicy");
+        const running = this.#scopes.get("message-timeline");
+        if (policy.enabled && running && !running.disposed) return true;
+        if (!this.#privateCapability) return false;
+        const identity = this.#captureTimelineIdentity();
+        if (!identity.accountId) return false;
+        try {
+            const result = await this.#withTimelineAccount(identity.accountId, capability => TIMELINE_IPC.append(capability, {events: [], policy}), () => this.#timelineIdentityIsCurrent(identity)) as {retentionApplied?: unknown;} | undefined;
+            return result?.retentionApplied === true;
+        }
+        catch {return false;}
     }
 
     friendWatchEvents(): SolcordRelationshipEvent[] {
@@ -1917,6 +1975,9 @@ class SolcordRuntimeStore extends Store {
         await this.#refreshAddonIntegrity("pre-rollback");
         const transaction = SolcordSettings.latestSetupTransaction();
         if (!transaction) return {status: "unavailable", removed: 0, preserved: 0};
+        // Confirm the settings half of the rollback exists before touching files,
+        // so a missing snapshot cannot leave files removed and settings unchanged.
+        if (!SolcordSettings.snapshotById(transaction.snapshotId)) return {status: "unavailable", removed: 0, preserved: 0};
         let providerArchiveRestored = true;
         if (transaction.providerArchiveTransactionId) {
             try {
@@ -2321,10 +2382,23 @@ class SolcordRuntimeStore extends Store {
 
     openReturnLater(id: string): boolean {
         const item = this.#returnLater.snapshot().find(candidate => candidate.id === id);
-        const target = item ? solcordReturnLaterTarget(item.route) : undefined;
-        if (!target) return false;
-        window.location.assign(target);
-        return true;
+        const route = item ? normalizeSolcordReturnRoute(item.route) : undefined;
+        // In-app routing keeps Discord loaded; a full page load would discard the
+        // in-memory reminders and leave PTB/Canary for discord.com.
+        return route ? this.#navigateInDiscord(route) : false;
+    }
+
+    /** Route inside the running Discord client after closing Solcord and Discord settings. */
+    #navigateInDiscord(route: string): boolean {
+        if (!/^\/channels\/(?:@me|\d{1,32})\/\d{1,32}(?:\/\d{1,32})?$/.test(route)) return false;
+        const transitionTo = getByStrings<(path: string) => void>(["transitionTo - Transitioning to"], {searchExports: true, cacheId: "solcord-transitionTo"});
+        if (typeof transitionTo !== "function") return false;
+        try {
+            SettingsRenderer.closeSolcordSurfaces();
+            transitionTo(route);
+            return true;
+        }
+        catch {return false;}
     }
 
     exportDiagnostics(): void {
@@ -4749,7 +4823,7 @@ class SolcordRuntimeStore extends Store {
 
         const updateHealth = () => {
             const status = this.#timeline.status();
-            const detail = `${status.records} observed message record(s); ${status.deleted} deleted, ${status.edited} edited, and ${status.ghostPings} ghost ping(s). ${this.#timelinePersistent ? "AES-256-GCM persistence is active through safeStorage." : "Session-only mode is active."}${storageAttention ? ` ${storageAttention}` : ""}`;
+            const detail = `${status.records} saved message(s); ${status.deleted} deleted, ${status.edited} edited, and ${status.ghostPings} ghost ping(s). ${this.#timelinePersistent ? "Encrypted on this computer (AES-256-GCM, safeStorage-protected key)." : "Kept in memory for this session only."}${storageAttention ? ` ${storageAttention}` : ""}`;
             const key = `${storageReadComplete}:${detail}`;
             if (key === previousHealthKey) return;
             previousHealthKey = key;
@@ -4800,7 +4874,7 @@ class SolcordRuntimeStore extends Store {
             this.#timelinePersistent = false;
             this.#setHealth("message-timeline", {
                 maturity: "preview",
-                detail: accountId ? "Switching to an isolated Timeline account store; prior-account rows were removed before storage I/O." : "Waiting for a validated current-account scope; no messages are retained."
+                detail: accountId ? "Switching to this account's separate history; the previous account's messages were removed from view first." : "Waiting for a validated current-account scope; no messages are retained."
             });
             if (!accountId) {
                 await this.#releaseTimelineAccount();
@@ -4890,7 +4964,7 @@ class SolcordRuntimeStore extends Store {
                 }
                 catch (error) {
                     if (!isCurrent()) return false;
-                    storageAttention = `Timeline persistence is incomplete (${errorName(error)}). ${queuedEvents} event(s) remain queued; Export retries them before writing a file.`;
+                    storageAttention = `Saving to disk is incomplete (${errorName(error)}). ${queuedEvents} event(s) remain queued; Export retries them before writing a file.`;
                     storageReadComplete = false;
                     this.#timelinePersistent = false;
                     updateHealth();

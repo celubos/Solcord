@@ -8,7 +8,7 @@ For a normal installation, start with the [quick start](../QUICK_START.md). This
 
 Published historical candidates remain immutable. The owner-machine install manifest, not this repository page, identifies whichever exact build is currently installed in the signed-in profile.
 
-The current download is [v2.0.0-rc.39](https://github.com/celubos/Solcord/releases/tag/v2.0.0-rc.39). Its automated installer evidence covers install, update, Discord-update repair, downgrade refusal, interrupted recovery, rollback, and uninstall in isolated targets; that is not a claim that destructive recovery cases were exercised against the signed-in owner profile.
+The current download is listed in [Release status](../STATUS.md). The installer's automated evidence covers install, update, Discord-update repair, downgrade refusal, interrupted recovery, rollback, and uninstall in isolated targets; that is not a claim that destructive recovery cases were exercised against the signed-in owner profile.
 
 The local install receipt identifies the exact source commit, core hash, Discord version, and backup. Those owner-machine paths are intentionally not embedded here. New source changes require new build and runtime evidence. Audience Guard uses account-bound encrypted storage only when Electron's secure storage is available, and reports session-only storage otherwise. It does not provide per-person control over Discord's media delivery.
 
@@ -73,10 +73,10 @@ The machine-readable install manifest records exact backup and rollback paths af
 
 The normal RC path is designed to take about one minute on a typical Windows PC after download. This is a usability target, not a time guarantee.
 
-1. Download `SolcordInstaller.exe` and the release-level `SHA256SUMS.txt` from the same owner-controlled `v2.0.0-rc.39` release. The complete review bundle is also available inside the delivery ZIP under its exact generated name.
+1. Download `SolcordInstaller.exe` and the release-level `SHA256SUMS.txt` from the same owner-controlled release. The complete review bundle is also available inside the delivery ZIP under its exact generated name.
 2. Compare the executable hash with the `installer/SolcordInstaller.exe` entry in the release-level `SHA256SUMS.txt`; that nested evidence name applies byte-for-byte to the root-published executable. Stop on any mismatch.
 3. Save anything in progress and leave active calls. Run `SolcordInstaller.exe`, confirm **Version** (Stable, PTB, or Canary), and choose **Install Solcord** or **Update Solcord**. Because the core is shared, the installer closes verified running Discord desktop channels, not just the selected one.
-4. Choose **Verify files**, then **Open Solcord**. A fresh install opens **User Settings → Solcord Suite** on Welcome after Discord is ready; an update or repair preserves completed setup.
+4. Choose **Check files**, then **Open Discord**. A fresh install opens **User Settings → Solcord Suite** on Welcome after Discord is ready; an update or repair preserves completed setup.
 
 The RC executable is unsigned. Windows may display an unknown-publisher warning. Do not disable Windows security or automate its prompts. The published guide must use screenshots captured from this exact RC executable; source mockups and images from an older build are not installation evidence.
 
@@ -86,7 +86,7 @@ The RC executable is unsigned. Windows may display an unknown-publisher warning.
 
 The installer detects Stable, PTB, and Canary and displays the selected version. Before a core change, it asks verified Discord processes to exit gracefully, then terminates only verified remaining Discord processes if necessary. It refuses the change if safe shutdown cannot be completed. It verifies the core before and after installation and records a checked backup of the previous core and injector.
 
-Each action is separate: **Install**, **Update**, **Repair**, **Roll back**, **Uninstall**, **Verify files**, **Open recovery folder**, and **Open Solcord**. Repair reinstalls this package; Update installs a different version. Roll back restores the receipt-bound backup; Uninstall removes Solcord's injector/core without deleting user data. Opening Discord is an explicit action.
+Each action is separate: **Install**, **Update**, **Repair**, **Roll back**, **Uninstall**, **Check files**, **Open backups folder**, and **Open Discord**. After a Discord update the recommended button reads **Turn Solcord back on** and runs Repair or Update. Repair reinstalls this package; Update installs a different version. Roll back restores the receipt-bound backup; Uninstall removes Solcord's injector/core without deleting user data. Opening Discord is an explicit action.
 
 It never deletes plugins, themes, settings, custom CSS, MessageLogger data, Timeline data, Friend Watch data, provider archives, or translation credential stores. It does not bypass Windows prompts, authenticate, start an Activity, or perform account actions. Its lifecycle self-test uses disposable directories and verifies install, exact hash, refusal of oversized receipts, receipt-bound rollback, refusal of a rogue newer backup, refusal of a tampered injector backup, preservation of an unexpected current-core change during automatic recovery, canonicalization of an identical stale pending receipt, and retry after an injected partial-rollback interruption. A `pending.json` receipt is durable before mutation; a successful install becomes `current.json`, while a failed update retains pending recovery. Rollback recognizes the candidate and already-restored hashes, restores the injector before the core, and is safe to retry from a mixed state. It refuses to replace or delete a current core whose hash is neither the installed candidate nor the captured prior core, including during automatic recovery. It accepts only the exact direct-child backup recorded by the selected recovery receipt and validates every restored hash before mutation. Launch re-detects and containment-checks the selected channel/version/path. The candidate is unsigned and self-contained; automated lifecycle checks do not make it a signed stable release.
 
@@ -118,7 +118,7 @@ A previous owner session reported Activities working. That historical result doe
 There are two separate rollback scopes:
 
 1. **Setup/provider rollback:** while Solcord is running, open **Recovery** for setup snapshots or **Extensions** for the latest provider migration. This restores recorded enabled states and the Solcord snapshot, removes only unchanged files the setup transaction added, and restores hash-matching archived source only when its plugin destination is absent.
-2. **Core rollback:** open the same verified installer and choose **Roll back**. It closes verified Discord processes, checks the recorded backup, and restores the injector/core using the recovery receipt. Choose **Open Solcord** only after recovery succeeds. Do not select a random backup folder or overwrite files by hand.
+2. **Core rollback:** open the same verified installer and choose **Roll back**. It closes verified Discord processes, checks the recorded backup, and restores the injector/core using the recovery receipt. Choose **Open Discord** only after recovery succeeds. Do not select a random backup folder or overwrite files by hand.
 
 The manifest-generated core restore uses resolved literal paths and a staged copy/hash/rename sequence. Before any recursive cleanup, it verifies the resolved target remains inside the manifest's timestamped backup or Solcord staging directory. No rollback command deletes the plugin directory, theme directory, stable settings directory, MessageLoggerV2 data, Timeline store, translation credential store, provider archive, or vanilla launcher.
 

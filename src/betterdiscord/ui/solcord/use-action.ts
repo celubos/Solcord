@@ -5,7 +5,7 @@ import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState,
 export const SolcordActionErrorContext = createContext<((error: unknown) => void) | undefined>(undefined);
 
 /** A temporary disabled state must not strand keyboard users after a save. */
-export function useSolcordControlFocus(input: RefObject<HTMLInputElement | null>, pending: boolean, disabled: boolean) {
+export function useSolcordControlFocus(input: RefObject<HTMLInputElement | HTMLButtonElement | null>, pending: boolean, disabled: boolean) {
     const restore = useRef(false);
     useLayoutEffect(() => {
         if (pending || !restore.current) return;

@@ -54,7 +54,7 @@ describe("Solcord Control Center clarity", () => {
     test("uses a stable vertical information architecture", () => {
         expect(panel).toContain("{label: \"Start\", ids: [\"overview\"]}");
         expect(panel).toContain("{label: \"Personalize\", ids: [\"appearance\", \"performance\"]}");
-        expect(panel).toContain("{label: \"Features\", ids: [\"privacy\", \"chat\", \"voice\", \"friends\"]}");
+        expect(panel).toContain("{label: \"Features\", ids: [\"privacy\", \"chat\", \"history\", \"voice\", \"friends\"]}");
         expect(panel).toContain("{label: \"System\", ids: [\"extensions\", \"recovery\"]}");
         expect(panel).toContain("placeholder=\"Find a setting\"");
     });
@@ -221,10 +221,13 @@ describe("Solcord Control Center clarity", () => {
         expect(runtime).toContain("Patcher.after(\"Solcord~ReturnLaterRoute\", window.history, \"pushState\"");
         expect(runtime).toContain("Patcher.after(\"Solcord~ReturnLaterRoute\", window.history, \"replaceState\"");
         expect(runtime).toContain("this.#returnRouteMemory.clear();");
-        expect(runtime).toContain("window.location.assign(target);");
+        // Opening a reminder routes inside Discord; a full page load would drop the in-memory list.
+        expect(runtime).toContain("return route ? this.#navigateInDiscord(route) : false;");
+        expect(runtime).not.toContain("window.location.assign(");
         expect(panel).toContain("SolcordRuntime.snoozeReturnLater(item.id");
         expect(panel).toContain("SolcordRuntime.completeReturnLater(item.id)");
         expect(panel).toContain("SolcordRuntime.openReturnLater(item.id)");
+        expect(panel).toContain("That reminder could not be opened");
         expect(panel).toContain("choose Save current DM or channel for later");
     });
 
@@ -261,7 +264,7 @@ describe("Solcord Control Center clarity", () => {
         expect(panel).toContain("const navigateFromSearch = (next: SolcordWorkspaceId) => {");
         expect(panel).toContain("setWorkspaceQuery(\"\")");
         expect(panel).toContain("onClick={() => navigateFromSearch(item.id)}");
-        expect(panel).toContain("<details className=\"solcord-workspace-menu\"><summary aria-label={`Change workspace. Current workspace: $" + "{selectedWorkspace.label}`}>Workspaces</summary>");
+        expect(panel).toContain("<details className=\"solcord-workspace-menu\"><summary aria-label={`Change workspace. Current workspace: $" + "{selectedWorkspace.label}`}>Workspace: {selectedWorkspace.label}</summary>");
         expect(panel).toContain("onClick={event => navigateFromCompactMenu(event, item.id)}");
         expect(panel).not.toContain("<select value={workspace}");
         expect(panel).not.toContain("value={workspace} onChange={event => setWorkspace(event.currentTarget.value as SolcordWorkspaceId)}>{visibleWorkspaces.map");
@@ -344,7 +347,7 @@ describe("Solcord Control Center clarity", () => {
 
     test("leads Privacy with the explicit profile and content-free capability report", () => {
         const privacy = readFileSync(resolve(import.meta.dir, "../../src/betterdiscord/ui/solcord/privacy.tsx"), "utf8");
-        expect(panel).toContain("<PrivacyProtectionPanel /><BuiltInFeatureSwitches scope=\"privacy\" /><StreamShieldControls />");
+        expect(panel).toContain("<PrivacyProtectionPanel /><BuiltInFeatureSwitches scope=\"privacy\" /><SafetyToolSwitches /><StreamShieldControls />");
         expect(privacy).toContain("Use Strict Privacy");
         expect(privacy).toContain("Check for updates");
         expect(privacy).toContain("privacyCapabilityStateLabel(capability.state)");
@@ -364,10 +367,12 @@ describe("Solcord Control Center clarity", () => {
         expect(panel).toMatch(/aria-label=\{`\$\{item\.title\}: \$\{stateLabel\[item\.maturity\]\}\. \$\{item\.detail\}`\}/);
     });
 
-    test("does not report a storage failure before Message Timeline is enabled", () => {
-        expect(timeline).toContain("Not in use while Timeline is off");
-        expect(timeline).toContain("Session only by choice");
-        expect(timeline).toContain("Session only · encrypted persistence unavailable");
+    test("does not report a storage failure before Message History is enabled or while it starts", () => {
+        // Behavior is exercised through the production React tree in panel-react.test.tsx.
+        expect(timeline).toContain("if (!policy.enabled) return \"off\";");
+        expect(timeline).toContain("if (!health || health.status === \"starting\" || health.status === \"stopped\") return \"starting\";");
+        expect(timeline).toContain("\"session-choice\": \"Kept in memory only, by your choice.");
+        expect(timeline).toContain("\"memory-fallback\": \"Secure storage is not available on this system");
         expect(timeline).not.toContain("session only · secure storage unavailable or disabled");
     });
 

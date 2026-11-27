@@ -21,7 +21,13 @@ export default function PrivacyProtectionPanel() {
             setStatus("Checking reviewed addon and theme sources…");
             try {
                 await Promise.all([CoreUpdater.checkForUpdate(false), PluginUpdater.checkAll(false), ThemeUpdater.checkAll(false)]);
-                setStatus("Manual checks finished. Review the update list for results. Solcord core remains pinned until an owner-controlled integrity feed is available.");
+                const sourceError = PluginUpdater.sourceError ?? ThemeUpdater.sourceError;
+                const available = (PluginUpdater.pending?.length ?? 0) + (ThemeUpdater.pending?.length ?? 0);
+                setStatus(sourceError
+                    ? "The addon and theme update source could not be reached, so nothing was checked. Existing files were not changed; try again later."
+                    : available
+                        ? `${available} reviewed addon or theme update(s) are available. Open Plugins or Themes to review and apply them.`
+                        : "Your addons and themes are up to date. The Solcord core stays pinned; new Solcord versions come from its installer.");
             }
             catch {setStatus("The manual update check did not complete. Existing files were not changed.");}
             return;

@@ -1,5 +1,23 @@
 # Solcord Changelog
 
+## 2.0.3 - Stays on after Discord updates
+
+- Solcord now attaches to a Discord update while Discord is still running (once its files are complete and stable) instead of only when Discord quits, so background updates no longer switch it off.
+- The Start menu **Solcord** entry turns Solcord back on after a Discord update, then opens Discord. It never closes a running Discord.
+- Setup explains each state in plain words (**Solcord is on / off**, **Update available**, **Needs repair**) with one recommended button such as **Turn Solcord back on**, and an older installer now says **Newer version installed** instead of a receipt validation error.
+- Setup keeps a current copy of itself with a **Solcord Setup** Start menu entry and a **Solcord** entry in Settings → Apps; uninstall removes them.
+- The Solcord shortcut uses Discord's current launcher, and a shortcut orphaned by an interrupted older Setup is repaired instead of blocking updates to it.
+- Consolidated duplicated installer path-safety, atomic-write and channel code.
+- Control Center: readable light-mode privacy states, plain-language privacy and status text, a neutral Fake Deafen "off" state, the current workspace in narrow layouts, and fixed logo spacing, option affordance and scrollbar colours.
+
+## 2.0.2 - Message History and Discord updates
+
+- Added **Message History**, a discoverable workspace for deleted and edited messages with filters, search, version history, conversation links, and two-step export and erase. Off by default; DM-only, text-only, 7-day defaults are unchanged.
+- Fixed Message History persistence: duplicate message events no longer erase edit history, retention counts from first capture so restarts match the session, saving no longer decrypts all stored history, stored history stays within the readable bound, and expiry continues while capture is off.
+- Kept Solcord manageable after Discord updates itself: the update hook writes the installer's exact loader, Setup shows **Discord updated** with Repair or Update, and Uninstall/first-install Roll Back refuse instead of breaking Discord's startup while a newer version still loads Solcord.
+- Fixed inert Privacy Mode switches, setup rollback after many edits, Return Later reloading Discord, hidden setup results, number fields that could not be typed into, and several actions that failed silently or always reported success.
+- Setup asks before closing a running Discord and cleans up interrupted temporary files and extraction folders.
+
 ## 2.0.1 - Reliability and privacy (2026-11-10)
 
 - Restored startup across modern Discord builds and late login. **Open Solcord Suite** opens an independent, readable settings panel.

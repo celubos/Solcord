@@ -1,71 +1,44 @@
 import {app} from "electron";
 import path from "path";
 import fs from "fs";
-import {comparator} from "@common/semver";
 import {bdFolder} from "./modules/betterdiscord";
-import {randomUUID} from "crypto";
+import {DISCORD_UPDATE_CHECK_INTERVAL_MS, DiscordUpdateWatch} from "./discord-update-watch";
 
 const supported: NodeJS.Platform[] = [
     "win32",
     "linux"
 ];
 
-function migrate() {
-    if (!supported.includes(process.platform)) return;
+const LOG_LIMIT_BYTES = 64 * 1024;
 
-    const logPath = path.join(bdFolder, "data", "updater.log");
-    const uuid = randomUUID();
-
-    const log = (content: string) => {
-        if (process.env.__BUILD__ === "production") return;
-        fs.appendFileSync(logPath, `[id=${uuid},time=${Date.now()}]: ${content}\n`);
-    };
-
+/**
+ * Local, content-free outcome log (result codes and times only), so a missing
+ * Solcord after a Discord update can be diagnosed. It is bounded and never
+ * leaves the machine.
+ */
+function log(content: string): void {
     try {
-        const base = path.dirname(process.execPath);
-
-        const currentVersion = path.basename(base).slice(4);
-        const discordPath = path.dirname(base);
-
-        const latestVersion = fs.readdirSync(discordPath)
-            .filter((item) => item.startsWith("app-") && fs.statSync(path.join(discordPath, item)).isDirectory())
-            .map(item => item.slice(4))
-            .reduce((pre, cur) => {
-                if (comparator(pre, cur) === 1) return cur;
-                return pre;
-            });
-
-        log(`Current version is ${currentVersion} and latest is ${latestVersion}`);
-
-        if (latestVersion === currentVersion) return log("Latest version is same");
-
-        log("Attempting migration");
-
-        const resources = path.join(discordPath, `app-${latestVersion}`, "resources");
-
-        if (fs.existsSync(path.join(resources, "betterdiscord.app.asar"))) return log("Appears migration has happened before");
-
-        log(`Renaming app.asar`);
-
-        fs.renameSync(path.join(resources, "app.asar"), path.join(resources, "betterdiscord.app.asar"));
-
-        fs.mkdirSync(path.join(resources, "app"), {recursive: true});
-
-        log("Writing new app directory");
-
-        fs.writeFileSync(path.join(resources, "app", "index.js"), `
-require(${JSON.stringify(path.join(__dirname, "main.js"))});
-require("../betterdiscord.app.asar");
-`);
-
-        fs.writeFileSync(path.join(resources, "app", "package.json"), JSON.stringify({
-            name: "discord",
-            main: "index.js"
-        }));
+        const file = path.join(bdFolder, "data", "updater.log");
+        if (fs.existsSync(file) && fs.statSync(file).size > LOG_LIMIT_BYTES) fs.writeFileSync(file, "");
+        fs.appendFileSync(file, `${new Date().toISOString()} ${content.replace(/[A-Z]:\\[^\s]*/gi, "<path>")}\n`);
     }
-    catch (e) {
-        log(`Migration Failed!\n${String(e)}`);
-    }
+    catch {/* diagnostics must never affect startup or quit */}
 }
 
-app.on("before-quit", migrate);
+if (supported.includes(process.platform)) {
+    // main.js sits at the root of the packaged core, so __dirname is the core path
+    // the installer records (BetterDiscord\data\betterdiscord.asar).
+    const watch = new DiscordUpdateWatch({execPath: process.execPath, corePath: __dirname, log});
+    let lastResult = "";
+    const record = (trigger: string, result: string) => {
+        if (result === lastResult && result !== "migrated") return;
+        lastResult = result;
+        log(`${trigger}: ${result}`);
+    };
+    const timer = setInterval(() => record("check", watch.check()), DISCORD_UPDATE_CHECK_INTERVAL_MS);
+    timer.unref?.();
+    app.on("before-quit", () => {
+        clearInterval(timer);
+        record("quit", watch.onQuit());
+    });
+}

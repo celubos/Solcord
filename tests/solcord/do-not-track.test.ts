@@ -195,7 +195,7 @@ key: method.key,
                 blockedValue: method.blockedValue ?? (() => undefined)
             }))
         });
-        expect(adapter.start()).toContainEqual({dataClass: "telemetry", state: "Degraded", summary: "1 of 2 validated surfaces blocked; the remainder drifted."});
+        expect(adapter.start()).toContainEqual({dataClass: "telemetry", state: "Degraded", summary: "Blocked in 1 of 2 known places. A Discord update changed the others, so they are not blocked yet."});
         expect(Object.getOwnPropertyDescriptor(container, "M$")).toEqual(expect.objectContaining({configurable: false, set: undefined}));
         const opaque = new Proxy({}, {get() {throw Error("Payload must remain opaque");}});
         await expect(harness.module.track("SYNTHETIC", opaque)).resolves.toBeUndefined();
@@ -260,7 +260,7 @@ key: method.key,
             validate: method.validate,
 blockedValue: method.blockedValue ?? (() => undefined)
         }))});
-        expect(adapter.start()).toContainEqual({dataClass: "telemetry", state: "Protected", summary: "2 validated optional emission surfaces blocked."});
+        expect(adapter.start()).toContainEqual({dataClass: "telemetry", state: "Protected", summary: "Blocked in all 2 places Solcord knows Discord sends this."});
         const opaque = new Proxy({}, {get() {throw Error("Do not inspect synthetic event properties");}});
         await analytics.track("SYNTHETIC", opaque).then(value => {expect(value).toBeUndefined();});
         metadata("SYNTHETIC", opaque); await Promise.all(pending);

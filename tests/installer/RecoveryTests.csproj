@@ -11,6 +11,7 @@
     <Compile Include="RecoveryTests.cs" />
     <Compile Include="../../installer/Solcord.Installer/InstallerEngine.cs" Link="InstallerEngine.cs" />
     <Compile Include="../../installer/Solcord.Installer/SolcordLauncher.cs" Link="SolcordLauncher.cs" />
+    <Compile Include="../../installer/Solcord.Installer/FileSafety.cs" Link="FileSafety.cs" />
     <EmbeddedResource Include="../../assets/branding/icons/solcord.ico" LogicalName="Solcord.Installer.Resources.solcord.ico" />
   </ItemGroup>
 </Project>

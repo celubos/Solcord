@@ -14,6 +14,9 @@
         .peopleColumn_fixture { min-height: 65vh; padding: 24px; }
         .protected { background-color: #303030; padding: 16px; margin: 16px 0; }
         .solcord-ambient-effect { position: fixed; inset: 0; pointer-events: none; background: repeating-linear-gradient(30deg, #163c36 0 1px, #102421 1px 32px); }
+        /* Light mode paints light surfaces so its text contrast is actually exercised. */
+        html[data-solcord-mode="solcord-light"] .protected { background-color: var(--sc-app-surface-2); color: var(--sc-app-text); }
+        html[data-solcord-mode="solcord-light"] .solcord-ambient-effect { background: repeating-linear-gradient(30deg, #d8c9b2 0 1px, #f3ebdf 1px 32px); }
     </style>
 </head>
 <body>

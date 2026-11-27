@@ -90,9 +90,9 @@ describe("Solcord privacy policy", () => {
     test("blocks only explicitly named validated optional surfaces and restores them completely", async () => {
         const state = harness();
         expect(state.adapter.start()).toEqual([
-            {dataClass: "telemetry", state: "Protected", summary: "1 validated optional emission surface blocked."},
-            {dataClass: "crash-reporting", state: "Protected", summary: "1 validated optional emission surface blocked."},
-            {dataClass: "activity-discovery", state: "Protected", summary: "1 validated optional emission surface blocked."}
+            {dataClass: "telemetry", state: "Protected", summary: "Blocked in the one place Solcord knows Discord sends this."},
+            {dataClass: "crash-reporting", state: "Protected", summary: "Blocked in the one place Solcord knows Discord sends this."},
+            {dataClass: "activity-discovery", state: "Protected", summary: "Blocked in the one place Solcord knows Discord sends this."}
         ]);
         expect(state.module.track("private")).toBeUndefined();
         expect(state.module.captureException("private")).toBeUndefined();
@@ -185,7 +185,7 @@ describe("Solcord privacy policy", () => {
             }]
         });
 
-        expect(adapter.start()).toContainEqual({dataClass: "activity-discovery", state: "Protected", summary: "1 validated optional emission surface blocked."});
+        expect(adapter.start()).toContainEqual({dataClass: "activity-discovery", state: "Protected", summary: "Blocked in the one place Solcord knows Discord sends this."});
         expect(dispatcher.dispatch({type: "MESSAGE_CREATE", message: "untouched"})).toBe("dispatched");
         expect(dispatcher.dispatch({type: "RUNNING_GAMES_CHANGE", games: [{pid: 42}]})).toBe("dispatched");
         expect(dispatcher.dispatch({type: "RUNNING_GAMES_CHANGE"})).toBeUndefined();
