@@ -9,7 +9,16 @@ export function solcordLoaderIndex(corePath: string): string {
     return `require(${JSON.stringify(corePath)});\nmodule.exports = require("../betterdiscord.app.asar");\n`;
 }
 
-export type DiscordUpdateMigrationResult = "same-version" | "already-migrated" | "missing-archive" | "occupied-loader" | "migrated" | "failed";
+export type DiscordUpdateMigrationResult = "same-version" | "already-migrated" | "missing-archive" | "not-ready" | "occupied-loader" | "migrated" | "failed";
+
+export interface DiscordUpdateMigrationOptions {
+    execPath: string;
+    corePath: string;
+    /** Only migrate a staged version whose files have been unchanged this long (proactive checks). */
+    minimumStableMs?: number;
+    now?: number;
+    log?(message: string): void;
+}
 
 /**
  * When Discord stages a newer app-* folder, carry the Solcord loader into it.
@@ -18,7 +27,7 @@ export type DiscordUpdateMigrationResult = "same-version" | "already-migrated" |
  * The loader is byte-for-byte the installer's, so Update, Repair, and
  * Uninstall recognize the migrated folder as their own.
  */
-export function migrateDiscordUpdate(options: {execPath: string; corePath: string; log?(message: string): void;}): DiscordUpdateMigrationResult {
+export function migrateDiscordUpdate(options: DiscordUpdateMigrationOptions): DiscordUpdateMigrationResult {
     const log = options.log ?? (() => {});
     const base = path.dirname(options.execPath);
     const currentVersion = path.basename(base).slice(4);
@@ -29,8 +38,9 @@ export function migrateDiscordUpdate(options: {execPath: string; corePath: strin
         .map(item => item.slice(4));
     if (!versions.length) return "same-version";
     const latestVersion = versions.reduce((pre, cur) => comparator(pre, cur) === 1 ? cur : pre);
-    log(`Current version is ${currentVersion} and latest is ${latestVersion}`);
+    // Checked every minute while Discord runs, so the common case stays silent.
     if (latestVersion === currentVersion) return "same-version";
+    log(`Current version is ${currentVersion} and latest is ${latestVersion}`);
 
     const resources = path.join(discordPath, `app-${latestVersion}`, "resources");
     const original = path.join(resources, "app.asar");
@@ -38,6 +48,13 @@ export function migrateDiscordUpdate(options: {execPath: string; corePath: strin
     const loader = path.join(resources, "app");
     if (fs.existsSync(moved)) return "already-migrated";
     if (!fs.existsSync(original) || !fs.lstatSync(original).isFile()) return "missing-archive";
+    if (options.minimumStableMs !== undefined) {
+        // A background-staged update is still being written until Discord's own
+        // executable exists and the archive has stopped changing.
+        const executable = path.join(discordPath, `app-${latestVersion}`, path.basename(options.execPath));
+        const archiveAge = (options.now ?? Date.now()) - fs.statSync(original).mtimeMs;
+        if (!fs.existsSync(executable) || archiveAge < options.minimumStableMs) return "not-ready";
+    }
     const createdDirectory = !fs.existsSync(loader);
     if (!createdDirectory && (!fs.lstatSync(loader).isDirectory() || fs.readdirSync(loader).length > 0)) {
         log("The newer Discord folder already has app/ contents; leaving it unchanged.");

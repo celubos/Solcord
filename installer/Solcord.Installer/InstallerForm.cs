@@ -5,6 +5,9 @@ using System.Text.RegularExpressions;
 
 namespace Solcord.Installer;
 
+/// <summary>How Setup was opened: by hand, from the Start Menu "Solcord" entry (--launch), or from Settings &gt; Apps (--uninstall).</summary>
+internal enum InstallerStartup {Normal, Heal, Uninstall}
+
 internal sealed class InstallerForm : Form
 {
     private static readonly Color Canvas = Color.FromArgb(247, 245, 240);
@@ -26,6 +29,9 @@ internal sealed class InstallerForm : Form
 
     private readonly InstallerEngine _engine;
     private readonly ReleaseManifest _manifest;
+    private readonly SetupRegistration? _registration;
+    private InstallerStartup _startup;
+    private bool _discordUpdatedState;
     private readonly ComboBox _targets = new();
     private readonly Label _stateKind = new();
     private readonly Label _stateTitle = new();
@@ -57,13 +63,17 @@ internal sealed class InstallerForm : Form
     private int _stateGeneration;
     private Color _stateBorder = Color.FromArgb(118, 171, 163);
 
-    internal InstallerForm(string bundleRoot, InstallerEngine? engine = null)
+    /// <param name="registration">The persistent Setup copy and Settings &gt; Apps entry; null in self-tests so they never touch the real PC.</param>
+    internal InstallerForm(string bundleRoot, InstallerEngine? engine = null, InstallerStartup startup = InstallerStartup.Normal, SetupRegistration? registration = null)
     {
         _engine = engine ?? new InstallerEngine(bundleRoot, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
         _manifest = _engine.LoadManifest();
+        _registration = registration;
+        _startup = startup;
+        if (registration is not null) _engine.SetupExecutable = registration.SetupExecutable;
         _primaryAction = NewButton("Continue", ButtonTone.Primary);
-        _verifyAction = NewButton("Verify files", ButtonTone.Outline);
-        _recoveryAction = NewButton("Open recovery folder", ButtonTone.Outline);
+        _verifyAction = NewButton("Check files", ButtonTone.Outline);
+        _recoveryAction = NewButton("Open backups folder", ButtonTone.Outline);
         _refreshTargetsAction = NewButton("Refresh", ButtonTone.Outline);
         _closeAction = NewButton("Close", ButtonTone.Outline);
         _errorDetailsAction = NewButton("Error details", ButtonTone.Outline);
@@ -83,7 +93,7 @@ internal sealed class InstallerForm : Form
         Controls.Add(BuildShell());
         AcceptButton = _primaryAction;
         CancelButton = _closeAction;
-        Load += async (_, _) => await RefreshTargetsAsync();
+        Load += async (_, _) => {await RefreshTargetsAsync(); await ContinueStartupAsync();};
         Shown += (_, _) => {if (_targets.Enabled) _targets.Focus();};
         _targets.SelectedIndexChanged += (_, _) => RefreshInstallationState();
         FormClosing += (_, e) => {if (_busy) e.Cancel = true;};
@@ -138,7 +148,7 @@ internal sealed class InstallerForm : Form
         title.Dock = DockStyle.Fill;
         title.AutoSize = true;
         title.TextAlign = ContentAlignment.BottomLeft;
-        var subtitle = NewLabel("Install, repair, or restore Solcord.", 9.25f, FontStyle.Regular, Body);
+        var subtitle = NewLabel($"Version {_manifest.CandidateLabel} · Adds Solcord to the Discord app on this PC.", 9.25f, FontStyle.Regular, Body);
         subtitle.Dock = DockStyle.Fill;
         subtitle.TextAlign = ContentAlignment.TopLeft;
         copy.Controls.Add(title, 0, 0);
@@ -277,7 +287,7 @@ internal sealed class InstallerForm : Form
     {
         var header = new TableLayoutPanel {Dock = DockStyle.Top, AutoSize = true, MinimumSize = new Size(0, 30), ColumnCount = 1, RowCount = 1, BackColor = Canvas, Margin = Padding.Empty, Padding = Padding.Empty};
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        _maintenanceHeading.Text = "Recovery";
+        _maintenanceHeading.Text = "More options";
         _maintenanceHeading.Font = new Font("Segoe UI Variable Text", 11f, FontStyle.Bold);
         _maintenanceHeading.ForeColor = Ink;
         _maintenanceHeading.Dock = DockStyle.Fill;
@@ -298,9 +308,9 @@ internal sealed class InstallerForm : Form
         _maintenanceList.Margin = Padding.Empty;
         _maintenanceList.Padding = Padding.Empty;
         for (int i = 0; i < 3; i++) _maintenanceList.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        _maintenanceList.Controls.Add(ActionRow("repair", "Repair Solcord", "Reinstall this exact package if files are missing or damaged.", 2, 0), 0, 0);
-        _maintenanceList.Controls.Add(ActionRow("rollback", "Roll back", "Restore the verified backup made before the last change.", 3, 1), 0, 1);
-        _maintenanceList.Controls.Add(ActionRow("uninstall", "Uninstall Solcord", "Remove Solcord and keep plugins, themes, settings, and recovery files.", 4, 2, ButtonTone.Danger), 0, 2);
+        _maintenanceList.Controls.Add(ActionRow("repair", "Repair Solcord", "Put back this version's files if something is missing or changed.", 2, 0), 0, 0);
+        _maintenanceList.Controls.Add(ActionRow("rollback", "Roll back", "Undo the last change using the backup made before it.", 3, 1), 0, 1);
+        _maintenanceList.Controls.Add(ActionRow("uninstall", "Uninstall Solcord", "Return Discord to normal. Plugins, themes, and settings stay on disk.", 4, 2, ButtonTone.Danger), 0, 2);
         return _maintenanceList;
     }
 
@@ -357,18 +367,20 @@ internal sealed class InstallerForm : Form
         _verifyAction.Dock = DockStyle.Fill;
         _verifyAction.Margin = new Padding(0, 0, 8, 0);
         _verifyAction.TabIndex = 5;
-        _verifyAction.AccessibleName = "Verify installed Solcord files";
+        _verifyAction.AccessibleName = "Check installed Solcord files";
+        _verifyAction.AccessibleDescription = "Compare the installed files with this version. Nothing is changed.";
         _verifyAction.Click += (_, _) => {
             DiscordTarget selected = Target();
-            RunAction("Verification", () => _engine.VerifyInstalled(selected) ? $"Installed files match {_manifest.CandidateLabel} for {selected.Channel} {selected.Version}." : $"Installed files do not match {_manifest.CandidateLabel} for {selected.Channel} {selected.Version}.");
+            RunAction("Checking files", () => _engine.VerifyInstalled(selected) ? $"All Solcord files match {_manifest.CandidateLabel} for Discord {selected.Channel} {selected.Version}. Nothing was changed." : $"Some Solcord files differ from {_manifest.CandidateLabel} for Discord {selected.Channel} {selected.Version}. Repair puts them back. Nothing was changed.");
         };
         _recoveryAction.Dock = DockStyle.Fill;
         _recoveryAction.Margin = new Padding(0, 0, 8, 0);
         _recoveryAction.TabIndex = 6;
-        _recoveryAction.AccessibleName = "Open recovery folder";
-        _recoveryAction.Click += (_, _) => RunAction("Recovery files", () => {
+        _recoveryAction.AccessibleName = "Open backups folder";
+        _recoveryAction.AccessibleDescription = "Open the folder with the backups Setup makes before every change.";
+        _recoveryAction.Click += (_, _) => RunAction("Backups folder", () => {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_engine.RecoveryDirectory) {UseShellExecute = true});
-            return "Opened the Solcord recovery folder.";
+            return "Opened the folder with Solcord's backups.";
         });
         _errorDetailsAction.Dock = DockStyle.Left;
         _errorDetailsAction.AutoSize = true;
@@ -494,13 +506,28 @@ internal sealed class InstallerForm : Form
 
     private InstallationState ReadInstallationState(DiscordTarget selected)
     {
+        // A newer Setup's records may not pass this Setup's strict checks; say so
+        // plainly instead of reporting a validation failure.
+        if (_engine.InstalledPackageIsNewer()) return new(false, true, true, false, false, null, _engine.InstalledPackageLabel(), NewerInstalled: true);
         bool pending = _engine.HasPendingRecovery();
         bool managed = _engine.HasManagedInstall();
         bool channelMatches = _engine.IsManagedChannel(selected);
         bool packageRecorded = managed && channelMatches && _engine.IsCurrentPackageRecorded();
         bool exact = !pending && packageRecorded && _engine.VerifyInstalled(selected);
         string? recordedVersion = managed && channelMatches ? _engine.RecordedDiscordVersion() : null;
-        return new(pending, managed, channelMatches, packageRecorded, exact, recordedVersion);
+        return new(pending, managed, channelMatches, packageRecorded, exact, recordedVersion, managed ? _engine.InstalledPackageLabel() : null);
+    }
+
+    private bool InstalledPackageIsNewerSafe()
+    {
+        try {return _engine.InstalledPackageIsNewer();}
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException) {return false;}
+    }
+
+    private void ShowNewerInstalled(string? installedLabel)
+    {
+        SetActionAvailability(false, false, false, false, false);
+        SetState("Newer version installed", $"Solcord {installedLabel ?? "(newer)"} is already on this PC", $"This Setup is {_manifest.CandidateLabel}, which is older, so it won't change anything. Open \"Solcord Setup\" from the Start menu, or download the latest release, to manage Solcord.", StateTone.Warning, null);
     }
 
     private async Task RefreshInstallationStateAsync(Func<DiscordTarget, InstallationState>? inspect = null)
@@ -511,15 +538,18 @@ internal sealed class InstallerForm : Form
         int generation = ++_stateGeneration;
         _checkingState = true;
         SetErrorDetails(null);
-        SetState("Checking", $"Checking Discord {selected!.Channel}", $"Reviewing {selected.Version}. Wait for its available actions before continuing.", StateTone.Protected, null);
+        _discordUpdatedState = false;
+        SetState("Checking", $"Checking Discord {selected!.Channel}", $"Looking at version {selected.Version}. This takes a moment.", StateTone.Protected, null);
         UpdateInteractionState();
         try
         {
             var status = await Task.Run(() => (inspect ?? ReadInstallationState)(selected));
             if (IsDisposed || generation != _stateGeneration) return;
-            var (pending, managed, channelMatches, packageRecorded, exact, recordedVersion) = status;
+            if (status.NewerInstalled) {ShowNewerInstalled(status.InstalledLabel); return;}
+            var (pending, managed, channelMatches, packageRecorded, exact, recordedVersion, installedLabel, _) = status;
             bool discordUpdated = managed && channelMatches && !pending && !exact && recordedVersion is not null && recordedVersion != selected.Version
                 && Version.TryParse(recordedVersion, out Version? recorded) && Version.TryParse(selected.Version, out Version? chosen) && chosen > recorded;
+            _discordUpdatedState = discordUpdated;
             if (managed && !channelMatches)
             {
                 SetActionAvailability(false, false, false, false, false);
@@ -528,26 +558,28 @@ internal sealed class InstallerForm : Form
                 catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException) {}
                 bool recordedPresent = recordedChannel is not null && _targets.Items.OfType<DiscordTarget>().Any(target => target.Channel == recordedChannel);
                 if (recordedChannel is not null && !recordedPresent)
-                    SetState("Different channel", $"Solcord is recorded for Discord {recordedChannel}", $"Discord {recordedChannel} is not installed now. Reinstall it to uninstall Solcord there, or open Recovery files for the saved backups.", StateTone.Warning, null);
+                    SetState("Different Discord app", $"Solcord is set up for Discord {recordedChannel}", $"Discord {recordedChannel} isn't installed right now. Reinstall it to remove Solcord there, or open the backups folder.", StateTone.Warning, null);
                 else
-                    SetState("Different channel", $"Select Discord {recordedChannel ?? "the managed channel"}", "Solcord manages one channel at a time. Select its recorded channel above, then uninstall there before switching.", StateTone.Warning, null);
+                    SetState("Different Discord app", $"Choose Discord {recordedChannel ?? "the one Solcord uses"} above", "Solcord works with one Discord app at a time. Pick that one above; to switch apps, uninstall there first.", StateTone.Warning, null);
                 return;
             }
             SetActionAvailability(targetReady, managed, exact, packageRecorded, pending);
-            if (pending) SetState("Recovery required", "Restore the last known state", "A previous change stopped early. Restore its backup to continue.", StateTone.Warning, "rollback");
-            else if (exact) SetState("Installed and verified", $"{_manifest.CandidateLabel} is ready", "Installed files match this package.", StateTone.Protected, "launch");
-            else if (discordUpdated && packageRecorded) SetState("Discord updated", "Move Solcord to the new Discord version", $"Discord updated from {recordedVersion} to {selected.Version}. Repair re-applies Solcord there; settings and add-ons stay in place.", StateTone.Warning, "repair");
-            else if (discordUpdated) SetState("Discord updated", $"Update to {_manifest.CandidateLabel}", $"Discord updated from {recordedVersion} to {selected.Version}. Update installs this package there; the current version is backed up first.", StateTone.Warning, "update");
-            else if (packageRecorded) SetState("Repair available", "Restore this build", "The release receipt matches, but installed files changed.", StateTone.Warning, "repair");
-            else if (managed) SetState("Update available", $"Update to {_manifest.CandidateLabel}", "The current version will be backed up first.", StateTone.Warning, "update");
-            else SetState("Ready to install", $"Install {_manifest.CandidateLabel}", "BetterDiscord settings and add-ons stay in place.", StateTone.Protected, "install");
+            string installed = installedLabel is null ? "The installed version" : $"Solcord {installedLabel}";
+            if (pending) SetState("Unfinished change", "Put things back the way they were", "A previous Setup run stopped partway. Restore its backup first. Your settings and add-ons are kept.", StateTone.Warning, "rollback", "Restore backup");
+            else if (exact) SetState("Solcord is on", $"Solcord {_manifest.CandidateLabel} is installed", $"Everything checks out for Discord {selected.Channel} {selected.Version}. Open Discord to use it, or just close Setup.", StateTone.Protected, "launch");
+            else if (discordUpdated && packageRecorded) SetState("Solcord is off", "Discord updated and turned Solcord off", $"Discord moved from {recordedVersion} to {selected.Version}. Turn Solcord back on to reconnect it. Settings and add-ons stay in place.", StateTone.Warning, "repair", "Turn Solcord back on");
+            else if (discordUpdated) SetState("Solcord is off", "Discord updated and turned Solcord off", $"Discord moved from {recordedVersion} to {selected.Version}. Turning Solcord back on also updates it to {_manifest.CandidateLabel}. Settings and add-ons stay in place.", StateTone.Warning, "update", "Turn Solcord back on");
+            else if (packageRecorded) SetState("Needs repair", "Some Solcord files changed", "Repair puts back this version's files. Settings and add-ons stay in place.", StateTone.Warning, "repair");
+            else if (managed) SetState("Update available", $"Update Solcord to {_manifest.CandidateLabel}", $"{installed} is installed now. It's backed up first, so you can roll back.", StateTone.Warning, "update");
+            else SetState("Ready to install", $"Install Solcord {_manifest.CandidateLabel}", $"Adds Solcord to Discord {selected.Channel}. If Discord is open, Setup asks before closing it. BetterDiscord settings and add-ons stay in place.", StateTone.Protected, "install");
         }
         catch (Exception error)
         {
             if (IsDisposed || generation != _stateGeneration) return;
+            if (InstalledPackageIsNewerSafe()) {ShowNewerInstalled(_engine.InstalledPackageLabel()); return;}
             SetActionAvailability(false, false, false, false, _engine.HasPendingRecovery());
             SetErrorDetails(error);
-            SetState("Needs attention", "Review before continuing", FriendlyError(error), StateTone.Danger, _engine.HasPendingRecovery() ? "rollback" : null);
+            SetState("Needs attention", "Setup couldn't read this installation", $"{FriendlyError(error)} Nothing was changed.", StateTone.Danger, _engine.HasPendingRecovery() ? "rollback" : null, _engine.HasPendingRecovery() ? "Restore backup" : null);
         }
         finally
         {
@@ -591,7 +623,7 @@ internal sealed class InstallerForm : Form
         _primaryAction.Visible = recommendedKey is not null;
         _primaryRow.Visible = recommendedKey is not null;
         _primaryRow.Height = recommendedKey is null ? 0 : 46;
-        _primaryAction.Text = primaryLabel ?? recommendedKey switch {"install" => "Install Solcord", "update" => "Update Solcord", "repair" => "Repair Solcord", "rollback" => "Roll back", "launch" => "Open Solcord", _ => "Continue"};
+        _primaryAction.Text = primaryLabel ?? recommendedKey switch {"install" => "Install Solcord", "update" => "Update Solcord", "repair" => "Repair Solcord", "rollback" => "Roll back", "launch" => "Open Discord", _ => "Continue"};
         _primaryAction.AccessibleDescription = body;
         ApplyButtonTone(_primaryAction, ButtonTone.Primary);
     }
@@ -617,25 +649,57 @@ internal sealed class InstallerForm : Form
 
     private string CompleteInstall(InstallReceipt receipt)
     {
-        string result = $"Installed and verified {receipt.CandidateLabel ?? "the selected candidate"} for Discord {receipt.Channel} {receipt.DiscordVersion}.";
-        return _engine.LastLauncherWarning is null ? $"{result} Windows Search now includes Solcord." : $"{result} {_engine.LastLauncherWarning}";
+        string result = $"Solcord {receipt.CandidateLabel ?? _manifest.CandidateLabel} is on for Discord {receipt.Channel} {receipt.DiscordVersion}. Open it any time as \"Solcord\" from the Start menu.";
+        return WithNotes(result, _engine.LastLauncherWarning, UpdateSetupEntry());
     }
 
-    private void RunOperation(string key)
+    private static string WithNotes(string result, params string?[] notes) => string.Join(" ", new[] {result}.Concat(notes.Where(note => note is not null))!);
+
+    /// <summary>
+    /// Keep the persistent "Solcord Setup" copy, its Start Menu entry, and the
+    /// Settings &gt; Apps entry in step with the installation: present while Solcord
+    /// is installed, gone after it is removed. Never fails the operation.
+    /// </summary>
+    private string? UpdateSetupEntry()
     {
-        if (_busy || _checkingState || _refreshingTargets) return;
+        if (_registration is null) return null;
+        string running = Environment.ProcessPath ?? Application.ExecutablePath;
+        try
+        {
+            if (!_engine.HasManagedInstall()) {_registration.Remove(running); return null;}
+            _registration.Ensure(running, _manifest);
+            DiscordTarget? managed = _engine.ManagedTarget();
+            if (managed is not null) _engine.RefreshLauncher(managed);
+            return null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or System.Security.SecurityException or PlatformNotSupportedException or System.Runtime.InteropServices.COMException)
+        {
+            return $"Solcord itself is fine, but the \"Solcord Setup\" entry in Start and Settings couldn't be updated ({error.GetType().Name}).";
+        }
+    }
+
+    private void RunOperation(string key) => _ = RunOperationAsync(key, confirm: true);
+
+    private async Task<bool> RunOperationAsync(string key, bool confirm)
+    {
+        if (_busy || _checkingState || _refreshingTargets) return false;
         DiscordTarget selected = Target();
-        if (key == "uninstall" && MessageBox.Show("Remove Solcord from this Discord installation?\n\nDiscord returns to normal. Plugins, themes, settings, and recovery files stay on disk.", "Uninstall Solcord", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+        if (confirm && key == "uninstall" && MessageBox.Show("Remove Solcord from Discord?\n\nDiscord goes back to normal. Your plugins, themes, settings, and backups stay on this PC.", "Uninstall Solcord", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return false;
         if (key is "install" or "update" or "repair" or "rollback" or "uninstall")
         {
-            IReadOnlyList<string> running;
-            try {running = _engine.RunningDiscordChannels();}
-            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) {running = [];}
-            if (running.Count > 0 && MessageBox.Show($"Discord {string.Join(", ", running)} is running. Setup will close it to continue, which ends any call or upload in progress.\n\nClose Discord and continue?", "Close Discord", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            IReadOnlyList<string> running = RunningDiscordChannelsSafe();
+            if (running.Count > 0 && (!confirm || MessageBox.Show($"Discord {string.Join(", ", running)} is open. Setup needs to close it for a moment, which ends any call or upload in progress.\n\nClose Discord and continue?", "Close Discord", MessageBoxButtons.YesNo, MessageBoxIcon.Information, MessageBoxDefaultButton.Button2) != DialogResult.Yes)) return false;
         }
-        ActionVisual? visual = _actions.GetValueOrDefault(key);
-        string title = visual?.Title ?? (key == "launch" ? "Open Solcord" : key == "install" ? "Install Solcord" : key == "update" ? "Update Solcord" : "Solcord operation");
-        RunAction(title, () => key switch {
+        string title = key switch {
+            "launch" => "Opening Discord",
+            "install" => "Installing Solcord",
+            "update" => _discordUpdatedState ? "Turning Solcord back on" : "Updating Solcord",
+            "repair" => _discordUpdatedState ? "Turning Solcord back on" : "Repairing Solcord",
+            "rollback" => "Rolling back",
+            "uninstall" => "Uninstalling Solcord",
+            _ => "Working"
+        };
+        return await RunActionAsync(title, () => key switch {
             "install" => CompleteInstall(_engine.InstallNew(selected)),
             "update" => CompleteInstall(_engine.Update(selected)),
             "repair" => CompleteInstall(_engine.Repair(selected)),
@@ -646,6 +710,35 @@ internal sealed class InstallerForm : Form
         }, key);
     }
 
+    private IReadOnlyList<string> RunningDiscordChannelsSafe()
+    {
+        try {return _engine.RunningDiscordChannels();}
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception) {return [];}
+    }
+
+    /// <summary>
+    /// "--launch" (the Start Menu "Solcord" entry): if Discord updated and turned
+    /// Solcord off, turn it back on, open Discord, and close. Discord is never
+    /// closed to do this; anything that needs a decision stays on screen.
+    /// "--uninstall" (Settings &gt; Apps): put focus on Uninstall.
+    /// </summary>
+    private async Task ContinueStartupAsync()
+    {
+        InstallerStartup startup = _startup;
+        _startup = InstallerStartup.Normal;
+        if (startup == InstallerStartup.Uninstall)
+        {
+            ActionVisual uninstall = _actions["uninstall"];
+            if (uninstall.Row.Visible && uninstall.Button.Enabled) {uninstall.Button.Focus(); _workspaceScroll.ScrollControlIntoView(uninstall.Row);}
+            return;
+        }
+        if (startup != InstallerStartup.Heal) return;
+        if (_recommendedKey == "launch") {if (await RunOperationAsync("launch", confirm: false)) Close(); return;}
+        if (!_discordUpdatedState || _recommendedKey is not ("repair" or "update") || RunningDiscordChannelsSafe().Count > 0) return;
+        string heal = _recommendedKey;
+        if (await RunOperationAsync(heal, confirm: false) && _recommendedKey == "launch" && await RunOperationAsync("launch", confirm: false)) Close();
+    }
+
     private string Launch(DiscordTarget selected)
     {
         _engine.Launch(selected);
@@ -654,32 +747,35 @@ internal sealed class InstallerForm : Form
 
     private string CompleteRollback(string backupDirectory)
     {
-        string result = "The previous installation and its ownership record were restored from the verified backup.";
-        return _engine.LastLauncherWarning is null ? result : $"{result} {_engine.LastLauncherWarning}";
+        string result = "The previous version was restored from its backup.";
+        return WithNotes(result, _engine.LastLauncherWarning, UpdateSetupEntry());
     }
 
     private string Uninstall(DiscordTarget selected)
     {
         string backup = _engine.Uninstall(selected);
-        string message = $"Solcord was removed. A recovery copy was saved at {backup}.";
-        return _engine.LastLauncherWarning is null ? message : $"{message} {_engine.LastLauncherWarning}";
+        string message = $"Solcord was removed and Discord is back to normal. A backup was saved in {backup}.";
+        return WithNotes(message, _engine.LastLauncherWarning, UpdateSetupEntry());
     }
 
-    private async void RunAction(string actionName, Func<string> action, string? retryKey = null)
+    private async void RunAction(string actionName, Func<string> action, string? retryKey = null) => await RunActionAsync(actionName, action, retryKey);
+
+    private async Task<bool> RunActionAsync(string actionName, Func<string> action, string? retryKey = null)
     {
-        if (_busy || _checkingState || _refreshingTargets) return;
+        if (_busy || _checkingState || _refreshingTargets) return false;
         _busy = true;
         ++_stateGeneration;
         Control? previousFocus = ActiveControl;
         UseWaitCursor = true;
         SetErrorDetails(null);
         UpdateInteractionState();
-        SetState("Working", actionName, "Settings, add-ons, and account data stay in place.", StateTone.Protected, null);
+        SetState("Working", $"{actionName}…", "This usually takes a few seconds. Settings, add-ons, and account data stay in place.", StateTone.Protected, null);
         try
         {
             string result = await Task.Run(action);
             await RefreshTargetsAsync();
             _stateBody.Text = _errorDetails is null ? result : $"{result} Status refresh needs attention; open Error details.";
+            return true;
         }
         catch (Exception error)
         {
@@ -687,7 +783,8 @@ internal sealed class InstallerForm : Form
             bool pending = _engine.HasPendingRecovery();
             string? next = pending ? "rollback" : retryKey;
             SetErrorDetails(error);
-            SetState("Action needed", $"{actionName} couldn't finish", FriendlyError(error), StateTone.Danger, next, pending ? "Restore backup" : next is null ? null : "Try again");
+            SetState("Action needed", $"{actionName} didn't finish", FriendlyError(error), StateTone.Danger, next, pending ? "Restore backup" : next is null ? null : "Try again");
+            return false;
         }
         finally
         {
@@ -809,8 +906,31 @@ internal sealed class InstallerForm : Form
         if (!form._closeAction.Enabled || form._closeAction.Text != "Close" || form.CancelButton != form._closeAction)
             throw new InvalidDataException("installer-keyboard: idle Close/Escape was not restored");
         ValidateTargetReadiness(form, fixtureRoot);
+        ValidatePlainStates(form, fixtureRoot);
         ValidateRefreshRecovery(form, engine);
         ValidateErrorDetails(form, fixtureRoot);
+    }
+
+    private static void ValidatePlainStates(InstallerForm form, string fixtureRoot)
+    {
+        var updated = new DiscordTarget("Stable", "1.2.4", Path.Combine(fixtureRoot, "Discord.exe"), "Discord");
+        form._refreshingTargets = true;
+        form._targets.Items.Clear();
+        form._targets.Items.Add(updated);
+        form._targets.SelectedIndex = 0;
+        form._refreshingTargets = false;
+        CompleteUiTask(form.RefreshInstallationStateAsync(_ => new(false, true, true, true, false, "1.2.3", "v2.0.0")), "discord-updated-state");
+        if (form._recommendedKey != "repair" || form._primaryAction.Text != "Turn Solcord back on" || !form._discordUpdatedState || form._stateKind.Text != "Solcord is off" || !form._stateBody.Text.Contains("1.2.3", StringComparison.Ordinal))
+            throw new InvalidDataException("installer-plain-states: a Discord update was not explained as Solcord being off with a one-click fix");
+        CompleteUiTask(form.RefreshInstallationStateAsync(_ => new(false, true, true, false, false, "1.2.3", "v1.9.0")), "discord-updated-older-package");
+        if (form._recommendedKey != "update" || form._primaryAction.Text != "Turn Solcord back on")
+            throw new InvalidDataException("installer-plain-states: a Discord update with an older package did not offer turning Solcord back on");
+        CompleteUiTask(form.RefreshInstallationStateAsync(_ => new(false, true, true, false, false, null, "v9.0.0", NewerInstalled: true)), "newer-installed-state");
+        if (form._recommendedKey is not null || form._primaryAction.Enabled || form._verifyAction.Enabled || form._actions.Values.Any(action => action.Button.Enabled) || !form._stateTitle.Text.Contains("v9.0.0", StringComparison.Ordinal) || form._errorDetails is not null)
+            throw new InvalidDataException("installer-plain-states: an older Setup offered to change a newer installation or reported an error");
+        CompleteUiTask(form.RefreshInstallationStateAsync(_ => new(true, true, true, true, false)), "pending-state");
+        if (form._recommendedKey != "rollback" || form._primaryAction.Text != "Restore backup")
+            throw new InvalidDataException("installer-plain-states: an unfinished change did not offer Restore backup");
     }
 
     private static void CompleteUiTask(Task operation, string stage)
@@ -901,11 +1021,11 @@ internal sealed class InstallerForm : Form
                 form.SetActionAvailability(true, true, false, true, false);
                 form.SetState(
                     "Action needed",
-                    "Update Solcord couldn't finish",
+                    "Turning Solcord back on didn't finish",
                     "Discord could not close automatically. Quit it from the system tray, then try again; plugins, themes, settings, and recovery files remain unchanged.",
                     StateTone.Danger,
                     "update",
-                    "Try again"
+                    "Turn Solcord back on"
                 );
                 form.SetErrorDetails(new IOException("The selected local archive could not be opened. Refresh the Discord app list or try again."));
                 form.MinimumSize = Size.Empty;
@@ -1026,6 +1146,6 @@ internal sealed class InstallerForm : Form
 
     private enum ButtonTone {Primary, Outline, Danger}
     private enum StateTone {Protected, Warning, Danger}
-    private sealed record InstallationState(bool Pending, bool Managed, bool ChannelMatches, bool PackageRecorded, bool Exact, string? RecordedVersion = null);
+    private sealed record InstallationState(bool Pending, bool Managed, bool ChannelMatches, bool PackageRecorded, bool Exact, string? RecordedVersion = null, string? InstalledLabel = null, bool NewerInstalled = false);
     private sealed record ActionVisual(string Title, string Description, Control Row, Button Button, ButtonTone Tone, int RowIndex);
 }

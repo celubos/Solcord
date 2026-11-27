@@ -235,6 +235,84 @@ static class RecoveryTests
         gone.Uninstall(current);
         Check(!File.Exists(removedCore), "Uninstall after recovery left the core");
         Console.WriteLine("PASS removed recorded Discord version: actionable refusal, repair, uninstall");
+
+        // The field case: Discord staged a new version in the background, left it
+        // vanilla (no migrator ran), deleted the recorded version, and a newer
+        // Solcord package is then installed over it.
+        string field = Path.Combine(root, "field-update");
+        var (older, olderTarget) = Fixture(field);
+        older.InstallNew(olderTarget);
+        StageDiscordUpdate(field, "1.2.4", "vanilla", "");
+        Directory.Delete(Path.GetDirectoryName(olderTarget.ExecutablePath)!, recursive: true);
+        var upgrade = new InstallerEngine(Bundle(Path.Combine(field, "bundle-b"), "v2.0.0-rc.2", "core-b"), Path.Combine(field, "local"), Path.Combine(field, "roaming"), _ => 0);
+        DiscordTarget staged = upgrade.DetectTargets().Single();
+        Check(staged.Version == "1.2.4" && upgrade.RecordedDiscordVersion() == "1.2.3" && !upgrade.IsCurrentPackageRecorded(), "Field fixture did not reproduce a detached newer Discord");
+        Check(upgrade.InstalledPackageLabel() == "v2.0.0-rc.1", "Installed package label was not readable");
+        upgrade.Update(staged);
+        Check(upgrade.VerifyInstalled(staged) && upgrade.RecordedDiscordVersion() == "1.2.4", "A newer package did not re-attach Solcord to the updated Discord");
+        Check(File.ReadAllText(Path.Combine(field, "roaming", "BetterDiscord", "plugins", "owner.plugin.js")) == "private-owner-data", "Owner bytes changed during field update");
+        upgrade.Uninstall(staged);
+        Check(File.ReadAllText(Path.Combine(field, "local", "Discord", "app-1.2.4", "resources", "app.asar")) == "original-1.2.4", "Uninstall after field update did not restore vanilla Discord");
+        Console.WriteLine("PASS detached Discord update + removed recorded version: newer package updates, uninstall restores vanilla");
+    }
+
+    static void TestLauncherTargets(string root)
+    {
+        var (_, target) = Fixture(root);
+        string channelRoot = Path.Combine(root, "local", "Discord");
+        Check(SolcordLauncher.LaunchCommand(target).Target == target.ExecutablePath, "Without a launcher the app executable must be used");
+        File.WriteAllText(Path.Combine(channelRoot, "Update.exe"), "squirrel");
+        var squirrel = SolcordLauncher.LaunchCommand(target);
+        Check(squirrel.Target == Path.Combine(channelRoot, "Update.exe") && squirrel.Arguments == "--processStart Discord.exe", "The Squirrel launch command is wrong");
+        File.WriteAllText(Path.Combine(channelRoot, "Discord.exe"), "launcher");
+        var launcher = SolcordLauncher.LaunchCommand(target);
+        Check(launcher.Target == Path.Combine(channelRoot, "Discord.exe") && launcher.Arguments == "--processStart Discord.exe", "Discord's current launcher was not preferred over Update.exe");
+        string setup = Path.Combine(root, "local", "Solcord", "Setup", "SolcordSetup.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(setup)!);
+        File.WriteAllText(setup, "setup");
+        var healing = SolcordLauncher.LaunchCommand(target, setup);
+        Check(healing.Target == setup && healing.Arguments == "--launch", "The healing Setup launcher was not used");
+
+        string roaming = Path.Combine(root, "roaming");
+        string installerRoot = Path.Combine(roaming, "BetterDiscord", "solcord-installer");
+        string shortcut = Path.Combine(roaming, "Microsoft", "Windows", "Start Menu", "Programs", "Solcord", "Solcord.lnk");
+        SolcordLauncher.Ensure(target, roaming);
+        Check(SolcordLauncher.ShortcutTarget(shortcut) == Path.Combine(channelRoot, "Discord.exe"), "The shortcut does not start Discord's current launcher");
+        // An interrupted older Setup lost the receipt and icon: adopt, don't refuse forever.
+        File.Delete(Path.Combine(installerRoot, "launcher.json"));
+        File.Delete(Path.Combine(installerRoot, "Solcord.ico"));
+        SolcordLauncher.Ensure(target, roaming, setup);
+        Check(File.Exists(Path.Combine(installerRoot, "launcher.json")) && File.Exists(Path.Combine(installerRoot, "Solcord.ico")) && SolcordLauncher.ShortcutTarget(shortcut) == setup, "An orphaned Solcord shortcut was not adopted");
+        File.Delete(Path.Combine(installerRoot, "launcher.json"));
+        SolcordLauncher.Remove(roaming);
+        Check(!File.Exists(shortcut) && !File.Exists(Path.Combine(installerRoot, "Solcord.ico")), "An orphaned Solcord shortcut was not removed on uninstall");
+        // Something else at that path is never overwritten or removed.
+        Directory.CreateDirectory(Path.GetDirectoryName(shortcut)!);
+        File.WriteAllText(shortcut, "not a Solcord shortcut");
+        try {SolcordLauncher.Ensure(target, roaming); throw new InvalidDataException("A foreign launcher entry was overwritten");}
+        catch (InvalidDataException error) when (error.Message.Contains("unrecognized", StringComparison.Ordinal)) {}
+        SolcordLauncher.Remove(roaming);
+        Check(File.ReadAllText(shortcut) == "not a Solcord shortcut", "A foreign launcher entry was removed");
+        Console.WriteLine("PASS launcher uses Discord's current launcher or healing Setup, adopts orphaned entries, keeps foreign ones");
+    }
+
+    static void TestInstalledPackageLabel(string root)
+    {
+        var (engine, target) = Fixture(root);
+        Check(engine.InstalledPackageLabel() is null, "A missing receipt reported an installed package");
+        engine.InstallNew(target);
+        string receipt = Path.Combine(root, "roaming", "BetterDiscord", "solcord-installer", "current.json");
+        Check(engine.InstalledPackageLabel() == "v2.0.0-rc.1", "The installed package label was not read");
+        // A receipt written by a future Setup may fail this Setup's strict checks;
+        // the label is still read so the UI can say a newer Solcord is installed.
+        File.WriteAllText(receipt, "{\"Version\":\"9.1.0\",\"CandidateLabel\":\"v9.1.0\",\"FutureField\":{\"x\":1},\"SourceCommit\":\"not-a-commit\"}");
+        Check(engine.InstalledPackageLabel() == "v9.1.0", "A future receipt label was not read leniently");
+        Check(engine.InstalledPackageIsNewer(), "A future receipt was not reported as newer");
+        File.WriteAllText(receipt, "{\"Version\":\"not a version\"}");
+        Check(engine.InstalledPackageLabel() is null && !engine.InstalledPackageIsNewer(), "A malformed receipt produced a label");
+        File.WriteAllText(receipt, "{\"Version\":\"1.0.0\"}");
+        Check(engine.InstalledPackageLabel() == "v1.0.0" && !engine.InstalledPackageIsNewer(), "An older label-less receipt was misreported");
+        Console.WriteLine("PASS installed package label is read leniently for newer/older receipts");
     }
 
     static void TestLoaderRecognition()
@@ -279,6 +357,8 @@ static class RecoveryTests
             TestLoaderRecognition();
             TestDiscordUpdateMigration(Path.Combine(root, "discord-update"));
             TestCompletedInstallIsNotRecovery(Path.Combine(root, "completed"));
+            TestInstalledPackageLabel(Path.Combine(root, "label"));
+            TestLauncherTargets(Path.Combine(root, "launcher"));
             return 0;
         }
         catch (Exception error) {Console.Error.WriteLine(error); return 1;}

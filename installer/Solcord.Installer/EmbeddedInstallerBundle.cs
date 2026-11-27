@@ -173,16 +173,5 @@ internal sealed class EmbeddedInstallerBundle : IDisposable
         }
     }
 
-    private static void RejectLinkedPath(string trustedRoot, string target)
-    {
-        string root = Path.GetFullPath(trustedRoot).TrimEnd(Path.DirectorySeparatorChar);
-        string full = Path.GetFullPath(target);
-        if (!full.Equals(root, StringComparison.OrdinalIgnoreCase) && !full.StartsWith($"{root}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("The embedded installer extraction path escapes its private root.");
-        string current = root;
-        foreach (string component in Path.GetRelativePath(root, full).Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
-        {
-            current = Path.Combine(current, component);
-            if ((Directory.Exists(current) || File.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("The embedded installer refused a linked extraction path.");
-        }
-    }
+    private static void RejectLinkedPath(string trustedRoot, string target) => FileSafety.RejectLinkedPath(trustedRoot, target, "The embedded installer extraction path escapes its private root.", "The embedded installer refused a linked extraction path.");
 }

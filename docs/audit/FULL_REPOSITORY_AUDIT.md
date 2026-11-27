@@ -15,8 +15,8 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 | Persistent tracked files | 760 |
 | Text files scanned | 745 |
 | Binary files classified | 15 |
-| Text lines scanned | 149,109 |
-| Custom Solcord lines | 67,275 |
+| Text lines scanned | 149,571 |
+| Custom Solcord lines | 67,697 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -26,14 +26,14 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | Signal | Whole tree | Custom Solcord surfaces |
 | --- | ---: | ---: |
 | TODO / FIXME / HACK | 30 | 4 |
-| Timer calls | 86 | 47 |
+| Timer calls | 87 | 47 |
 | Mutation observers | 28 | 21 |
 | DOM queries | 380 | 282 |
 | Webpack discovery calls | 87 | 12 |
 | Patch calls | 31 | 11 |
-| Synchronous filesystem calls | 1,142 | 1,003 |
+| Synchronous filesystem calls | 1,150 | 1,008 |
 | Console calls | 86 | 65 |
-| Empty catch blocks | 8 | 6 |
+| Empty catch blocks | 6 | 4 |
 
 ## Largest maintainable files
 
@@ -48,11 +48,11 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 7 | `src/betterdiscord/styles/solcord.css` | 1,338 | 100.2 KiB |
 | 8 | `bun.lock` | 1,301 | 140.2 KiB |
 | 9 | `src/betterdiscord/modules/solcord/store.ts` | 1,224 | 64.6 KiB |
-| 10 | `CHANGELOG.md` | 1,212 | 47.8 KiB |
-| 11 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,211 | 81.5 KiB |
+| 10 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,222 | 82.5 KiB |
+| 11 | `CHANGELOG.md` | 1,221 | 48.8 KiB |
 | 12 | `tests/solcord/disposable-acceptance.test.ts` | 1,211 | 58.4 KiB |
 | 13 | `tests/common/i18n.test.ts` | 1,170 | 46.4 KiB |
-| 14 | `installer/Solcord.Installer/InstallerForm.cs` | 1,032 | 61.6 KiB |
+| 14 | `installer/Solcord.Installer/InstallerForm.cs` | 1,152 | 70.2 KiB |
 | 15 | `tests/solcord/fake-deafen.test.ts` | 948 | 51.4 KiB |
 | 16 | `scripts/assemble-solcord-release-evidence.mjs` | 947 | 54.7 KiB |
 | 17 | `src/electron/main/modules/solcord-setup.ts` | 904 | 52.1 KiB |
@@ -72,9 +72,9 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 6 | `tests/solcord/native-suite-security.test.ts` | 1,488 | 78.2 KiB |
 | 7 | `src/betterdiscord/styles/solcord.css` | 1,338 | 100.2 KiB |
 | 8 | `src/betterdiscord/modules/solcord/store.ts` | 1,224 | 64.6 KiB |
-| 9 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,211 | 81.5 KiB |
+| 9 | `installer/Solcord.Installer/InstallerEngine.cs` | 1,222 | 82.5 KiB |
 | 10 | `tests/solcord/disposable-acceptance.test.ts` | 1,211 | 58.4 KiB |
-| 11 | `installer/Solcord.Installer/InstallerForm.cs` | 1,032 | 61.6 KiB |
+| 11 | `installer/Solcord.Installer/InstallerForm.cs` | 1,152 | 70.2 KiB |
 | 12 | `tests/solcord/fake-deafen.test.ts` | 948 | 51.4 KiB |
 | 13 | `scripts/assemble-solcord-release-evidence.mjs` | 947 | 54.7 KiB |
 | 14 | `src/electron/main/modules/solcord-setup.ts` | 904 | 52.1 KiB |
@@ -82,8 +82,8 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 16 | `src/betterdiscord/modules/solcord/message-timeline.ts` | 762 | 35.1 KiB |
 | 17 | `src/betterdiscord/modules/solcord/fake-deafen.ts` | 687 | 32.8 KiB |
 | 18 | `src/common/solcord/v2-feature-models.ts` | 661 | 36.1 KiB |
-| 19 | `docs/audit/2026-11-07/file-coverage.csv` | 627 | 73.8 KiB |
-| 20 | `docs/releases/2.0.2-performance.json` | 609 | 22.7 KiB |
+| 19 | `installer/Solcord.Installer/Program.cs` | 632 | 43.0 KiB |
+| 20 | `docs/audit/2026-11-07/file-coverage.csv` | 627 | 73.8 KiB |
 
 ## Earlier repository corrections
 

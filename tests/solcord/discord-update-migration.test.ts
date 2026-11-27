@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 
 import {migrateDiscordUpdate, SOLCORD_LOADER_PACKAGE, solcordLoaderIndex} from "../../src/electron/main/discord-update-migration";
+import {DISCORD_UPDATE_STABLE_MS, DiscordUpdateWatch} from "../../src/electron/main/discord-update-watch";
 
 const roots: string[] = [];
 afterEach(() => {for (const root of roots.splice(0)) fs.rmSync(root, {recursive: true, force: true});});
@@ -76,6 +77,51 @@ describe("Discord update migration", () => {
         const latest = discord(["1.0.9300"]);
         expect(migrateDiscordUpdate({execPath: latest.execPath, corePath: latest.core})).toBe("same-version");
         expect(fs.readdirSync(latest.resources("1.0.9300"))).toEqual(["app.asar"]);
+    });
+
+    test("waits while Discord is still staging a background update, then attaches once it is stable", () => {
+        const fixture = discord();
+        const staged = path.join(fixture.root, "Discord", "app-1.0.9300");
+        const archive = path.join(staged, "resources", "app.asar");
+        const now = Date.now();
+        fs.utimesSync(archive, new Date(now - 5_000), new Date(now - 5_000));
+        expect(migrateDiscordUpdate({execPath: fixture.execPath, corePath: fixture.core, minimumStableMs: 60_000, now})).toBe("not-ready");
+        fs.utimesSync(archive, new Date(now - 120_000), new Date(now - 120_000));
+        fs.rmSync(path.join(staged, "Discord.exe"));
+        expect(migrateDiscordUpdate({execPath: fixture.execPath, corePath: fixture.core, minimumStableMs: 60_000, now})).toBe("not-ready");
+        fs.writeFileSync(path.join(staged, "Discord.exe"), "fixture");
+        expect(fs.readdirSync(path.join(staged, "resources"))).toEqual(["app.asar"]);
+        expect(migrateDiscordUpdate({execPath: fixture.execPath, corePath: fixture.core, minimumStableMs: 60_000, now})).toBe("migrated");
+        expect(fs.readFileSync(path.join(staged, "resources", "app", "index.js"), "utf8")).toBe(solcordLoaderIndex(fixture.core));
+    });
+
+    test("the running-client watch attaches to a staged update without waiting for Discord to quit", () => {
+        const fixture = discord();
+        const archive = path.join(fixture.resources("1.0.9300"), "app.asar");
+        const now = Date.now();
+        fs.utimesSync(archive, new Date(now - 10_000), new Date(now - 10_000));
+        const watch = new DiscordUpdateWatch({execPath: fixture.execPath, corePath: fixture.core});
+        expect(watch.check(now)).toBe("not-ready");
+        expect(watch.check(now + DISCORD_UPDATE_STABLE_MS)).toBe("migrated");
+        expect(fs.existsSync(path.join(fixture.resources("1.0.9300"), "betterdiscord.app.asar"))).toBeTrue();
+        // Settled: later ticks do no filesystem work.
+        let calls = 0;
+        const counting = new DiscordUpdateWatch({execPath: fixture.execPath, corePath: fixture.core}, options => {calls++; return migrateDiscordUpdate(options);});
+        expect(counting.check(now + DISCORD_UPDATE_STABLE_MS)).toBe("already-migrated");
+        expect(counting.check(now + 2 * DISCORD_UPDATE_STABLE_MS)).toBe("already-migrated");
+        expect(calls).toBe(1);
+    });
+
+    test("the quit hook retries briefly when the archive is locked and never throws", () => {
+        const fixture = discord();
+        const results: Array<"failed" | "migrated"> = ["failed", "failed", "migrated"];
+        const sleeps: number[] = [];
+        const watch = new DiscordUpdateWatch({execPath: fixture.execPath, corePath: fixture.core}, () => results.shift()!, milliseconds => sleeps.push(milliseconds));
+        expect(watch.onQuit()).toBe("migrated");
+        expect(sleeps).toEqual([150, 150]);
+        const throwing = new DiscordUpdateWatch({execPath: fixture.execPath, corePath: fixture.core}, () => {throw new Error("EPERM");}, () => {});
+        expect(throwing.onQuit()).toBe("failed");
+        expect(throwing.check()).toBe("failed");
     });
 
     test("reports a newer folder without an archive instead of creating a loader", () => {

@@ -1,0 +1,608 @@
+{
+    "schemaVersion": 1,
+    "status": "complete",
+    "backendSourceCommit": "3c753a8b19f331d5d263e3f0ac11696ac4cf9097",
+    "baselineComparisonCommit": "9b3004ff8c25c9879803a6c07fa8b28d04731438",
+    "environment": {
+        "runtime": "Bun 1.4.0",
+        "platform": "Windows x64",
+        "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36",
+        "concurrency": "Renderer, settings and voice benchmarks ran while the low-duty backend soak was active."
+    },
+    "sourceHashes": [
+        {
+            "path": "assets/themes/Solcord-CarbonEmber.theme.css",
+            "sha256": "ff86b971fa0dfa6c6aab03a6b47d48529ab9d835cb214bda9441c819a149e502",
+            "canonicalSha256": "ff86b971fa0dfa6c6aab03a6b47d48529ab9d835cb214bda9441c819a149e502"
+        },
+        {
+            "path": "assets/themes/Solcord-Default.theme.css",
+            "sha256": "c827959b57ec59e06ed2313316260a0dd9e6915cbd3b94269c190757080a2eab",
+            "canonicalSha256": "c827959b57ec59e06ed2313316260a0dd9e6915cbd3b94269c190757080a2eab"
+        },
+        {
+            "path": "assets/themes/Solcord-MidnightGlass.theme.css",
+            "sha256": "805c72842b1d62003d443e07336ce5d4a3eed86d49f18f4db37ae13b658cff39",
+            "canonicalSha256": "805c72842b1d62003d443e07336ce5d4a3eed86d49f18f4db37ae13b658cff39"
+        },
+        {
+            "path": "assets/themes/Solcord-NightTransit.theme.css",
+            "sha256": "3d297e7d54e7d38b97e3518bcb47ac0546f177baab70957f28286ee2ff9cb9cf",
+            "canonicalSha256": "3d297e7d54e7d38b97e3518bcb47ac0546f177baab70957f28286ee2ff9cb9cf"
+        },
+        {
+            "path": "assets/themes/Solcord-ObsidianThread.theme.css",
+            "sha256": "365e1f301f6f0d202643d9e298076b797db155d194ac29e22c724308156603f4",
+            "canonicalSha256": "365e1f301f6f0d202643d9e298076b797db155d194ac29e22c724308156603f4"
+        },
+        {
+            "path": "assets/themes/Solcord-PaperSignal.theme.css",
+            "sha256": "94b500ab8de7cea5b3fdbb1911b0f8620258b6eb15a7ec0b42f84e702034d376",
+            "canonicalSha256": "94b500ab8de7cea5b3fdbb1911b0f8620258b6eb15a7ec0b42f84e702034d376"
+        },
+        {
+            "path": "assets/themes/Solcord-QuietRead.theme.css",
+            "sha256": "36be0d64c80365e6e7610ccefda3d59ef1aad8fe0995881e169d4254f29367ef",
+            "canonicalSha256": "36be0d64c80365e6e7610ccefda3d59ef1aad8fe0995881e169d4254f29367ef"
+        },
+        {
+            "path": "assets/themes/Solcord-RelayClassic.theme.css",
+            "sha256": "c75251ae9e543177a3e4209ca186fc75541bf83573a5800691da001546e09e77",
+            "canonicalSha256": "c75251ae9e543177a3e4209ca186fc75541bf83573a5800691da001546e09e77"
+        },
+        {
+            "path": "assets/themes/Solcord-SignalBlock.theme.css",
+            "sha256": "9d04cefb0123e5c356a2040d5ba10fe44473aa5ce05b601dfb6e1460596cc5f4",
+            "canonicalSha256": "9d04cefb0123e5c356a2040d5ba10fe44473aa5ce05b601dfb6e1460596cc5f4"
+        },
+        {
+            "path": "assets/themes/Solcord-Threadline.theme.css",
+            "sha256": "b48e08bf849c05fc25dd14902f0ecb247b06278b4d072148111ad72db0166d87",
+            "canonicalSha256": "b48e08bf849c05fc25dd14902f0ecb247b06278b4d072148111ad72db0166d87"
+        },
+        {
+            "path": "assets/themes/Solcord-Workshop.theme.css",
+            "sha256": "7c8a0681d476ea4cddfc7509da13e2febfca23d73c80477a149335a76d9dac9a",
+            "canonicalSha256": "7c8a0681d476ea4cddfc7509da13e2febfca23d73c80477a149335a76d9dac9a"
+        },
+        {
+            "path": "scripts/benchmark-solcord-panel.ts",
+            "sha256": "283956be80a5eb0af0bf5f3f808655d15cba9768201410e3d2742b5a020a46a1",
+            "canonicalSha256": "6f7c009b8f5260eb6176cd99a92debafc1e4fd43407827354ec8c0b22c8c338d"
+        },
+        {
+            "path": "scripts/benchmark-solcord-voice.ts",
+            "sha256": "d88abb51cd91d5be1e83ac8bbc5502c34df22dfd1c91935dc7f96aaf63311832",
+            "canonicalSha256": "c45a4a4529a1ff6f0fe4ccd356794bd41552c6c57fb94c1b9ee7074178d6cbb1"
+        },
+        {
+            "path": "scripts/fixtures/solcord-renderer-benchmark.ts",
+            "sha256": "3bd488baccce76c9023f8f1b405ca9bf723bf0b488af9e3243239c966bb2d8cb",
+            "canonicalSha256": "ce55f4a091873f5cad75047d1c69ba01666047b1857b88c6bf71b21550d3dfa2"
+        },
+        {
+            "path": "scripts/render-solcord-ui-fixture.mjs",
+            "sha256": "9896eef8fd751afd03cf953c324eadfe7c8712ed349646830acd11ca92e7e8a1",
+            "canonicalSha256": "a279f076a8a3d811c8d61cc494eb36dc03291a2d701ad49e50bb23c1f1ba0280"
+        },
+        {
+            "path": "scripts/soak-solcord-backend.ts",
+            "sha256": "b4d081682d4591f4bf8aa8981b7dee499a03318a9d68b883f27e8d2a8f2668f3",
+            "canonicalSha256": "9d9d596fb38093f70f12fe261d7679e1f054b39290ce32786b0a4e93669ae84b"
+        },
+        {
+            "path": "src/betterdiscord/modules/patcher.ts",
+            "sha256": "5b06ef56c43568a31ffaafec89562ac849ce679a66efa2399305a051234124fd",
+            "canonicalSha256": "477b713538dbcb3e3111e269a1a9e120311706c7e556ce55688b8ccc3b156f49"
+        },
+        {
+            "path": "src/betterdiscord/modules/solcord/baseline-suite.ts",
+            "sha256": "12c96ea628caa016fefbcc80f95f131b07583aa62b220958d7693e3d6e0344ea",
+            "canonicalSha256": "9362c061892838f3b0f3aaea69a639f32e3cd7b5967da26465898da6fab9f72d"
+        },
+        {
+            "path": "src/betterdiscord/modules/solcord/disposal.ts",
+            "sha256": "266a70c1eac2a498300ccd08b96c93de691b4c68a4380892ad0f62370d3fda39",
+            "canonicalSha256": "6a1f806523fe244999774425c88aa5b0a7cea5d49e8eabecebf61036edab0f1f"
+        },
+        {
+            "path": "src/betterdiscord/modules/solcord/fake-deafen-send.ts",
+            "sha256": "72b49e12b263148bca8f849f7165c2db75ad690169a5980850838982444e3a04",
+            "canonicalSha256": "3e5379bd37a7ddbf64cbaf4011e8abe4cf3452f8e38081d8c87f00efc3d71d13"
+        },
+        {
+            "path": "src/betterdiscord/modules/solcord/fake-deafen.ts",
+            "sha256": "ee53abcaefbf47eacb66646e92b900f268af5345e64c1af040392b6ef9cf6f76",
+            "canonicalSha256": "d009c0e24d00d74b012f8faf23d8698e108dd1b9d6487d3b64a1a18fbb9de6d2"
+        },
+        {
+            "path": "src/betterdiscord/modules/solcord/message-timeline.ts",
+            "sha256": "833fab0dabace5d2ba433dcbf7dda97a41cc176cced9d1c83049378f807a73df",
+            "canonicalSha256": "0db737b075972a3e8d2997c381cff22ee9758c4ccc6092bbc4525bfe28af09a7"
+        },
+        {
+            "path": "src/betterdiscord/styles/solcord.css",
+            "sha256": "0bc229758edda6d58b8311e8f299a9e99456a9f5cea2e24e3419e111d03fcfd8",
+            "canonicalSha256": "da697da7fa6d84aa247c510b8e2095022b41de84b31024077acd6dc99094dece"
+        },
+        {
+            "path": "src/betterdiscord/ui/solcord/panel.tsx",
+            "sha256": "2f72df33806763bdf37dd85a56495772225b21cded5f682ebc743eded594495f",
+            "canonicalSha256": "5fc6f5802d988fef94299f67637d2ff6e47f1090957fb6a044cd8be363b0b57d"
+        },
+        {
+            "path": "src/betterdiscord/ui/solcord/privacy.tsx",
+            "sha256": "b41188de955350157943ee31a609b4664f0d6fee48d484b05609177e8acd5feb",
+            "canonicalSha256": "4850a1f097caadd67ae7f9e7ebd84db6e81b42f22095f839a495c1d58774a9ac"
+        },
+        {
+            "path": "src/betterdiscord/ui/solcord/timeline.tsx",
+            "sha256": "81d261fec4735c718c56b2d196d96688e88fac2760e288a0e146528789bfaddd",
+            "canonicalSha256": "81d261fec4735c718c56b2d196d96688e88fac2760e288a0e146528789bfaddd"
+        },
+        {
+            "path": "src/common/solcord/v2-feature-models.ts",
+            "sha256": "1320eb49173705cefe44e0f58ade7b21b66772d276c619a20c904febafd5a328",
+            "canonicalSha256": "f1707ee81340dd56aae0253331721a5a1696c96e2da25b1d5818876a5f6c23b4"
+        },
+        {
+            "path": "tests/fixtures/solcord-ambient-shell.html",
+            "sha256": "1d19d58c6046d3240a8f4bd6a16966de6f953d0134e92149e2c4610fd0a33208",
+            "canonicalSha256": "e355cd2c6abf553650cfa1ddb30799cb3cc54fbfee4b29ab5e1e5c57c6cdf1f1"
+        },
+        {
+            "path": "tests/fixtures/solcord-control-center.html",
+            "sha256": "7389ab4c0da2bbb7888e902f60dfc4b9d8645bfed217332fbc32a21672609a2e",
+            "canonicalSha256": "c6762032a70593b37a141325837cf997d68b5ff5d8e897b3f6051770b89c843e"
+        },
+        {
+            "path": "tests/fixtures/solcord-host-palette.html",
+            "sha256": "42ae065c50495a3b37703a430ca81a4d1ca535cddec07da359095664eb2453a6",
+            "canonicalSha256": "4cf6aaf0926935793218ee1311382575b038dce53317e6a00810be9fb76ebe21"
+        },
+        {
+            "path": "tests/solcord/panel-react.test.tsx",
+            "sha256": "30b2f62603cc018fdca23e445b6fd1c96fb7caafa47969b22f5344c6984efe3d",
+            "canonicalSha256": "6b93bafe3a13c2812709a97ce999a9aaacf237ea4ccb0b7480d99e7bcc94b9c0"
+        }
+    ],
+    "embedResolver": {
+        "targets": 1000,
+        "samplesPerVersion": 31,
+        "baseline": {
+            "medianMs": 32.5,
+            "p95Ms": 38.900000005960464,
+            "containsCallsPerScan": 999000
+        },
+        "current": {
+            "medianMs": 0.800000011920929,
+            "p95Ms": 1.2000000178813934,
+            "containsCallsPerScan": 0
+        }
+    },
+    "embedDom": {
+        "initialEmbeds": 1000,
+        "installationMs": 4.699999988079071,
+        "unrelatedMutations": 30,
+        "unrelatedResolverScans": 0,
+        "dirtyMessageMutations": 30,
+        "dirtyMessageResolverScans": 60,
+        "fullDocumentResolverScans": 0,
+        "remainingOwnedResources": {}
+    },
+    "panel": {
+        "cycles": 600,
+        "workspaceTransitions": 6000,
+        "assertions": 34804,
+        "timings": [
+            {
+                "name": "mount",
+                "samples": 600,
+                "medianMs": 1.34729999999945,
+                "p95Ms": 2.832399999999325,
+                "maximumMs": 25.7783
+            },
+            {
+                "name": "Appearance & Accessibility",
+                "samples": 600,
+                "medianMs": 4.190900000000511,
+                "p95Ms": 9.135099999999511,
+                "maximumMs": 38.63149999999996
+            },
+            {
+                "name": "Performance",
+                "samples": 600,
+                "medianMs": 1.945699999999988,
+                "p95Ms": 3.925799999999981,
+                "maximumMs": 12.109700000000885
+            },
+            {
+                "name": "Privacy & Safety",
+                "samples": 600,
+                "medianMs": 3.1598000000003594,
+                "p95Ms": 7.049700000001394,
+                "maximumMs": 13.421700000002602
+            },
+            {
+                "name": "Chat & Composer",
+                "samples": 600,
+                "medianMs": 3.354700000000321,
+                "p95Ms": 6.481300000000374,
+                "maximumMs": 17.363500000000386
+            },
+            {
+                "name": "Message History",
+                "samples": 600,
+                "medianMs": 3.3460000000000036,
+                "p95Ms": 6.45260000000053,
+                "maximumMs": 16.995899999999892
+            },
+            {
+                "name": "Voice & Activities",
+                "samples": 600,
+                "medianMs": 4.2794999999999845,
+                "p95Ms": 8.25760000000082,
+                "maximumMs": 22.830299999997806
+            },
+            {
+                "name": "Friends & Spaces",
+                "samples": 600,
+                "medianMs": 1.9200000000000728,
+                "p95Ms": 4.010900000001129,
+                "maximumMs": 15.898200000000543
+            },
+            {
+                "name": "Extensions",
+                "samples": 600,
+                "medianMs": 3.232299999999668,
+                "p95Ms": 6.240800000000036,
+                "maximumMs": 18.71889999999985
+            },
+            {
+                "name": "Recovery",
+                "samples": 600,
+                "medianMs": 2.202499999999418,
+                "p95Ms": 4.342799999999443,
+                "maximumMs": 13.542900000000373
+            },
+            {
+                "name": "Overview",
+                "samples": 600,
+                "medianMs": 0.8475999999991473,
+                "p95Ms": 1.6296999999995023,
+                "maximumMs": 5.776599999999689
+            },
+            {
+                "name": "unmount",
+                "samples": 600,
+                "medianMs": 0.12359999999898719,
+                "p95Ms": 0.2400000000000091,
+                "maximumMs": 0.8768000000000029
+            }
+        ],
+        "maximumSubscriptions": 13,
+        "remainingSubscriptions": 0,
+        "remainingAnimationFrames": 0,
+        "settingsMutationRequests": 0,
+        "fixtureQueryCacheResets": 600,
+        "maximumFixtureQueryDependencies": 0,
+        "initialHeapBytes": 9412820,
+        "heapAt100Cycles": 20902795,
+        "finalHeapBytes": 21136157,
+        "sampledPeakRssBytes": 197009408
+    },
+    "voice": {
+        "measuredOnOffCycles": 50000,
+        "warmupCycles": 100,
+        "syntheticRawSends": 150300,
+        "medianMs": 0.0078000000000315595,
+        "p95Ms": 0.013800000000003365,
+        "maximumMs": 2.260300000000001,
+        "remainingPatches": 0,
+        "memory": [
+            {
+                "cycle": 0,
+                "rssBytes": 95956992,
+                "heapUsedBytes": 14408390
+            },
+            {
+                "cycle": 1000,
+                "rssBytes": 105091072,
+                "heapUsedBytes": 14216452
+            },
+            {
+                "cycle": 2000,
+                "rssBytes": 110862336,
+                "heapUsedBytes": 14256913
+            },
+            {
+                "cycle": 3000,
+                "rssBytes": 113278976,
+                "heapUsedBytes": 14265308
+            },
+            {
+                "cycle": 4000,
+                "rssBytes": 113725440,
+                "heapUsedBytes": 14281369
+            },
+            {
+                "cycle": 5000,
+                "rssBytes": 114339840,
+                "heapUsedBytes": 14274809
+            },
+            {
+                "cycle": 6000,
+                "rssBytes": 118132736,
+                "heapUsedBytes": 14303018
+            },
+            {
+                "cycle": 7000,
+                "rssBytes": 123371520,
+                "heapUsedBytes": 14303154
+            },
+            {
+                "cycle": 8000,
+                "rssBytes": 123990016,
+                "heapUsedBytes": 14350454
+            },
+            {
+                "cycle": 9000,
+                "rssBytes": 125128704,
+                "heapUsedBytes": 14350506
+            },
+            {
+                "cycle": 10000,
+                "rssBytes": 129024000,
+                "heapUsedBytes": 14350522
+            },
+            {
+                "cycle": 11000,
+                "rssBytes": 130072576,
+                "heapUsedBytes": 14371022
+            },
+            {
+                "cycle": 12000,
+                "rssBytes": 130572288,
+                "heapUsedBytes": 14414097
+            },
+            {
+                "cycle": 13000,
+                "rssBytes": 130613248,
+                "heapUsedBytes": 14424521
+            },
+            {
+                "cycle": 14000,
+                "rssBytes": 134152192,
+                "heapUsedBytes": 14430441
+            },
+            {
+                "cycle": 15000,
+                "rssBytes": 130203648,
+                "heapUsedBytes": 14430489
+            },
+            {
+                "cycle": 16000,
+                "rssBytes": 133611520,
+                "heapUsedBytes": 14430537
+            },
+            {
+                "cycle": 17000,
+                "rssBytes": 134483968,
+                "heapUsedBytes": 14400327
+            },
+            {
+                "cycle": 18000,
+                "rssBytes": 134594560,
+                "heapUsedBytes": 14507730
+            },
+            {
+                "cycle": 19000,
+                "rssBytes": 134602752,
+                "heapUsedBytes": 14508005
+            },
+            {
+                "cycle": 20000,
+                "rssBytes": 134602752,
+                "heapUsedBytes": 14508149
+            },
+            {
+                "cycle": 21000,
+                "rssBytes": 134619136,
+                "heapUsedBytes": 14521581
+            },
+            {
+                "cycle": 22000,
+                "rssBytes": 135110656,
+                "heapUsedBytes": 14526781
+            },
+            {
+                "cycle": 23000,
+                "rssBytes": 122167296,
+                "heapUsedBytes": 14526829
+            },
+            {
+                "cycle": 24000,
+                "rssBytes": 122556416,
+                "heapUsedBytes": 14526877
+            },
+            {
+                "cycle": 25000,
+                "rssBytes": 122556416,
+                "heapUsedBytes": 14526925
+            },
+            {
+                "cycle": 26000,
+                "rssBytes": 122560512,
+                "heapUsedBytes": 14630045
+            },
+            {
+                "cycle": 27000,
+                "rssBytes": 122560512,
+                "heapUsedBytes": 14629869
+            },
+            {
+                "cycle": 28000,
+                "rssBytes": 122560512,
+                "heapUsedBytes": 14629917
+            },
+            {
+                "cycle": 29000,
+                "rssBytes": 122560512,
+                "heapUsedBytes": 14629965
+            },
+            {
+                "cycle": 30000,
+                "rssBytes": 122560512,
+                "heapUsedBytes": 14630013
+            },
+            {
+                "cycle": 31000,
+                "rssBytes": 121970688,
+                "heapUsedBytes": 14630061
+            },
+            {
+                "cycle": 32000,
+                "rssBytes": 122101760,
+                "heapUsedBytes": 14630285
+            },
+            {
+                "cycle": 33000,
+                "rssBytes": 122101760,
+                "heapUsedBytes": 14630333
+            },
+            {
+                "cycle": 34000,
+                "rssBytes": 122101760,
+                "heapUsedBytes": 14632685
+            },
+            {
+                "cycle": 35000,
+                "rssBytes": 122101760,
+                "heapUsedBytes": 14632827
+            },
+            {
+                "cycle": 36000,
+                "rssBytes": 122101760,
+                "heapUsedBytes": 14633099
+            },
+            {
+                "cycle": 37000,
+                "rssBytes": 122101760,
+                "heapUsedBytes": 14633149
+            },
+            {
+                "cycle": 38000,
+                "rssBytes": 122101760,
+                "heapUsedBytes": 14633197
+            },
+            {
+                "cycle": 39000,
+                "rssBytes": 122429440,
+                "heapUsedBytes": 14787869
+            },
+            {
+                "cycle": 40000,
+                "rssBytes": 122494976,
+                "heapUsedBytes": 14787917
+            },
+            {
+                "cycle": 41000,
+                "rssBytes": 122494976,
+                "heapUsedBytes": 14787965
+            },
+            {
+                "cycle": 42000,
+                "rssBytes": 122560512,
+                "heapUsedBytes": 14788013
+            },
+            {
+                "cycle": 43000,
+                "rssBytes": 122560512,
+                "heapUsedBytes": 14788061
+            },
+            {
+                "cycle": 44000,
+                "rssBytes": 122560512,
+                "heapUsedBytes": 14788109
+            },
+            {
+                "cycle": 45000,
+                "rssBytes": 122691584,
+                "heapUsedBytes": 14788157
+            },
+            {
+                "cycle": 46000,
+                "rssBytes": 122691584,
+                "heapUsedBytes": 14788205
+            },
+            {
+                "cycle": 47000,
+                "rssBytes": 122626048,
+                "heapUsedBytes": 14788253
+            },
+            {
+                "cycle": 48000,
+                "rssBytes": 122626048,
+                "heapUsedBytes": 14788301
+            },
+            {
+                "cycle": 49000,
+                "rssBytes": 122691584,
+                "heapUsedBytes": 14788349
+            },
+            {
+                "cycle": 50000,
+                "rssBytes": 122691584,
+                "heapUsedBytes": 14788397
+            },
+            {
+                "cycle": 50000,
+                "rssBytes": 122605568,
+                "heapUsedBytes": 14645065
+            }
+        ]
+    },
+    "controlledUi": {
+        "pass": true,
+        "scenarios": 46,
+        "failures": 0
+    },
+    "soak": {
+        "configuredDurationMs": 1800000,
+        "elapsedMs": 1800064,
+        "cycles": 17622,
+        "fakeDeafenCycles": 17622,
+        "failures": 0,
+        "pass": true,
+        "cycleTiming": {
+            "sampleKind": "Last 4096 completed cycles, excluding configured idle delay",
+            "samples": 4096,
+            "medianMs": 0.8621000000275671,
+            "p95Ms": 1.4544000001624227,
+            "maximumMs": 21.251400000000004
+        },
+        "maximumOwnedResources": 26,
+        "maximumVoiceHealthSamples": 120,
+        "fixtureQueryCacheResets": 17622,
+        "initialHeapBytes": 7758825,
+        "finalHeapBytes": 12055933,
+        "heapGrowthBytes": 4297108,
+        "heapGrowthLimitBytes": 67108864,
+        "sampledPeakHeapBytes": 12879045,
+        "sampledPeakRssBytes": 115744768,
+        "memorySamples": 61
+    },
+    "limits": [
+        "Synthetic backend and controlled React/DOM evidence; this does not replace signed-in Discord, real-call audio, real network or native installer acceptance.",
+        "Embed resolver versions execute against the same synthetic loaded DOM in headless Chromium; timings describe this workstation, with correctness assertions included.",
+        "Panel navigation uses the actual React tree with controlled host interfaces in Happy DOM, including the Message History workspace, not Chromium layout or native host latency.",
+        "Voice timings include the shipping controller, Patcher and receipt helper but exclude Discord encoding, Flux, network/media, Runtime notifications and React rendering; synchronous local enqueue is not server acknowledgement.",
+        "Heap samples use forced Bun GC. DOM query-cache maintenance occurs after teardown assertions and is fixture maintenance, not product cleanup. Sampled RSS peaks can miss between-sample peaks.",
+        "Message History storage behavior is covered by encrypted-store and journal tests, not by these timing runs.",
+        "No perfect, zero-traffic or leak-free claim is established by these tests."
+    ],
+    "sourceHashFormat": {
+        "sha256": "Exact measured Windows working-tree bytes.",
+        "canonicalSha256": "The same verified bytes with CRLF normalized to LF for cross-platform release verification."
+    }
+}

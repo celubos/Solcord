@@ -25,16 +25,45 @@ internal static class Program
             }
         }
         if (args.Contains("--update", StringComparer.OrdinalIgnoreCase)) return RunUpdate(args);
+        InstallerStartup startup = args.Contains("--launch", StringComparer.OrdinalIgnoreCase) ? InstallerStartup.Heal
+            : args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase) ? InstallerStartup.Uninstall
+            : InstallerStartup.Normal;
         try
         {
             using EmbeddedInstallerBundle bundle = EmbeddedInstallerBundle.ExtractVerified();
-            Application.Run(new InstallerForm(bundle.Root));
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var registration = new SetupRegistration(local, roaming);
+            var engine = new InstallerEngine(bundle.Root, local, roaming) {SetupExecutable = registration.SetupExecutable};
+            // The Start Menu "Solcord" entry: when nothing needs attention, open
+            // Discord straight away without showing Setup at all.
+            if (startup == InstallerStartup.Heal && TryLaunchVerified(engine)) return 0;
+            Application.Run(new InstallerForm(bundle.Root, engine, startup, registration));
             return 0;
         }
         catch (Exception error)
         {
-            MessageBox.Show(error.Message, "Solcord Installer", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(error.Message, "Solcord Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
+        }
+    }
+
+    /// <summary>Open Discord when Solcord is installed, verified, and attached to the newest Discord version.</summary>
+    private static bool TryLaunchVerified(InstallerEngine engine)
+    {
+        try
+        {
+            if (engine.HasPendingRecovery()) return false;
+            DiscordTarget? managed = engine.ManagedTarget();
+            if (managed is null) return false;
+            DiscordTarget? newest = engine.DetectTargets().FirstOrDefault(target => target.Channel == managed.Channel);
+            if (newest is null || newest.Version != managed.Version) return false;
+            engine.Launch(managed);
+            return true;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return false;
         }
     }
 
@@ -76,6 +105,50 @@ internal static class InstallerSelfTest
         return document.ToJsonString();
     }
 
+    /// <summary>
+    /// The Setup copy, its Start Menu entry, and the Settings &gt; Apps entry, using
+    /// disposable folders and a private registry key that is deleted afterwards.
+    /// </summary>
+    private static void ValidateSetupRegistration(string bundleRoot, string root)
+    {
+        string local = Path.Combine(root, "local");
+        string roaming = Path.Combine(root, "roaming");
+        string testRoot = $@"Software\Solcord.SelfTest\{Guid.NewGuid():N}";
+        string testKey = $@"{testRoot}\Uninstall\Solcord";
+        var registration = new SetupRegistration(local, roaming, testKey);
+        ReleaseManifest manifest = new InstallerEngine(bundleRoot, local, roaming).LoadManifest();
+        string download = Path.Combine(root, "Downloads", "SolcordInstaller.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(download)!);
+        File.WriteAllText(download, "setup-bytes");
+        try
+        {
+            string copy = registration.Ensure(download, manifest);
+            if (copy != registration.SetupExecutable || File.ReadAllText(copy) != "setup-bytes") throw new InvalidDataException("setup-registration: the Setup copy is wrong");
+            if (!string.Equals(SolcordLauncher.ShortcutTarget(registration.ShortcutPath), copy, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("setup-registration: the Start Menu entry does not open the Setup copy");
+            if (!registration.IsRegistered()) throw new InvalidDataException("setup-registration: the Settings > Apps entry is missing");
+            using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(testKey)!)
+            {
+                if (key.GetValue("UninstallString") as string != $"\"{copy}\" --uninstall" || key.GetValue("DisplayVersion") as string != manifest.Version || key.GetValue("DisplayName") as string != "Solcord")
+                    throw new InvalidDataException("setup-registration: the Settings > Apps entry has the wrong values");
+            }
+            registration.Ensure(copy, manifest);
+            if (File.ReadAllText(copy) != "setup-bytes") throw new InvalidDataException("setup-registration: running from the copy damaged it");
+            registration.Remove(download);
+            if (File.Exists(copy) || File.Exists(registration.ShortcutPath) || registration.IsRegistered() || Directory.Exists(registration.SetupDirectory))
+                throw new InvalidDataException("setup-registration: uninstall left the Setup copy, shortcut, or apps entry");
+            using (Microsoft.Win32.RegistryKey foreign = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(testKey)) foreign.SetValue("InstallLocation", Path.Combine(root, "someone-else"));
+            registration.Remove(download);
+            using (Microsoft.Win32.RegistryKey? kept = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(testKey))
+                if (kept is null) throw new InvalidDataException("setup-registration: an apps entry Setup did not create was removed");
+        }
+        finally
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(testRoot, throwOnMissingSubKey: false);
+            using Microsoft.Win32.RegistryKey? parent = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Solcord.SelfTest");
+            if (parent is not null && parent.SubKeyCount == 0 && parent.ValueCount == 0) {parent.Dispose(); Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(@"Software\Solcord.SelfTest", throwOnMissingSubKey: false);}
+        }
+    }
+
     internal static int Run(string embeddedBundleRoot)
     {
         string root = Path.Combine(Path.GetTempPath(), $"solcord-installer-test-{Guid.NewGuid():N}");
@@ -92,6 +165,8 @@ internal static class InstallerSelfTest
             InstallerForm.ValidateGeometryMatrix(embeddedBundleRoot);
             stage = "responsive-single-flight-engine-operation";
             InstallerForm.ValidateResponsiveOperations(embeddedBundleRoot);
+            stage = "persistent-setup-registration";
+            ValidateSetupRegistration(embeddedBundleRoot, Path.Combine(root, "setup-registration"));
             string local = Path.Combine(root, "local");
             string roaming = Path.Combine(root, "roaming");
             string discord = Path.Combine(local, "Discord", "app-1.2.3");

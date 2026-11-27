@@ -28,6 +28,8 @@ internal sealed class InstallerEngine
     private readonly Action<string>? _mutationHook;
 
     internal string? LastLauncherWarning {get; private set;}
+    /// <summary>The persistent Setup copy; when it exists the "Solcord" Start Menu entry runs it with --launch so Solcord is re-attached after Discord updates.</summary>
+    internal string? SetupExecutable {get; set;}
     internal string RecoveryDirectory => Path.Combine(_roamingAppData, "BetterDiscord", "solcord-installer");
 
     internal InstallerEngine(
@@ -68,7 +70,7 @@ internal sealed class InstallerEngine
 
     internal IReadOnlyList<DiscordTarget> DetectTargets()
     {
-        var definitions = new[] {("Stable", "Discord", "Discord"), ("PTB", "DiscordPTB", "DiscordPTB"), ("Canary", "DiscordCanary", "DiscordCanary")};
+        var definitions = DiscordChannels.All.Select(item => (item.Channel, item.ProcessName, item.ProcessName));
         var targets = new List<DiscordTarget>();
         foreach ((string channel, string directoryName, string processName) in definitions)
         {
@@ -95,7 +97,7 @@ internal sealed class InstallerEngine
 
     private void RequireReadyTarget(DiscordTarget target)
     {
-        string processName = target.Channel switch {"Stable" => "Discord", "PTB" => "DiscordPTB", "Canary" => "DiscordCanary", _ => ""};
+        string processName = DiscordChannels.ProcessName(target.Channel);
         if (processName.Length == 0 || target.ProcessName != processName || !Version.TryParse(target.Version, out _))
             throw new InvalidDataException("The selected Discord version is not a supported installation.");
         string expected = Path.Combine(_localAppData, processName, $"app-{target.Version}", $"{processName}.exe");
@@ -127,7 +129,7 @@ internal sealed class InstallerEngine
     {
         if (selected.Channel != receipt.Channel || !Version.TryParse(receipt.DiscordVersion, out _))
             throw new InvalidDataException("Select the Discord channel recorded by this Solcord installation to manage it.");
-        string processName = receipt.Channel switch {"Stable" => "Discord", "PTB" => "DiscordPTB", "Canary" => "DiscordCanary", _ => ""};
+        string processName = DiscordChannels.ProcessName(receipt.Channel);
         var target = new DiscordTarget(receipt.Channel, receipt.DiscordVersion,
             Path.Combine(_localAppData, processName, $"app-{receipt.DiscordVersion}", $"{processName}.exe"), processName);
         if (processName.Length > 0 && !Directory.Exists(Path.GetDirectoryName(target.ExecutablePath)))
@@ -142,7 +144,7 @@ internal sealed class InstallerEngine
 
     private DiscordTarget RecordedTarget(InstallReceipt receipt)
     {
-        string name = receipt.Channel switch {"Stable" => "Discord", "PTB" => "DiscordPTB", "Canary" => "DiscordCanary", _ => throw new InvalidDataException("The recorded Discord channel is invalid.")};
+        string name = DiscordChannels.ProcessName(receipt.Channel);
         return new DiscordTarget(receipt.Channel, receipt.DiscordVersion, Path.Combine(_localAppData, name, $"app-{receipt.DiscordVersion}", $"{name}.exe"), name);
     }
 
@@ -198,6 +200,44 @@ internal sealed class InstallerEngine
     private void RequireManagedChannel(DiscordTarget selected)
     {
         if (!IsManagedChannel(selected)) throw new InvalidOperationException("Solcord manages one Discord channel at a time because its core is shared. Uninstall it from the recorded channel before switching channels.");
+    }
+
+    /// <summary>
+    /// The package label recorded by the current receipt, read leniently: a receipt
+    /// written by a newer Setup can fail this Setup's strict checks, and the UI
+    /// must still be able to say "a newer Solcord is installed" instead of
+    /// reporting a validation failure. Never used to authorize a change.
+    /// </summary>
+    internal string? InstalledPackageLabel()
+    {
+        string file = Path.Combine(_roamingAppData, "BetterDiscord", "solcord-installer", "current.json");
+        try
+        {
+            if (!File.Exists(file) || new FileInfo(file).Length is <= 0 or > 64 * 1024) return null;
+            RejectLinkedPath(_roamingAppData, file);
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(file));
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("Version", out JsonElement versionElement) || versionElement.ValueKind != JsonValueKind.String) return null;
+            string version = versionElement.GetString()!;
+            if (!Regex.IsMatch(version, "^\\d+\\.\\d+\\.\\d+(?:\\.\\d+)?$", RegexOptions.CultureInvariant)) return null;
+            if (root.TryGetProperty("CandidateLabel", out JsonElement label) && label.ValueKind == JsonValueKind.String && IsCandidateLabelForVersion(label.GetString()!, version)) return label.GetString();
+            return $"v{version}";
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException) {return null;}
+    }
+
+    /// <summary>True when the installed package is newer than this Setup, so this Setup must not manage it.</summary>
+    internal bool InstalledPackageIsNewer()
+    {
+        string? label = InstalledPackageLabel();
+        if (label is null) return false;
+        ReleaseManifest manifest = LoadManifest();
+        string version = label[1..].Split('-', 2)[0];
+        if (!Version.TryParse(version, out Version? installed) || !Version.TryParse(manifest.Version, out Version? candidate)) return false;
+        if (installed != candidate) return installed > candidate;
+        return TryGetReleaseCandidateOrdinal(label, version, out ulong installedOrdinal)
+            && TryGetReleaseCandidateOrdinal(manifest.CandidateLabel, manifest.Version, out ulong candidateOrdinal)
+            && installedOrdinal > candidateOrdinal;
     }
 
     internal bool IsCurrentPackageRecorded()
@@ -336,7 +376,7 @@ internal sealed class InstallerEngine
             // there cannot present a completed install as needing Roll Back.
             try {File.Delete(pendingReceipt);}
             catch {/* current.json durably records the successful install; a matching stale pending receipt is reconciled before the next mutation */}
-            try {SolcordLauncher.Ensure(target, _roamingAppData);}
+            try {SolcordLauncher.Ensure(target, _roamingAppData, SetupExecutable);}
             catch (Exception error) {LastLauncherWarning = $"Solcord was installed, but its Windows Search entry could not be refreshed ({error.GetType().Name}).";}
             return receipt;
         }
@@ -384,7 +424,7 @@ internal sealed class InstallerEngine
             // A verified install with an identical leftover pending receipt is
             // complete; retire the leftover. A different pending receipt still blocks.
             RequireNoPendingRecovery();
-            try {SolcordLauncher.Ensure(target, _roamingAppData);}
+            try {SolcordLauncher.Ensure(target, _roamingAppData, SetupExecutable);}
             catch (Exception error) {LastLauncherWarning = $"Installed files are verified, but the Windows Search entry needs attention ({error.GetType().Name}).";}
             return ReadCurrentReceipt()!;
         }
@@ -402,7 +442,7 @@ internal sealed class InstallerEngine
             InstallReceipt? receipt = ReadCurrentReceipt();
             if (receipt is null || receipt.ArtifactSha256 != manifest.ArtifactSha256 || receipt.SourceCommit != manifest.SourceCommit || receipt.CandidateLabel != manifest.CandidateLabel) return false;
             if (selected is not null && (receipt.Channel != selected.Channel || receipt.DiscordVersion != selected.Version)) return false;
-            string processName = receipt.Channel switch {"Stable" => "Discord", "PTB" => "DiscordPTB", "Canary" => "DiscordCanary", _ => ""};
+            string processName = DiscordChannels.ProcessName(receipt.Channel);
             var target = new DiscordTarget(receipt.Channel, receipt.DiscordVersion,
                 Path.Combine(_localAppData, processName, $"app-{receipt.DiscordVersion}", $"{processName}.exe"), processName);
             RequireReadyTarget(target);
@@ -446,7 +486,7 @@ internal sealed class InstallerEngine
         if (previous is null || Path.GetFileName(receiptFile) == "pending.json") File.Delete(receiptFile);
         try
         {
-            if (previous is not null && state.PreviousLauncherRecorded) SolcordLauncher.Ensure(RecordedTarget(previous), _roamingAppData);
+            if (previous is not null && state.PreviousLauncherRecorded) SolcordLauncher.Ensure(RecordedTarget(previous), _roamingAppData, SetupExecutable);
             else SolcordLauncher.Remove(_roamingAppData);
         }
         catch (Exception error) {LastLauncherWarning = $"The previous installation was restored, but the Solcord Windows Search entry needs manual cleanup ({error.GetType().Name}).";}
@@ -631,7 +671,7 @@ internal sealed class InstallerEngine
         if (activeArchive != archive) File.Move(activeArchive, archive, overwrite: false);
         RequireWorkingInjector(target, files[0].Item2, receipt.DiscordArchiveSha256);
         File.Delete(journalFile);
-        try {SolcordLauncher.Ensure(target, _roamingAppData);}
+        try {SolcordLauncher.Ensure(target, _roamingAppData, SetupExecutable);}
         catch (Exception error) {LastLauncherWarning = $"The installation was restored; its shortcut needs attention ({error.GetType().Name}).";}
         return backup;
     }
@@ -649,6 +689,8 @@ internal sealed class InstallerEngine
         }
         finally {if (File.Exists(temporary)) File.Delete(temporary);}
     }
+
+    internal void RefreshLauncher(DiscordTarget target) => SolcordLauncher.Ensure(target, _roamingAppData, SetupExecutable);
 
     internal void Launch(DiscordTarget target)
     {
@@ -1025,7 +1067,7 @@ internal sealed class InstallerEngine
     internal string? RecordedChannel() => ReadCurrentReceipt()?.Channel;
 
     /// <summary>Discord channels with running processes, for an explicit close confirmation.</summary>
-    internal IReadOnlyList<string> RunningDiscordChannels() => new[] {("Stable", "Discord"), ("PTB", "DiscordPTB"), ("Canary", "DiscordCanary")}
+    internal IReadOnlyList<string> RunningDiscordChannels() => DiscordChannels.All
         .Where(item => _runningProcessCount(item.Item2) > 0).Select(item => item.Item1).ToArray();
 
     private static bool RecognizedInjector(string index, string package, string installedCore)
@@ -1110,7 +1152,7 @@ internal sealed class InstallerEngine
 
     private void RequireAllDiscordStopped()
     {
-        string[] running = new[] {"Discord", "DiscordPTB", "DiscordCanary"}.Where(name => _runningProcessCount(name) > 0).ToArray();
+        string[] running = DiscordChannels.All.Select(item => item.ProcessName).Where(name => _runningProcessCount(name) > 0).ToArray();
         if (running.Length == 0) return;
         _stopDiscordProcesses(running);
         string[] remaining = running;
@@ -1172,39 +1214,9 @@ internal sealed class InstallerEngine
             && full.StartsWith($"{trustedRoot}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void RejectReparsePoint(string directory)
-    {
-        if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("The installer refused a linked directory.");
-    }
+    private static void RejectReparsePoint(string directory) => FileSafety.RejectReparsePoint(directory, "The installer refused a linked directory.");
 
-    private static void RejectLinkedPath(string trustedRoot, string target)
-    {
-        string root = Path.GetFullPath(trustedRoot).TrimEnd(Path.DirectorySeparatorChar);
-        string full = Path.GetFullPath(target);
-        if (!full.Equals(root, StringComparison.OrdinalIgnoreCase) && !full.StartsWith($"{root}{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("The installer target escapes its trusted root.");
-        string current = root;
-        foreach (string component in Path.GetRelativePath(root, full).Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
-        {
-            current = Path.Combine(current, component);
-            if ((Directory.Exists(current) || File.Exists(current)) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("The installer refused a linked target path.");
-        }
-    }
+    private static void RejectLinkedPath(string trustedRoot, string target) => FileSafety.RejectLinkedPath(trustedRoot, target, "The installer target escapes its trusted root.", "The installer refused a linked target path.");
 
-    private static void WriteAtomic(string target, string content)
-    {
-        string temporary = $"{target}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            File.WriteAllText(temporary, content);
-            File.Move(temporary, target, overwrite: true);
-        }
-        finally
-        {
-            // A failed rename (antivirus lock, sharing violation) must not leave a
-            // stray file that later makes recovery see "owner files" in app/.
-            try {if (File.Exists(temporary)) File.Delete(temporary);}
-            catch (IOException) {}
-            catch (UnauthorizedAccessException) {}
-        }
-    }
+    private static void WriteAtomic(string target, string content) => FileSafety.WriteAtomic(target, content);
 }

@@ -1,6 +1,6 @@
 # Solcord quick start
 
-Use this guide for the **Solcord 2.0.2** Windows installer. Mac users should read the separate [macOS preview guide](MACOS.md).
+Use this guide for the **Solcord 2.0.3** Windows installer. Mac users should read the separate [macOS preview guide](MACOS.md).
 
 Allow about one minute on a typical PC **after download**. Windows prompts, Discord shutdown, or recovery can take longer.
 
@@ -18,8 +18,8 @@ Allow about one minute on a typical PC **after download**. Windows prompts, Disc
 
 Download both files into the same folder:
 
-- [SolcordInstaller.exe](https://github.com/celubos/Solcord/releases/download/v2.0.2/SolcordInstaller.exe)
-- [SHA256SUMS.txt](https://github.com/celubos/Solcord/releases/download/v2.0.2/SHA256SUMS.txt)
+- [SolcordInstaller.exe](https://github.com/celubos/Solcord/releases/download/v2.0.3/SolcordInstaller.exe)
+- [SHA256SUMS.txt](https://github.com/celubos/Solcord/releases/download/v2.0.3/SHA256SUMS.txt)
 
 ### Check the download
 
@@ -39,11 +39,15 @@ Solcord's core is shared by Discord Stable, PTB, and Canary. When changing that 
 
 Open **SolcordInstaller.exe**. In **Discord app**, choose the Discord installation you use. The version is detected from your PC, not fixed by this guide. Choose **Refresh** or press **F5** after installing or updating Discord. Actions stay disabled while Setup checks the selected app.
 
-Choose the large recommended action. It will say **Install Solcord**, **Update Solcord**, or **Repair Solcord** according to the files on your PC. Wait for the verified success status. Do not move or delete recovery files while an action is running.
+Choose the large recommended action. It will say **Install Solcord**, **Update Solcord**, **Repair Solcord**, or **Turn Solcord back on** according to the files on your PC. Wait for the success status. Do not move or delete backups while an action is running.
 
-## 4. Verify and launch
+Setup keeps a copy of itself on your PC, so you can delete the download afterwards. Open it any time as **Solcord Setup** from the Start menu, or from **Settings → Apps → Installed apps → Solcord**.
 
-Select **Verify files**. When the installed files match the package, choose **Open Solcord**. This launches your existing Discord installation; you do not need a separate account or a new Discord profile.
+## 4. Open Discord
+
+When Setup says **Solcord is on**, choose **Open Discord**. This launches your existing Discord installation; you do not need a separate account or a new Discord profile. **Check files** compares the installed files with this version without changing anything.
+
+From now on you can open Discord with the **Solcord** entry in the Start menu. If a Discord update turned Solcord off while Discord was closed, that entry turns it back on first.
 
 ## 5. Complete First Setup
 
@@ -66,24 +70,27 @@ Translation is optional. On-device translation requires a compatible engine in y
 
 Download the new release's installer and checksum file, verify the download, and choose **Update Solcord**. Plugins, themes, settings, and private stores remain in place. **Repair** reinstalls the exact package you opened; it does not download an update.
 
+Discord updates itself in the background. Solcord attaches to the new Discord version while Discord is running, so you normally don't need to do anything.
+
 ## Recovery
 
 | Problem | Next step |
 | --- | --- |
 | Discord does not appear in Discord app | Open the official desktop app once, quit it, then choose **Refresh** in Setup. |
 | Discord cannot close | Quit it from the Windows system tray, then retry. The installer will not guess at an unverified process. |
-| Files are missing or damaged | Run the same package and choose **Repair**. |
+| Files are missing or damaged | Open **Solcord Setup** and choose **Repair**. |
 | Setup reports an error | Choose **Error details** for the complete local error and recovery path. Nothing is uploaded automatically. |
-| Setup says **Discord updated** | Choose the recommended **Repair Solcord** (same release) or **Update Solcord** (newer release). This moves Solcord to the new Discord version. Uninstall waits until you do. |
-| Discord updated and Solcord disappeared | Open the newest installer. Choose **Update Solcord**, or **Repair Solcord** if that exact release is already recorded. |
+| Setup says **Solcord is off** | Discord updated without Solcord. Choose **Turn Solcord back on**. Uninstall waits until you do. |
+| Discord updated and Solcord disappeared | Open Discord from the **Solcord** Start menu entry, or open **Solcord Setup** and choose **Turn Solcord back on**. |
+| Setup says **Newer version installed** | You opened an older installer. Use **Solcord Setup** from the Start menu or download the latest release. |
 | The new core will not start | Use **Roll back** to restore the verified pre-change backup. |
 | A feature says Unavailable | Check Plugin Doctor; the current Discord build may not support that adapter. |
 | A background is not moving | In Appearance, select a background rather than Signal or Off. Check the effective motion policy; Lean and reduced motion stop ambient animation. |
 
-**Open recovery folder** shows local backups and receipts. Do not delete `%APPDATA%\BetterDiscord`, plugins, themes, Custom CSS, or private databases to troubleshoot.
+**Open backups folder** shows local backups and receipts. Do not delete `%APPDATA%\BetterDiscord`, plugins, themes, Custom CSS, or private databases to troubleshoot.
 
 ## Removing Solcord
 
-Choose **Uninstall** in the installer. It removes the core/injector and keeps plugins, themes, settings, private stores, and backups. This is deliberately not a data-wipe action. To remove saved deleted/edited messages too, choose **Erase history** in Solcord's **Message History** first.
+Choose **Uninstall** in **Solcord Setup**, or uninstall **Solcord** from **Settings → Apps → Installed apps**. It removes the core/injector, the Start menu entries, and Setup's own copy, and keeps plugins, themes, settings, private stores, and backups. This is deliberately not a data-wipe action. To remove saved deleted/edited messages too, choose **Erase history** in Solcord's **Message History** first.
 
 For manual recovery and backup details, read [Install and rollback](INSTALL_AND_ROLLBACK.md).

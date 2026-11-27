@@ -1,6 +1,6 @@
 {
     "name": "solcord",
-    "version": "2.0.2",
+    "version": "2.0.3",
     "description": "A reliability, privacy, and productivity fork of BetterDiscord with bounded Discord Activities compatibility.",
     "private": true,
     "repository": {"type": "git", "url": "https://github.com/celubos/Solcord.git"},

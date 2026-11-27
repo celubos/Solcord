@@ -1,5 +1,14 @@
 # Solcord Changelog
 
+## 2.0.3 - Stays on after Discord updates
+
+- Solcord now attaches to a Discord update while Discord is still running (once its files are complete and stable) instead of only when Discord quits, so background updates no longer switch it off.
+- The Start menu **Solcord** entry turns Solcord back on after a Discord update, then opens Discord. It never closes a running Discord.
+- Setup explains each state in plain words (**Solcord is on / off**, **Update available**, **Needs repair**) with one recommended button such as **Turn Solcord back on**, and an older installer now says **Newer version installed** instead of a receipt validation error.
+- Setup keeps a current copy of itself with a **Solcord Setup** Start menu entry and a **Solcord** entry in Settings → Apps; uninstall removes them.
+- The Solcord shortcut uses Discord's current launcher, and a shortcut orphaned by an interrupted older Setup is repaired instead of blocking updates to it.
+- Consolidated duplicated installer path-safety, atomic-write and channel code.
+
 ## 2.0.2 - Message History and Discord updates
 
 - Added **Message History**, a discoverable workspace for deleted and edited messages with filters, search, version history, conversation links, and two-step export and erase. Off by default; DM-only, text-only, 7-day defaults are unchanged.
