@@ -8,6 +8,7 @@ import {app, safeStorage} from "electron";
 import type {SolcordRelationshipChangeTransition, SolcordRelationshipEvent} from "@common/solcord/friend-watch";
 
 import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
+import {assertSolcordPathInside, recoverSolcordReplacedFile, solcordReplacementArtifacts, SolcordSerialQueue, writeSolcordFileAtomically} from "./solcord-private-store-files";
 
 interface FriendWatchRequest {
     events?: unknown[];
@@ -29,8 +30,7 @@ const MAX_BATCH_BYTES = 2 * 1024 * 1024;
 const MAX_WRAPPED_KEY_BYTES = 8 * 1024;
 const STORE_DIRECTORY = /^store-[0-9a-f]{40}$/;
 const ACCOUNT_TRANSIENT_FILE = /^(?:data\.sc-key|events\.scdb)\.\d+\.[0-9a-f]{8}\.(?:old|tmp)$/;
-const EVENT_BACKUP_FILE = /^events\.scdb\.\d+\.[0-9a-f]{8}\.old$/;
-const EVENT_TEMPORARY_FILE = /^events\.scdb\.\d+\.[0-9a-f]{8}\.tmp$/;
+const EVENT_ARTIFACTS = solcordReplacementArtifacts("events.scdb");
 const TRANSITIONS = new Set<string>([
     "incoming-request-received",
     "incoming-request-cancelled",
@@ -105,7 +105,7 @@ export class SolcordFriendWatchStorage {
     #identityKey?: Buffer;
     #session = new Map<string, SolcordRelationshipEvent[]>();
     #persistenceFailed = false;
-    #queue = Promise.resolve();
+    #queue = new SolcordSerialQueue();
 
     status(): {persistent: boolean; sessionOnly: boolean; reason?: string;} {
         const persistent = this.#secureAvailable();
@@ -115,7 +115,7 @@ export class SolcordFriendWatchStorage {
     append(rawAccount: unknown, rawRequest: unknown): Promise<{events: SolcordRelationshipEvent[]; persistent: boolean;}> {
         const account = this.#account(rawAccount);
         const request = normalizeRequest(rawRequest, "append");
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (!this.#secureAvailable()) return {events: this.#appendSession(account, request), persistent: false};
             try {
                 const directory = this.#accountDirectory(account, true)!;
@@ -139,7 +139,7 @@ export class SolcordFriendWatchStorage {
     read(rawAccount: unknown, rawRequest: unknown): Promise<{events: SolcordRelationshipEvent[]; persistent: boolean; complete: boolean;}> {
         const account = this.#account(rawAccount);
         const request = normalizeRequest(rawRequest, "read");
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (!this.#secureAvailable()) return {events: prune(this.#session.get(account) ?? [], request.retentionDays), persistent: false, complete: true};
             try {
                 const directory = this.#accountDirectory(account, false);
@@ -163,7 +163,7 @@ export class SolcordFriendWatchStorage {
     clear(rawAccount: unknown, rawRequest: unknown): Promise<{cleared: number; persistent: boolean; complete: boolean;}> {
         const account = this.#account(rawAccount);
         normalizeRequest(rawRequest, "clear");
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             const session = this.#session.get(account)?.length ?? 0;
             this.#session.delete(account);
             try {
@@ -194,12 +194,6 @@ export class SolcordFriendWatchStorage {
     #account(value: unknown): string {
         if (!validAccount(value)) throw new TypeError("Invalid Friend Watch account scope.");
         return value;
-    }
-
-    #serialized<T>(task: () => Promise<T>): Promise<T> {
-        const result = this.#queue.then(task, task);
-        this.#queue = result.then(() => undefined, () => undefined);
-        return result;
     }
 
     #secureAvailable(): boolean {
@@ -374,88 +368,23 @@ export class SolcordFriendWatchStorage {
     }
 
     #assertInside(target: string, root: string): void {
-        const resolvedRoot = path.resolve(root);
-        const resolvedTarget = path.resolve(target);
-        if (!resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) throw new TypeError("Friend Watch path escapes its root.");
+        assertSolcordPathInside(target, root, "Friend Watch path escapes its root.");
     }
 
     #recoverAtomicFile(directory: string, key: Buffer): void {
         this.#assertDirectory(directory);
-        const target = path.join(directory, "events.scdb");
-        const names = fs.readdirSync(directory);
-        const backups = names.filter(name => EVENT_BACKUP_FILE.test(name));
-        const temporary = names.filter(name => EVENT_TEMPORARY_FILE.test(name));
-        if (backups.length > 1) throw new TypeError("Ambiguous Friend Watch recovery state.");
-        for (const name of [...backups, ...temporary]) {
-            const candidate = path.join(directory, name);
-            this.#assertInside(candidate, directory);
-            const stat = fs.lstatSync(candidate);
-            if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError("Unsafe Friend Watch recovery artifact.");
-        }
-        if (!fs.existsSync(target) && backups.length === 1) fs.renameSync(path.join(directory, backups[0]), target);
-        if (fs.existsSync(target)) {
-            const stat = fs.lstatSync(target);
-            if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError("Friend Watch target is unsafe.");
-            const remainingBackup = backups.map(name => path.join(directory, name)).find(fs.existsSync);
-            if (remainingBackup) {
-                try {
-                    this.#readEnvelopeFile(target, key);
-                    fs.unlinkSync(remainingBackup);
-                }
-                catch {
-                    const displaced = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.old`;
-                    fs.renameSync(target, displaced);
-                    try {
-                        fs.renameSync(remainingBackup, target);
-                        this.#readEnvelopeFile(target, key);
-                        fs.unlinkSync(displaced);
-                    }
-                    catch (error) {
-                        if (!fs.existsSync(target) && fs.existsSync(displaced)) fs.renameSync(displaced, target);
-                        throw error;
-                    }
-                }
-            }
-        }
-        for (const name of temporary) fs.unlinkSync(path.join(directory, name));
+        recoverSolcordReplacedFile(path.join(directory, "events.scdb"), {
+            artifacts: EVENT_ARTIFACTS,
+            verify: file => {this.#readEnvelopeFile(file, key);},
+            assertArtifact: file => this.#assertInside(file, directory),
+            messages: {ambiguous: "Ambiguous Friend Watch recovery state.", unsafeArtifact: "Unsafe Friend Watch recovery artifact.", unsafeTarget: "Friend Watch target is unsafe."}
+        });
     }
 
+    /** Every Friend Watch file is fsynced again after its rename. */
     #atomicWrite(target: string, content: string, root: string, replace = false): void {
         this.#assertInside(target, root);
-        const temporary = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
-        const descriptor = fs.openSync(temporary, "wx", 0o600);
-        try {
-            fs.writeFileSync(descriptor, content, {encoding: "utf8"});
-            fs.fsyncSync(descriptor);
-        }
-        finally {fs.closeSync(descriptor);}
-        try {
-            if (replace && fs.existsSync(target)) {
-                const stat = fs.lstatSync(target);
-                if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError("Friend Watch target is unsafe.");
-                const backup = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.old`;
-                fs.renameSync(target, backup);
-                try {
-                    fs.renameSync(temporary, target);
-                    this.#flushFile(target);
-                    fs.unlinkSync(backup);
-                }
-                catch (error) {
-                    if (!fs.existsSync(target) && fs.existsSync(backup)) fs.renameSync(backup, target);
-                    throw error;
-                }
-            }
-            else {
-                fs.renameSync(temporary, target);
-                this.#flushFile(target);
-            }
-        }
-        finally {
-            try {
-                if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
-            }
-            catch {/* preserve primary error */}
-        }
+        writeSolcordFileAtomically(target, content, {replace, unsafeTarget: "Friend Watch target is unsafe.", verify: file => this.#flushFile(file), verifyNewFile: true});
     }
 
     #flushFile(file: string): void {

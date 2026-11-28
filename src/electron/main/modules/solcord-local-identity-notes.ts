@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import {app, safeStorage} from "electron";
+import {safeStorage} from "electron";
 
-import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
+import {SolcordPrivateStoreFiles, SolcordSerialQueue} from "./solcord-private-store-files";
 
 
 export interface SolcordStoredIdentityNote {
@@ -21,13 +20,10 @@ interface IdentityNoteDocument {
 }
 
 const ACCOUNT_ID = /^\d{1,32}$/;
-const STORE_DIRECTORY = /^store-[0-9a-f]{40}$/;
 const MAX_NOTES = 500;
 const MAX_DOCUMENT_BYTES = 512 * 1024;
 const MAX_WRAPPED_BYTES = 1024 * 1024;
 const EMPTY_DOCUMENT: IdentityNoteDocument = {version: 1, notes: []};
-const NOTES_BACKUP_FILE = /^notes\.scdb\.\d+\.[0-9a-f]{8}\.old$/;
-const NOTES_TEMPORARY_FILE = /^notes\.scdb\.\d+\.[0-9a-f]{8}\.tmp$/;
 
 function printableText(value: unknown, maximumLength: number, label: string): string {
     if (typeof value !== "string" || value.length > maximumLength || [...value].some(character => {
@@ -81,9 +77,27 @@ function cloneDocument(document: IdentityNoteDocument): IdentityNoteDocument {
 
 export class SolcordLocalIdentityNotesStorage {
     #session = new Map<string, IdentityNoteDocument>();
-    #identity?: Buffer;
+    #files = new SolcordPrivateStoreFiles<IdentityNoteDocument>({
+        directoryName: "solcord-local-identity-notes-v1",
+        fileName: "notes.scdb",
+        maxWrappedBytes: MAX_WRAPPED_BYTES,
+        normalize: normalizeDocument,
+        messages: {
+            unsafeDirectory: "Identity note storage directory is unsafe.",
+            linkedDirectory: "Identity note storage directory is unsafe.",
+            pathEscapesRoot: "Identity note storage path escaped its root.",
+            invalidIdentityFile: "Invalid identity note storage key.",
+            invalidIdentityKey: "Invalid identity note storage key.",
+            invalidStoreDirectory: "Invalid identity note store directory.",
+            invalidStoreFile: "Invalid identity note file.",
+            invalidEncryptedDocument: "Invalid encrypted identity note document.",
+            ambiguousRecovery: "Ambiguous identity note recovery state.",
+            unsafeRecoveryArtifact: "Unsafe identity note recovery artifact.",
+            unsafeTarget: "Identity note target is unsafe."
+        }
+    });
     #failed = false;
-    #queue = Promise.resolve();
+    #queue = new SolcordSerialQueue();
 
     status(): {persistent: boolean; sessionOnly: boolean; reason?: string;} {
         return this.#secureAvailable()
@@ -94,7 +108,7 @@ export class SolcordLocalIdentityNotesStorage {
     read(rawAccount: unknown, rawRequest: unknown): Promise<{notes: SolcordStoredIdentityNote[]; persistent: boolean; complete: boolean;}> {
         const account = this.#account(rawAccount);
         this.#emptyRequest(rawRequest);
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             const result = this.#readDocument(account);
             return {notes: result.document.notes, persistent: result.persistent, complete: result.complete};
         });
@@ -107,7 +121,7 @@ export class SolcordLocalIdentityNotesStorage {
         this.#rejectAuthority(request);
         if (request.storage !== "secure-only" || Object.keys(request).some(key => !["subjectId", "note", "tags", "storage"].includes(key))) throw new TypeError("Identity note writes require the reviewed secure-only intent.");
         const note = normalizeNote({subjectId: request.subjectId, text: request.note, tags: request.tags});
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             const current = this.#readDocument(account);
             const notes = new Map(current.document.notes.map(item => [item.subjectId, item]));
             if (!notes.has(note.subjectId) && notes.size >= MAX_NOTES) throw new RangeError("Local identity note limit reached.");
@@ -133,7 +147,7 @@ export class SolcordLocalIdentityNotesStorage {
         const request = rawRequest as Record<string, unknown>;
         this.#rejectAuthority(request);
         if (typeof request.subjectId !== "string" || !ACCOUNT_ID.test(request.subjectId) || Object.keys(request).some(key => key !== "subjectId")) throw new TypeError("Invalid identity note subject.");
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             const current = this.#readDocument(account);
             const notes = new Map(current.document.notes.map(item => [item.subjectId, item]));
             const removed = notes.delete(request.subjectId as string);
@@ -154,20 +168,14 @@ export class SolcordLocalIdentityNotesStorage {
     clear(rawAccount: unknown, rawRequest: unknown): Promise<{cleared: number; persistent: boolean; complete: boolean;}> {
         const account = this.#account(rawAccount);
         this.#emptyRequest(rawRequest);
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             const current = this.#readDocument(account);
             const cleared = current.document.notes.length;
             this.#session.delete(account);
             try {
-                const directory = this.#accountDirectory(account, false);
+                const directory = this.#files.accountDirectory(account, false);
                 if (!directory) return {cleared, persistent: this.#secureAvailable(), complete: true};
-                for (const name of fs.readdirSync(directory)) {
-                    if (name !== "notes.scdb" && !NOTES_TEMPORARY_FILE.test(name) && !NOTES_BACKUP_FILE.test(name)) continue;
-                    const file = path.join(directory, name);
-                    const stat = fs.lstatSync(file);
-                    if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError("Unsafe identity note residue.");
-                    fs.unlinkSync(file);
-                }
+                if (!this.#files.removeStoreFiles(directory)) throw new TypeError("Unsafe identity note residue.");
                 if (fs.readdirSync(directory).length === 0) fs.rmdirSync(directory);
                 return {cleared, persistent: this.#secureAvailable(), complete: true};
             }
@@ -182,9 +190,9 @@ export class SolcordLocalIdentityNotesStorage {
             const file = this.#notesFile(account, false);
             if (!file) return {document: fallback, persistent: true, complete: true};
             const directory = path.dirname(file);
-            this.#recoverNotes(directory);
+            this.#files.recover(directory);
             if (!fs.existsSync(file)) return {document: fallback, persistent: true, complete: true};
-            const document = this.#readNotesFile(file);
+            const document = this.#files.readFile(file);
             this.#session.set(account, cloneDocument(document));
             return {document, persistent: true, complete: true};
         }
@@ -196,16 +204,8 @@ export class SolcordLocalIdentityNotesStorage {
 
     #writeDocument(account: string, document: IdentityNoteDocument): void {
         const file = this.#notesFile(account, true)!;
-        this.#recoverNotes(path.dirname(file));
-        const wrapped = safeStorage.encryptString(JSON.stringify(document));
-        if (!Buffer.isBuffer(wrapped) || wrapped.length <= 0 || wrapped.length > MAX_WRAPPED_BYTES) throw new TypeError("Invalid encrypted identity note document.");
-        this.#atomicWrite(file, wrapped, true);
-    }
-
-    #serialized<T>(operation: () => Promise<T>): Promise<T> {
-        const result = this.#queue.then(operation, operation);
-        this.#queue = result.then(() => undefined, () => undefined);
-        return result;
+        this.#files.recover(path.dirname(file));
+        this.#files.writeEncrypted(file, document);
     }
 
     #account(value: unknown): string {
@@ -230,149 +230,13 @@ export class SolcordLocalIdentityNotesStorage {
         catch {return false;}
     }
 
-    #root(create: boolean): string | undefined {
-        const betterDiscord = path.resolve(resolveSolcordBetterDiscordRoot(app.getPath("userData")));
-        const root = path.join(betterDiscord, "solcord-local-identity-notes-v1");
-        if (!fs.existsSync(betterDiscord)) {
-            if (!create) return;
-            fs.mkdirSync(betterDiscord, {recursive: true, mode: 0o700});
-        }
-        this.#assertDirectory(betterDiscord);
-        if (!fs.existsSync(root)) {
-            if (!create) return;
-            fs.mkdirSync(root, {recursive: false, mode: 0o700});
-        }
-        this.#assertDirectory(root);
-        this.#assertWithin(root, betterDiscord);
-        return root;
-    }
-
-    #identityKey(create: boolean): Buffer | undefined {
-        if (this.#identity) return Buffer.from(this.#identity);
-        const root = this.#root(create);
-        if (!root) return;
-        const file = path.join(root, "identity.sc-key");
-        if (!fs.existsSync(file)) {
-            if (!create) return;
-            const identity = crypto.randomBytes(32);
-            try {
-                const wrapped = safeStorage.encryptString(identity.toString("base64"));
-                this.#atomicWrite(file, wrapped);
-                this.#identity = Buffer.from(identity);
-                return identity;
-            }
-            catch (error) {identity.fill(0); throw error;}
-        }
-        const stat = fs.lstatSync(file);
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > MAX_WRAPPED_BYTES) throw new TypeError("Invalid identity note storage key.");
-        const identity = Buffer.from(safeStorage.decryptString(fs.readFileSync(file)), "base64");
-        if (identity.length !== 32) throw new TypeError("Invalid identity note storage key.");
-        this.#identity = Buffer.from(identity);
-        return identity;
-    }
-
-    #accountDirectory(account: string, create: boolean): string | undefined {
-        const root = this.#root(create);
-        if (!root) return;
-        const identity = this.#identityKey(create);
-        if (!identity) return;
-        let opaque: string;
-        try {opaque = crypto.createHmac("sha256", identity).update(account, "utf8").digest("hex").slice(0, 40);}
-        finally {identity.fill(0);}
-        const directory = path.join(root, `store-${opaque}`);
-        if (!STORE_DIRECTORY.test(path.basename(directory))) throw new TypeError("Invalid identity note store directory.");
-        if (!fs.existsSync(directory)) {
-            if (!create) return;
-            fs.mkdirSync(directory, {recursive: false, mode: 0o700});
-        }
-        this.#assertDirectory(directory);
-        this.#assertWithin(directory, root);
-        return directory;
-    }
-
     #notesFile(account: string, create: boolean): string | undefined {
-        const directory = this.#accountDirectory(account, create);
+        const directory = this.#files.accountDirectory(account, create);
         if (!directory) return;
-        const file = path.join(directory, "notes.scdb");
-        this.#assertWithin(file, directory);
-        const hasTransient = fs.readdirSync(directory).some(name => NOTES_BACKUP_FILE.test(name) || NOTES_TEMPORARY_FILE.test(name));
+        const file = path.join(directory, this.#files.fileName);
+        this.#files.assertWithin(file, directory);
+        const hasTransient = fs.readdirSync(directory).some(name => this.#files.isTransientFile(name));
         return fs.existsSync(file) || hasTransient || create ? file : undefined;
-    }
-
-    #assertDirectory(directory: string): void {
-        const stat = fs.lstatSync(directory);
-        if (!stat.isDirectory() || stat.isSymbolicLink() || path.resolve(fs.realpathSync.native(directory)) !== path.resolve(directory)) throw new TypeError("Identity note storage directory is unsafe.");
-    }
-
-    #assertWithin(target: string, root: string): void {
-        const resolvedRoot = path.resolve(root);
-        const resolvedTarget = path.resolve(target);
-        if (resolvedTarget === resolvedRoot || !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) throw new TypeError("Identity note storage path escaped its root.");
-    }
-
-    #readNotesFile(file: string): IdentityNoteDocument {
-        const stat = fs.lstatSync(file);
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > MAX_WRAPPED_BYTES) throw new TypeError("Invalid identity note file.");
-        return normalizeDocument(JSON.parse(safeStorage.decryptString(fs.readFileSync(file))));
-    }
-
-    #recoverNotes(directory: string): void {
-        this.#assertDirectory(directory);
-        const target = path.join(directory, "notes.scdb");
-        this.#assertWithin(target, directory);
-        const names = fs.readdirSync(directory);
-        const backups = names.filter(name => NOTES_BACKUP_FILE.test(name));
-        const temporary = names.filter(name => NOTES_TEMPORARY_FILE.test(name));
-        if (backups.length > 1) throw new TypeError("Ambiguous identity note recovery state.");
-        for (const name of [...backups, ...temporary]) {
-            const candidate = path.join(directory, name);
-            const stat = fs.lstatSync(candidate);
-            if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError("Unsafe identity note recovery artifact.");
-        }
-        if (!fs.existsSync(target) && backups.length === 1) fs.renameSync(path.join(directory, backups[0]), target);
-        const backup = backups.map(name => path.join(directory, name)).find(fs.existsSync);
-        if (fs.existsSync(target) && backup) {
-            try {this.#readNotesFile(target); fs.unlinkSync(backup);}
-            catch {
-                const displaced = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.old`;
-                fs.renameSync(target, displaced);
-                try {fs.renameSync(backup, target); this.#readNotesFile(target); fs.unlinkSync(displaced);}
-                catch (error) {if (!fs.existsSync(target) && fs.existsSync(displaced)) fs.renameSync(displaced, target); throw error;}
-            }
-        }
-        for (const name of temporary) fs.unlinkSync(path.join(directory, name));
-    }
-
-    #atomicWrite(target: string, content: Buffer, replace = false): void {
-        const directory = path.dirname(target);
-        this.#assertDirectory(directory);
-        this.#assertWithin(target, directory);
-        const temporary = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
-        const descriptor = fs.openSync(temporary, "wx", 0o600);
-        try {fs.writeFileSync(descriptor, content); fs.fsyncSync(descriptor);}
-        finally {fs.closeSync(descriptor);}
-        try {
-            if (replace && fs.existsSync(target)) {
-                const stat = fs.lstatSync(target);
-                if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError("Identity note target is unsafe.");
-                const backup = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.old`;
-                fs.renameSync(target, backup);
-                try {
-                    fs.renameSync(temporary, target);
-                    this.#readNotesFile(target);
-                    fs.unlinkSync(backup);
-                }
-                catch (error) {
-                    if (!fs.existsSync(target) && fs.existsSync(backup)) fs.renameSync(backup, target);
-                    throw error;
-                }
-            }
-            else {fs.renameSync(temporary, target);}
-        }
-        finally {
-            try {if (fs.existsSync(temporary)) fs.unlinkSync(temporary);}
-            catch {/* preserve primary error */}
-        }
     }
 }
 

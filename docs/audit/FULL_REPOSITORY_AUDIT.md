@@ -12,11 +12,11 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 
 | Measure | Count |
 | --- | ---: |
-| Persistent tracked files | 765 |
-| Text files scanned | 750 |
+| Persistent tracked files | 766 |
+| Text files scanned | 751 |
 | Binary files classified | 15 |
-| Text lines scanned | 150,492 |
-| Custom Solcord lines | 68,549 |
+| Text lines scanned | 150,312 |
+| Custom Solcord lines | 68,369 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals
@@ -31,7 +31,7 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | DOM queries | 381 | 282 |
 | Webpack discovery calls | 87 | 12 |
 | Patch calls | 31 | 11 |
-| Synchronous filesystem calls | 1,150 | 1,008 |
+| Synchronous filesystem calls | 1,070 | 928 |
 | Console calls | 86 | 65 |
 | Empty catch blocks | 8 | 6 |
 
@@ -55,8 +55,8 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 14 | `installer/Solcord.Installer/InstallerForm.cs` | 1,159 | 70.7 KiB |
 | 15 | `tests/solcord/fake-deafen.test.ts` | 948 | 51.4 KiB |
 | 16 | `scripts/assemble-solcord-release-evidence.mjs` | 947 | 54.7 KiB |
-| 17 | `src/electron/main/modules/solcord-setup.ts` | 904 | 52.1 KiB |
-| 18 | `src/electron/main/modules/solcord-timeline.ts` | 902 | 39.8 KiB |
+| 17 | `src/electron/main/modules/solcord-timeline.ts` | 874 | 38.6 KiB |
+| 18 | `src/electron/main/modules/solcord-setup.ts` | 860 | 50.5 KiB |
 | 19 | `src/betterdiscord/modules/solcord/message-timeline.ts` | 762 | 35.1 KiB |
 | 20 | `src/betterdiscord/ui/settings.tsx` | 753 | 30.7 KiB |
 
@@ -77,8 +77,8 @@ These counts are inventory signals, not findings by themselves. Each use still r
 | 11 | `installer/Solcord.Installer/InstallerForm.cs` | 1,159 | 70.7 KiB |
 | 12 | `tests/solcord/fake-deafen.test.ts` | 948 | 51.4 KiB |
 | 13 | `scripts/assemble-solcord-release-evidence.mjs` | 947 | 54.7 KiB |
-| 14 | `src/electron/main/modules/solcord-setup.ts` | 904 | 52.1 KiB |
-| 15 | `src/electron/main/modules/solcord-timeline.ts` | 902 | 39.8 KiB |
+| 14 | `src/electron/main/modules/solcord-timeline.ts` | 874 | 38.6 KiB |
+| 15 | `src/electron/main/modules/solcord-setup.ts` | 860 | 50.5 KiB |
 | 16 | `src/betterdiscord/modules/solcord/message-timeline.ts` | 762 | 35.1 KiB |
 | 17 | `src/betterdiscord/modules/solcord/fake-deafen.ts` | 687 | 32.8 KiB |
 | 18 | `src/common/solcord/v2-feature-models.ts` | 661 | 36.1 KiB |

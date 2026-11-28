@@ -4,6 +4,7 @@ import path from "path";
 import {app, safeStorage} from "electron";
 
 import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
+import {assertSolcordPathInside, ensureSolcordManagedDirectory, SolcordSerialQueue, type SolcordManagedDirectoryMessages} from "./solcord-private-store-files";
 import {TIMELINE_MAX_EVENT_BYTES, TIMELINE_MAX_APPEND_BYTES, TIMELINE_MAX_APPEND_EVENTS, TIMELINE_MAX_STORED_BYTES, TIMELINE_MAX_STORED_EVENTS} from "@common/solcord/timeline-limits";
 
 
@@ -51,6 +52,11 @@ const STORE_DIRECTORY = /^store-[0-9a-f]{40}$/;
 const SEGMENT_FILE = /^\d{16}-[0-9a-f]{16}\.scseg$/;
 const TEMPORARY_FILE = /^(?:\d{16}-[0-9a-f]{16}\.scseg|data\.sc-key)\.\d+\.[0-9a-f]{8}\.tmp$/;
 const IDENTITY_TEMPORARY_FILE = /^identity\.sc-key\.\d+\.[0-9a-f]{8}\.tmp$/;
+const TIMELINE_DIRECTORY_MESSAGES: SolcordManagedDirectoryMessages = {
+    escapesRoot: "Timeline directory escapes the BetterDiscord root.",
+    unsafeNode: "Timeline directory is a link or non-directory.",
+    resolvesOutside: "Timeline directory resolves through a link outside BetterDiscord."
+};
 
 export interface TimelineClearResult {
     cleared: number;
@@ -167,7 +173,7 @@ export class SolcordTimelineStorage {
     #identityKey?: Buffer;
     #persistenceFailure?: string;
     #session = new Map<string, TimelineEvent[]>();
-    #queue = Promise.resolve();
+    #queue = new SolcordSerialQueue();
     #readBytes: number;
     #readEvents: number;
     /** Per-store segment sizes, so append-time capacity checks do not stat or decrypt every file. */
@@ -192,7 +198,7 @@ export class SolcordTimelineStorage {
     append(rawAccountScope: unknown, rawRequest: unknown): Promise<{stored: number; persistent: boolean; retentionApplied: boolean;}> {
         const accountScope = normalizeAccountScope(rawAccountScope);
         const request = normalizeRequest(rawRequest, "append");
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (request.policy.retention === "session") {
                 const purge = this.#purgePersistentForSession(accountScope);
                 return {...this.#appendSession(accountScope, request), retentionApplied: purge.complete};
@@ -262,7 +268,7 @@ export class SolcordTimelineStorage {
     read(rawAccountScope: unknown, rawRequest: unknown): Promise<TimelineReadResult> {
         const accountScope = normalizeAccountScope(rawAccountScope);
         const request = normalizeRequest(rawRequest, "read");
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (request.policy.retention === "session") {
                 const purge = this.#purgePersistentForSession(accountScope);
                 return this.#memoryReadResult(accountScope, request.policy, purge.complete);
@@ -295,7 +301,7 @@ export class SolcordTimelineStorage {
     clear(rawAccountScope: unknown, rawRequest: unknown): Promise<TimelineClearResult> {
         const accountScope = normalizeAccountScope(rawAccountScope);
         const request = normalizeRequest(rawRequest, "clear");
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             const memoryCount = request.clearOpaqueStores
                 ? [...this.#session.values()].reduce((sum, events) => sum + events.length, 0)
                 : this.#session.get(accountScope)?.length ?? 0;
@@ -314,12 +320,6 @@ export class SolcordTimelineStorage {
                 return this.#opaqueRecoveryRequired(memoryCount);
             }
         });
-    }
-
-    #serialized<T>(task: () => Promise<T>): Promise<T> {
-        const result = this.#queue.then(task, task);
-        this.#queue = result.then(() => undefined, () => undefined);
-        return result;
     }
 
     #secureStorageAvailable(): boolean {
@@ -844,33 +844,7 @@ export class SolcordTimelineStorage {
     }
 
     #ensureSafeDirectory(target: string, create: boolean): boolean {
-        const base = path.resolve(this.#betterDiscordRoot());
-        const resolved = path.resolve(target);
-        if (resolved !== base && !resolved.startsWith(`${base}${path.sep}`)) throw new TypeError("Timeline directory escapes the BetterDiscord root.");
-
-        if (!fs.existsSync(base)) {
-            if (!create) return false;
-            fs.mkdirSync(base, {recursive: true, mode: 0o700});
-        }
-        this.#assertDirectoryNode(base);
-        if (resolved === base) return true;
-
-        if (!fs.existsSync(resolved)) {
-            if (!create) return false;
-            const parent = path.dirname(resolved);
-            if (parent !== base) this.#ensureSafeDirectory(parent, true);
-            fs.mkdirSync(resolved, {recursive: false, mode: 0o700});
-        }
-        this.#assertDirectoryNode(resolved);
-        const realBase = fs.realpathSync.native(base);
-        const realTarget = fs.realpathSync.native(resolved);
-        if (realTarget !== realBase && !realTarget.startsWith(`${realBase}${path.sep}`)) throw new TypeError("Timeline directory resolves through a link outside BetterDiscord.");
-        return true;
-    }
-
-    #assertDirectoryNode(directory: string): void {
-        const stat = fs.lstatSync(directory);
-        if (!stat.isDirectory() || stat.isSymbolicLink()) throw new TypeError("Timeline directory is a link or non-directory.");
+        return ensureSolcordManagedDirectory(target, create, TIMELINE_DIRECTORY_MESSAGES);
     }
 
     #assertExistingSafeDirectory(directory: string): void {
@@ -878,9 +852,7 @@ export class SolcordTimelineStorage {
     }
 
     #assertInside(target: string, root: string): void {
-        const resolvedRoot = path.resolve(root);
-        const resolvedTarget = path.resolve(target);
-        if (resolvedTarget === resolvedRoot || !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) throw new TypeError("Unsafe Solcord timeline path.");
+        assertSolcordPathInside(target, root, "Unsafe Solcord timeline path.");
     }
 
     #atomicWrite(target: string, content: string): void {

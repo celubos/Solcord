@@ -8,6 +8,7 @@ import {app} from "electron";
 import {planSolcordV2ProviderRetirement, SOLCORD_V2_REPLACEMENT_MANIFEST, type SolcordV2RetirementPlan} from "@common/solcord/v2-replacement-manifest";
 
 import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
+import {SolcordSerialQueue, writeSolcordTextAtomically} from "./solcord-private-store-files";
 
 
 interface ProviderFileRecord {
@@ -90,24 +91,6 @@ function ensureOrdinaryDirectory(target: string, create = false): void {
 function ensureInside(root: string, target: string): void {
     const relative = path.relative(root, target);
     if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new TypeError("Solcord provider path escapes its root.");
-}
-
-function atomicWrite(target: string, value: string): void {
-    const temporary = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
-    const descriptor = fs.openSync(temporary, "wx", 0o600);
-    try {
-        fs.writeFileSync(descriptor, value, "utf8");
-        fs.fsyncSync(descriptor);
-        fs.closeSync(descriptor);
-        fs.renameSync(temporary, target);
-    }
-    catch (error) {
-        try {fs.closeSync(descriptor);}
-        catch {/* already closed */}
-        try {if (fs.existsSync(temporary)) fs.unlinkSync(temporary);}
-        catch {/* best effort */}
-        throw error;
-    }
 }
 
 function sameIdentity(left: ProviderFileIdentity, right: ProviderFileIdentity): boolean {
@@ -242,7 +225,7 @@ function readJournal(root: string, transactionId: string): ArchiveJournal {
 
 export class SolcordProviderArchive {
     #previews = new Map<string, PendingPreview>();
-    #queue = Promise.resolve();
+    #queue = new SolcordSerialQueue();
     readonly #attestReplacementHealth?: SolcordProviderArchiveOptions["attestReplacementHealth"];
     readonly #now: () => number;
     readonly #moveCheckpoint?: SolcordProviderArchiveOptions["moveCheckpoint"];
@@ -254,7 +237,7 @@ export class SolcordProviderArchive {
     }
 
     preview(rawRequest: unknown): Promise<{previewId: string; records: ProviderFileRecord[]; plan: SolcordV2RetirementPlan;}> {
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             const request = rawRequest && typeof rawRequest === "object" && !Array.isArray(rawRequest) ? rawRequest as Record<string, unknown> : {};
             if (!Array.isArray(request.replacementReadyFiles)) throw new TypeError("V2 replacement readiness is required.");
             if (request.replacementReadyFiles.length > MAX_REPLACEMENT_READY_FILES) throw new RangeError("V2 replacement readiness exceeds its limit.");
@@ -281,7 +264,7 @@ export class SolcordProviderArchive {
     }
 
     apply(rawPreviewId: unknown): Promise<{transactionId: string; archived: ProviderFileRecord[]; archiveDirectory: string;}> {
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (typeof rawPreviewId !== "string") throw new TypeError("Invalid V2 provider preview id.");
             const pending = this.#previews.get(rawPreviewId);
             this.#previews.delete(rawPreviewId);
@@ -303,14 +286,14 @@ export class SolcordProviderArchive {
             ensureOrdinaryDirectory(transactionRoot);
             const journal: ArchiveJournal = {version: 2, transactionId, createdAt: Date.now(), files: pending.records};
             const journalPath = path.join(root, `${transactionId}.json`);
-            atomicWrite(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+            writeSolcordTextAtomically(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
             const moved: ProviderFileRecord[] = [];
             try {
                 for (const expected of pending.snapshots) {
                     moveVerified(pending.root, transactionRoot, expected, "apply", this.#moveCheckpoint);
                     moved.push(expected.record);
                 }
-                atomicWrite(path.join(root, `${transactionId}.complete`), `${digest(fs.readFileSync(journalPath))}\n`);
+                writeSolcordTextAtomically(path.join(root, `${transactionId}.complete`), `${digest(fs.readFileSync(journalPath))}\n`);
                 return {transactionId, archived: structuredClone(moved), archiveDirectory: transactionRoot};
             }
             catch (error) {
@@ -323,14 +306,14 @@ export class SolcordProviderArchive {
                     }
                     catch {restored = false;}
                 }
-                atomicWrite(path.join(root, `${transactionId}.${restored ? "rolledback" : "incomplete"}`), `${restored ? "apply-failed" : "manual-recovery-required"}\n`);
+                writeSolcordTextAtomically(path.join(root, `${transactionId}.${restored ? "rolledback" : "incomplete"}`), `${restored ? "apply-failed" : "manual-recovery-required"}\n`);
                 throw error;
             }
         });
     }
 
     rollback(rawTransactionId: unknown): Promise<{complete: boolean; restored: ProviderFileRecord[]; blocked: string[];}> {
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (typeof rawTransactionId !== "string" || !TRANSACTION_ID.test(rawTransactionId)) throw new TypeError("Invalid V2 archive transaction id.");
             const root = this.#archiveRoot();
             ensureOrdinaryDirectory(root);
@@ -353,7 +336,7 @@ export class SolcordProviderArchive {
                 catch {blocked.push(record.fileName);}
             }
             const complete = blocked.length === 0;
-            atomicWrite(path.join(root, `${rawTransactionId}.${complete ? "restored" : "incomplete"}`), `${complete ? "owner-rollback" : "manual-recovery-required"}\n`);
+            writeSolcordTextAtomically(path.join(root, `${rawTransactionId}.${complete ? "restored" : "incomplete"}`), `${complete ? "owner-rollback" : "manual-recovery-required"}\n`);
             return {complete, restored: structuredClone(restored), blocked};
         });
     }
@@ -374,12 +357,6 @@ export class SolcordProviderArchive {
     #replacementIsHealthy(fileName: string): boolean {
         try {return this.#attestReplacementHealth?.(fileName) === true;}
         catch {return false;}
-    }
-
-    #serialized<T>(task: () => Promise<T>): Promise<T> {
-        const result = this.#queue.then(task, task);
-        this.#queue = result.then(() => undefined, () => undefined);
-        return result;
     }
 }
 
