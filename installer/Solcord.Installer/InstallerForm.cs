@@ -38,12 +38,14 @@ internal sealed class InstallerForm : Form
     private readonly Label _stateBody = new();
     private readonly Panel _statePanel = new();
     private readonly Button _primaryAction;
-    private readonly Button _verifyAction;
-    private readonly Button _recoveryAction;
+    // "Check files" and the backups folder are rows in the options list; these point at their buttons.
+    private Button _verifyAction = null!;
+    private Button _recoveryAction = null!;
     private readonly Button _refreshTargetsAction;
     private readonly Button _closeAction;
     private readonly Button _errorDetailsAction;
     private readonly Label _maintenanceHeading = new();
+    private readonly Label _installNotes = new();
     private readonly TableLayoutPanel _maintenanceList = new();
     private readonly TableLayoutPanel _workspace = new();
     private readonly Panel _header = new();
@@ -72,8 +74,6 @@ internal sealed class InstallerForm : Form
         _startup = startup;
         if (registration is not null) _engine.SetupExecutable = registration.SetupExecutable;
         _primaryAction = NewButton("Continue", ButtonTone.Primary);
-        _verifyAction = NewButton("Check files", ButtonTone.Outline);
-        _recoveryAction = NewButton("Open backups folder", ButtonTone.Outline);
         _refreshTargetsAction = NewButton("Refresh", ButtonTone.Outline);
         _closeAction = NewButton("Close", ButtonTone.Outline);
         _errorDetailsAction = NewButton("Error details", ButtonTone.Outline);
@@ -173,16 +173,17 @@ internal sealed class InstallerForm : Form
         _workspace.BackColor = Canvas;
         _workspace.ColumnCount = 1;
         _workspace.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        _workspace.RowCount = 6;
+        _workspace.RowCount = 7;
         _workspace.Padding = new Padding(36, 12, 36, 12);
         _workspace.Margin = Padding.Empty;
         for (int i = 0; i < _workspace.RowCount; i++) _workspace.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _workspace.Controls.Add(BuildTargetField(), 0, 0);
         _workspace.Controls.Add(BuildStatePanel(), 0, 1);
         _workspace.Controls.Add(BuildPrimaryAction(), 0, 2);
-        _workspace.Controls.Add(BuildMaintenanceHeader(), 0, 3);
-        _workspace.Controls.Add(BuildMaintenanceList(), 0, 4);
-        _workspace.Controls.Add(BuildUtilities(), 0, 5);
+        _workspace.Controls.Add(BuildInstallNotes(), 0, 3);
+        _workspace.Controls.Add(BuildMaintenanceHeader(), 0, 4);
+        _workspace.Controls.Add(BuildMaintenanceList(), 0, 5);
+        _workspace.Controls.Add(BuildUtilities(), 0, 6);
         _workspaceScroll.Controls.Add(_workspace);
         return _workspaceScroll;
     }
@@ -283,6 +284,27 @@ internal sealed class InstallerForm : Form
         return _primaryRow;
     }
 
+    /// <summary>Three short reassurances shown only before a first install.</summary>
+    private Control BuildInstallNotes()
+    {
+        _installNotes.Name = "installNotes";
+        _installNotes.Dock = DockStyle.Top;
+        _installNotes.AutoSize = true;
+        _installNotes.Margin = new Padding(3, 0, 3, 8);
+        _installNotes.Font = new Font("Segoe UI Variable Text", 9.25f, FontStyle.Regular);
+        _installNotes.ForeColor = Body;
+        _installNotes.BackColor = Color.Transparent;
+        _installNotes.UseMnemonic = false;
+        _installNotes.Text = "✓  Takes about a minute. If Discord is open, it closes for a moment.\n✓  Your Discord login, plugins, themes, and settings stay as they are.\n✓  Undo it any time with Uninstall, here or in Settings › Apps.";
+        _installNotes.AccessibleName = "What installing does";
+        _installNotes.Visible = false;
+        _workspace.SizeChanged += (_, _) => {
+            int width = Math.Max(160, _workspace.ClientSize.Width - _workspace.Padding.Horizontal - 6);
+            if (_installNotes.MaximumSize.Width != width) _installNotes.MaximumSize = new Size(width, 0);
+        };
+        return _installNotes;
+    }
+
     private Control BuildMaintenanceHeader()
     {
         var header = new TableLayoutPanel {Dock = DockStyle.Top, AutoSize = true, MinimumSize = new Size(0, 30), ColumnCount = 1, RowCount = 1, BackColor = Canvas, Margin = Padding.Empty, Padding = Padding.Empty};
@@ -303,21 +325,37 @@ internal sealed class InstallerForm : Form
         _maintenanceList.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         _maintenanceList.ColumnCount = 1;
         _maintenanceList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        _maintenanceList.RowCount = 3;
+        _maintenanceList.RowCount = 5;
         _maintenanceList.BackColor = Surface;
         _maintenanceList.Margin = Padding.Empty;
         _maintenanceList.Padding = Padding.Empty;
-        for (int i = 0; i < 3; i++) _maintenanceList.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (int i = 0; i < 5; i++) _maintenanceList.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _maintenanceList.Controls.Add(ActionRow("repair", "Repair Solcord", "Put back this version's files if something is missing or changed.", 2, 0), 0, 0);
         _maintenanceList.Controls.Add(ActionRow("rollback", "Roll back", "Undo the last change using the backup made before it.", 3, 1), 0, 1);
-        _maintenanceList.Controls.Add(ActionRow("uninstall", "Uninstall Solcord", "Return Discord to normal. Plugins, themes, and settings stay on disk.", 4, 2, ButtonTone.Danger), 0, 2);
+        _maintenanceList.Controls.Add(ActionRow("verify", "Check files", "Compare the installed files with this version. Nothing is changed.", 4, 2, buttonText: "Check", onClick: CheckFiles), 0, 2);
+        _maintenanceList.Controls.Add(ActionRow("backups", "Backups", "Open the folder with the backup Setup makes before every change.", 5, 3, buttonText: "Open", buttonAccessibleName: "Open backups folder", onClick: OpenBackups), 0, 3);
+        _maintenanceList.Controls.Add(ActionRow("uninstall", "Uninstall Solcord", "Return Discord to normal. Plugins, themes, and settings stay on disk.", 6, 4, ButtonTone.Danger), 0, 4);
+        _verifyAction = _actions["verify"].Button;
+        _recoveryAction = _actions["backups"].Button;
         return _maintenanceList;
     }
 
-    private Control ActionRow(string key, string title, string description, int tabIndex, int rowIndex, ButtonTone tone = ButtonTone.Outline)
+    private void CheckFiles()
+    {
+        DiscordTarget selected = Target();
+        RunAction("Checking files", () => _engine.VerifyInstalled(selected) ? $"All Solcord files match {_manifest.CandidateLabel} for Discord {selected.Channel} {selected.Version}. Nothing was changed." : $"Some Solcord files differ from {_manifest.CandidateLabel} for Discord {selected.Channel} {selected.Version}. Repair puts them back. Nothing was changed.");
+    }
+
+    private void OpenBackups() => RunAction("Opening backups", () => {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_engine.RecoveryDirectory) {UseShellExecute = true});
+        return "Opened the folder with Solcord's backups.";
+    });
+
+    private Control ActionRow(string key, string title, string description, int tabIndex, int rowIndex, ButtonTone tone = ButtonTone.Outline, string? buttonText = null, string? buttonAccessibleName = null, Action? onClick = null)
     {
         var row = new Panel {Dock = DockStyle.Fill, AutoSize = false, Height = 48, MinimumSize = new Size(0, 44), BackColor = Surface, Margin = Padding.Empty, Padding = Padding.Empty, AccessibleName = title};
-        row.Paint += (_, args) => {if (rowIndex < 2) {using var rule = new Pen(Line, 1); args.Graphics.DrawLine(rule, 18, row.ClientSize.Height - 1, row.ClientSize.Width - 14, row.ClientSize.Height - 1);}};
+        // A divider separates this row from the next visible one, never below the last.
+        row.Paint += (_, args) => {if (_actions.Values.Any(action => action.RowIndex > rowIndex && action.Row.Visible)) {using var rule = new Pen(Line, 1); args.Graphics.DrawLine(rule, 18, row.ClientSize.Height - 1, row.ClientSize.Width - 14, row.ClientSize.Height - 1);}};
         var copy = new TableLayoutPanel {ColumnCount = 1, RowCount = 2, BackColor = Color.Transparent, Margin = Padding.Empty, Padding = Padding.Empty};
         copy.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         copy.RowStyles.Add(new RowStyle(SizeType.Absolute, 19));
@@ -329,16 +367,16 @@ internal sealed class InstallerForm : Form
         details.AutoEllipsis = true;
         copy.Controls.Add(name, 0, 0);
         copy.Controls.Add(details, 0, 1);
-        var button = NewButton(title.Replace("Solcord", "").Trim(), tone);
+        var button = NewButton(buttonText ?? title.Replace("Solcord", "").Trim(), tone);
         button.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         button.AutoSize = false;
         button.Size = new Size(112, 36);
         button.Margin = Padding.Empty;
         button.TextAlign = ContentAlignment.MiddleCenter;
         button.TabIndex = tabIndex;
-        button.AccessibleName = title;
+        button.AccessibleName = buttonAccessibleName ?? title;
         button.AccessibleDescription = description;
-        button.Click += (_, _) => RunOperation(key);
+        button.Click += (_, _) => {if (onClick is not null) onClick(); else RunOperation(key);};
         row.Controls.Add(copy);
         row.Controls.Add(button);
         void ArrangeRow()
@@ -360,28 +398,8 @@ internal sealed class InstallerForm : Form
 
     private Control BuildUtilities()
     {
-        var utilities = new TableLayoutPanel {Dock = DockStyle.Top, AutoSize = true, MinimumSize = new Size(0, 44), ColumnCount = 3, RowCount = 1, BackColor = Canvas, Margin = Padding.Empty, Padding = new Padding(0, 6, 0, 0)};
-        utilities.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 144));
-        utilities.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 196));
+        var utilities = new TableLayoutPanel {Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 1, BackColor = Canvas, Margin = Padding.Empty, Padding = new Padding(0, 8, 0, 0)};
         utilities.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        _verifyAction.Dock = DockStyle.Fill;
-        _verifyAction.Margin = new Padding(0, 0, 8, 0);
-        _verifyAction.TabIndex = 5;
-        _verifyAction.AccessibleName = "Check installed Solcord files";
-        _verifyAction.AccessibleDescription = "Compare the installed files with this version. Nothing is changed.";
-        _verifyAction.Click += (_, _) => {
-            DiscordTarget selected = Target();
-            RunAction("Checking files", () => _engine.VerifyInstalled(selected) ? $"All Solcord files match {_manifest.CandidateLabel} for Discord {selected.Channel} {selected.Version}. Nothing was changed." : $"Some Solcord files differ from {_manifest.CandidateLabel} for Discord {selected.Channel} {selected.Version}. Repair puts them back. Nothing was changed.");
-        };
-        _recoveryAction.Dock = DockStyle.Fill;
-        _recoveryAction.Margin = new Padding(0, 0, 8, 0);
-        _recoveryAction.TabIndex = 6;
-        _recoveryAction.AccessibleName = "Open backups folder";
-        _recoveryAction.AccessibleDescription = "Open the folder with the backups Setup makes before every change.";
-        _recoveryAction.Click += (_, _) => RunAction("Backups folder", () => {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_engine.RecoveryDirectory) {UseShellExecute = true});
-            return "Opened the folder with Solcord's backups.";
-        });
         _errorDetailsAction.Dock = DockStyle.Left;
         _errorDetailsAction.AutoSize = true;
         _errorDetailsAction.Margin = Padding.Empty;
@@ -394,9 +412,7 @@ internal sealed class InstallerForm : Form
             using Form details = CreateErrorDetailsDialog(_errorDetails);
             details.ShowDialog(this);
         };
-        utilities.Controls.Add(_verifyAction, 0, 0);
-        utilities.Controls.Add(_recoveryAction, 1, 0);
-        utilities.Controls.Add(_errorDetailsAction, 2, 0);
+        utilities.Controls.Add(_errorDetailsAction, 0, 0);
         return utilities;
     }
 
@@ -485,6 +501,7 @@ internal sealed class InstallerForm : Form
         catch (Exception error)
         {
             if (IsDisposed || generation != _stateGeneration) return;
+            if (InstalledPackageIsNewerSafe()) {ShowNewerInstalled(_engine.InstalledPackageLabel()); return;}
             SetActionAvailability(false, false, false, false, false);
             SetErrorDetails(error);
             SetState("Needs attention", "Discord versions couldn't be checked", $"{FriendlyError(error)} Refresh (F5) to try again.", StateTone.Danger, null);
@@ -571,7 +588,7 @@ internal sealed class InstallerForm : Form
             else if (discordUpdated) SetState("Solcord is off", "Discord updated and turned Solcord off", $"Discord moved from {recordedVersion} to {selected.Version}. Turning Solcord back on also updates it to {_manifest.CandidateLabel}. Settings and add-ons stay in place.", StateTone.Warning, "update", "Turn Solcord back on");
             else if (packageRecorded) SetState("Needs repair", "Some Solcord files changed", "Repair puts back this version's files. Settings and add-ons stay in place.", StateTone.Warning, "repair");
             else if (managed) SetState("Update available", $"Update Solcord to {_manifest.CandidateLabel}", $"{installed} is installed now. It's backed up first, so you can roll back.", StateTone.Warning, "update");
-            else SetState("Ready to install", $"Install Solcord {_manifest.CandidateLabel}", $"Adds Solcord to Discord {selected.Channel}. If Discord is open, Setup asks before closing it. BetterDiscord settings and add-ons stay in place.", StateTone.Protected, "install");
+            else SetState("Ready to install", $"Install Solcord {_manifest.CandidateLabel}", $"Adds Solcord to Discord {selected.Channel} {selected.Version}.", StateTone.Protected, "install");
         }
         catch (Exception error)
         {
@@ -592,10 +609,13 @@ internal sealed class InstallerForm : Form
         SetManagedAction("repair", targetReady && packageRecorded && !pending);
         SetManagedAction("rollback", targetReady && (managed || pending));
         SetManagedAction("uninstall", targetReady && managed && !pending);
-        bool anyMaintenance = _actions.Values.Any(action => action.Row.Visible);
-        _maintenanceHeading.Visible = anyMaintenance;
         _canVerify = targetReady && managed && !pending;
         _canOpenRecovery = Directory.Exists(_engine.RecoveryDirectory);
+        SetManagedAction("verify", _canVerify);
+        SetManagedAction("backups", _canOpenRecovery);
+        bool anyMaintenance = _actions.Values.Any(action => action.Row.Visible);
+        _maintenanceHeading.Visible = anyMaintenance;
+        foreach (ActionVisual action in _actions.Values) action.Row.Invalidate();
         UpdateInteractionState();
     }
 
@@ -625,6 +645,7 @@ internal sealed class InstallerForm : Form
         _primaryRow.Height = recommendedKey is null ? 0 : 46;
         _primaryAction.Text = primaryLabel ?? recommendedKey switch {"install" => "Install Solcord", "update" => "Update Solcord", "repair" => "Repair Solcord", "rollback" => "Roll back", "launch" => "Open Discord", _ => "Continue"};
         _primaryAction.AccessibleDescription = body;
+        _installNotes.Visible = recommendedKey == "install";
         ApplyButtonTone(_primaryAction, ButtonTone.Primary);
     }
 
@@ -1031,7 +1052,8 @@ internal sealed class InstallerForm : Form
                     "Turning Solcord back on didn't finish",
                     "Discord could not close automatically. Quit it from the system tray, then try again; plugins, themes, settings, and recovery files remain unchanged.",
                     StateTone.Danger,
-                    "update",
+                    // "install" also shows the install notes, so the tallest layout is measured.
+                    "install",
                     "Turn Solcord back on"
                 );
                 form.SetErrorDetails(new IOException("The selected local archive could not be opened. Refresh the Discord app list or try again."));

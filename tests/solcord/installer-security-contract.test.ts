@@ -185,7 +185,9 @@ describe("Solcord installer security contracts", () => {
         expect(installerForm).toContain("ButtonTone.Primary");
         expect(installerForm).toContain("_recommendedKey");
         expect(installerForm).toContain("_targets.TabIndex = 0");
-        expect(installerForm).toContain("_verifyAction.TabIndex = 5");
+        expect(installerForm).toContain("ActionRow(\"verify\", \"Check files\"");
+        expect(installerForm).toContain("buttonAccessibleName: \"Open backups folder\"");
+        expect(installerForm).toContain("_installNotes.Visible = recommendedKey == \"install\";");
         expect(installerForm).toContain("Open backups folder");
         expect(installerForm).toContain("MinimumSize = new Size(0, 44)");
         expect(installerForm).toContain("Height = 36");

@@ -20,6 +20,9 @@ internal sealed class SetupRegistration
     private readonly string _roamingAppData;
     private readonly string _uninstallKey;
 
+    /// <summary>True when Setup was removed while running from its own copy; the copy is deleted after Setup exits.</summary>
+    internal bool DeletesCopyAfterExit {get; private set;}
+
     internal SetupRegistration(string localAppData, string roamingAppData, string uninstallKey = DefaultUninstallKey)
     {
         _localAppData = Path.GetFullPath(localAppData).TrimEnd(Path.DirectorySeparatorChar);
@@ -39,6 +42,7 @@ internal sealed class SetupRegistration
     internal string Ensure(string runningExecutable, ReleaseManifest manifest)
     {
         string source = Path.GetFullPath(runningExecutable);
+        DeletesCopyAfterExit = false;
         FileSafety.RejectLinkedPath(_localAppData, SetupDirectory, "The Solcord Setup folder escapes its trusted root.", "The Solcord Setup folder is linked elsewhere.");
         Directory.CreateDirectory(SetupDirectory);
         FileSafety.RejectReparsePoint(SetupDirectory, "The Solcord Setup folder is linked elsewhere.");
@@ -85,7 +89,7 @@ internal sealed class SetupRegistration
     /// <summary>
     /// Remove the Start Menu entry, the apps entry, and the Setup copy. Only the
     /// exact files and key Setup created are touched. When Setup is running from
-    /// the copy itself, the copy is deleted by a short-lived helper after exit.
+    /// the copy itself, the copy is deleted after Setup exits (<see cref="FinishAfterExit"/>).
     /// </summary>
     internal void Remove(string runningExecutable)
     {
@@ -100,9 +104,20 @@ internal sealed class SetupRegistration
             TryRemoveEmpty(SetupDirectory);
             return;
         }
-        // Windows cannot delete a running program. A hidden helper waits for this
-        // process to exit, deletes exactly this file, then removes the Setup and
-        // product folders only if they are empty (rmdir without /s).
+        // Windows cannot delete a running program, and Setup stays open after an
+        // uninstall so the result can be read. Delete the copy once Setup exits.
+        DeletesCopyAfterExit = true;
+    }
+
+    /// <summary>
+    /// Called as Setup exits. A hidden helper waits a few seconds for this process
+    /// to end, deletes exactly the Setup copy, then removes the Setup and product
+    /// folders only if they are empty (rmdir without /s).
+    /// </summary>
+    internal void FinishAfterExit()
+    {
+        if (!DeletesCopyAfterExit) return;
+        DeletesCopyAfterExit = false;
         string script = $"/d /c ping -n 4 127.0.0.1 >nul & del /f /q \"{SetupExecutable}\" & rmdir \"{SetupDirectory}\" & rmdir \"{Path.Combine(ProductDirectory, "InstallerTemp")}\" & rmdir \"{ProductDirectory}\"";
         Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), script) {CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden});
     }

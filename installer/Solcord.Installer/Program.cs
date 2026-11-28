@@ -38,7 +38,8 @@ internal static class Program
             // The Start Menu "Solcord" entry: when nothing needs attention, open
             // Discord straight away without showing Setup at all.
             if (startup == InstallerStartup.Heal && TryLaunchVerified(engine)) return 0;
-            Application.Run(new InstallerForm(bundle.Root, engine, startup, registration));
+            try {Application.Run(new InstallerForm(bundle.Root, engine, startup, registration));}
+            finally {registration.FinishAfterExit();}
             return 0;
         }
         catch (Exception error)
@@ -79,13 +80,25 @@ internal static class Program
                 throw new ArgumentException("The Discord channel must be Stable, PTB, or Canary.");
 
             using EmbeddedInstallerBundle bundle = EmbeddedInstallerBundle.ExtractVerified();
-            var engine = new InstallerEngine(
-                bundle.Root,
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var registration = new SetupRegistration(local, roaming);
+            var engine = new InstallerEngine(bundle.Root, local, roaming) {SetupExecutable = registration.SetupExecutable};
             DiscordTarget target = engine.DetectTargets().SingleOrDefault(candidate => candidate.Channel == channel)
                 ?? throw new InvalidOperationException($"Discord {channel} is not installed.");
             engine.Update(target);
+            // Keep "Solcord Setup", the Settings > Apps entry, and the Start menu
+            // shortcut on this version too, exactly as an update from the window does.
+            try
+            {
+                registration.Ensure(Environment.ProcessPath ?? Application.ExecutablePath, engine.LoadManifest());
+                DiscordTarget? managed = engine.ManagedTarget();
+                if (managed is not null) engine.RefreshLauncher(managed);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or System.Security.SecurityException or PlatformNotSupportedException or System.Runtime.InteropServices.COMException)
+            {
+                Console.Error.WriteLine($"setup-entry:{error.GetType().Name}");
+            }
             return 0;
         }
         catch (Exception error)
@@ -133,6 +146,13 @@ internal static class InstallerSelfTest
             }
             registration.Ensure(copy, manifest);
             if (File.ReadAllText(copy) != "setup-bytes") throw new InvalidDataException("setup-registration: running from the copy damaged it");
+            // Uninstalling from the copy itself keeps the window usable: entries go now, the copy after exit.
+            registration.Remove(copy);
+            if (!File.Exists(copy) || !registration.DeletesCopyAfterExit || File.Exists(registration.ShortcutPath) || registration.IsRegistered())
+                throw new InvalidDataException("setup-registration: uninstall from the running copy did not defer deleting the copy");
+            registration.Ensure(copy, manifest);
+            if (registration.DeletesCopyAfterExit || !registration.IsRegistered())
+                throw new InvalidDataException("setup-registration: reinstalling from the copy did not cancel its pending deletion");
             registration.Remove(download);
             if (File.Exists(copy) || File.Exists(registration.ShortcutPath) || registration.IsRegistered() || Directory.Exists(registration.SetupDirectory))
                 throw new InvalidDataException("setup-registration: uninstall left the Setup copy, shortcut, or apps entry");

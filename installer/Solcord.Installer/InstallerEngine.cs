@@ -742,7 +742,7 @@ internal sealed class InstallerEngine
         InstallReceipt? current;
         try {current = JsonSerializer.Deserialize<InstallReceipt>(File.ReadAllText(receipt));}
         catch {throw new InvalidDataException("The current Solcord installer receipt is malformed; repair is held for review.");}
-        if (current is null || !Sha256Pattern.IsMatch(current.ArtifactSha256) || !Regex.IsMatch(current.SourceCommit, "^[0-9a-f]{40}$") || !Version.TryParse(current.Version, out Version? installed) || !Version.TryParse(manifest.Version, out Version? candidate) || current.CandidateLabel is not null && !IsCandidateLabelForVersion(current.CandidateLabel, current.Version)) throw new InvalidDataException("Solcord version provenance is malformed; update is held for review.");
+        if (!IsWellFormedReceipt(current) || !Version.TryParse(current!.Version, out Version? installed) || !Version.TryParse(manifest.Version, out Version? candidate)) throw new InvalidDataException("Solcord version provenance is malformed; update is held for review.");
         if (candidate < installed) throw new InvalidOperationException("The candidate is older than the recorded Solcord install. Use an explicit rollback instead of downgrading through Update.");
         if (candidate > installed) return;
         if (current.CandidateLabel is null)
@@ -1120,9 +1120,22 @@ internal sealed class InstallerEngine
             receipt = JsonSerializer.Deserialize<InstallReceipt>(reader.ReadToEnd());
         }
         catch {throw new InvalidDataException("The current Solcord install receipt is malformed.");}
-        if (receipt is null || !Sha256Pattern.IsMatch(receipt.ArtifactSha256) || !Regex.IsMatch(receipt.SourceCommit, "^[0-9a-f]{40}$") || !Version.TryParse(receipt.Version, out _) || receipt.CandidateLabel is not null && !IsCandidateLabelForVersion(receipt.CandidateLabel, receipt.Version) || receipt.DiscordArchiveSha256 is not null && !Sha256Pattern.IsMatch(receipt.DiscordArchiveSha256)) throw new InvalidDataException("The current Solcord install receipt failed validation.");
-        return receipt;
+        if (!IsWellFormedReceipt(receipt)) throw new InvalidDataException("The current Solcord install receipt failed validation.");
+        return receipt!;
     }
+
+    /// <summary>
+    /// Null-safe receipt validation. A receipt written by a newer Setup can omit or
+    /// rename fields; that must read as "not this Setup's receipt", never as a crash.
+    /// </summary>
+    private static bool IsWellFormedReceipt(InstallReceipt? receipt) =>
+        receipt is not null
+        && receipt.ArtifactSha256 is not null && Sha256Pattern.IsMatch(receipt.ArtifactSha256)
+        && receipt.SourceCommit is not null && Regex.IsMatch(receipt.SourceCommit, "^[0-9a-f]{40}$")
+        && Version.TryParse(receipt.Version, out _)
+        && !string.IsNullOrEmpty(receipt.Channel) && !string.IsNullOrEmpty(receipt.DiscordVersion)
+        && (receipt.CandidateLabel is null || IsCandidateLabelForVersion(receipt.CandidateLabel, receipt.Version))
+        && (receipt.DiscordArchiveSha256 is null || Sha256Pattern.IsMatch(receipt.DiscordArchiveSha256));
 
     private void RequireUnchangedReceipt(string file, string expectedHash)
     {
