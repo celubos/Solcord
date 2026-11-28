@@ -7,7 +7,7 @@ This is Solcord's self-contained Windows x64 installer. Its branded action cente
 - **Repair Solcord** reinstalls the exact package already recorded by the installer.
 - **Roll Back** restores the receipt-bound state captured before the current installation.
 - **Uninstall Solcord** removes only the recognized Solcord core and injector, returns the selected channel to vanilla Discord, and preserves a verified recovery copy.
-- **Check files**, **Open Discord**, and **Open backups folder** remain secondary utilities.
+- **Check files** and **Backups** (opens the backups folder) sit in the same **More options** list, and **Open Discord** is the recommended action once Solcord is on.
 
 Each state is named in plain words (**Solcord is on**, **Solcord is off**, **Update available**, **Needs repair**, **Unfinished change**, **Ready to install**) with one recommended button. After a Discord update the button reads **Turn Solcord back on** and runs Repair (same release) or Update (newer release). An installer older than the recorded installation reads that receipt leniently, says **Newer version installed**, and offers no action.
 
