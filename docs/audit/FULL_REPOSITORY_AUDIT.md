@@ -12,11 +12,11 @@ Custom ownership roots: `src/common/solcord/`, `src/betterdiscord/modules/solcor
 
 | Measure | Count |
 | --- | ---: |
-| Persistent tracked files | 766 |
-| Text files scanned | 751 |
-| Binary files classified | 15 |
-| Text lines scanned | 150,472 |
-| Custom Solcord lines | 68,449 |
+| Persistent tracked files | 759 |
+| Text files scanned | 750 |
+| Binary files classified | 9 |
+| Text lines scanned | 150,429 |
+| Custom Solcord lines | 68,406 |
 | Previous product-identity matches | 0 |
 
 ## Runtime and maintenance signals

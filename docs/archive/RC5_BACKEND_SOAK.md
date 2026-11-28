@@ -64,7 +64,7 @@ The Baseline Suite was further split into Layout Collapse, Embed Controls, Cross
 - ESLint, Solcord CSS lint, TypeScript, and type generation: PASS.
 - Repository audit: PASS after regeneration.
 - Production dependency audit: 92 packages checked, 0 vulnerabilities.
-- Codex Security diff scan `36cb987a-9573-46f7-93d3-f22fbb246c77`: 38/38 production or executable review items closed across eight security surfaces, zero findings.
+- Security diff scan `36cb987a-9573-46f7-93d3-f22fbb246c77`: 38/38 production or executable review items closed across eight security surfaces, zero findings.
 - Two clean production builds emitted byte-identical 2,032,032-byte ASARs at SHA-256 `1b674f2a05ed07860b9fd3b46042e4e8eb80921c2f31c0434d8b661a24024d2e` for source checkpoint `4fe8008e25be2cd658b9d6b14bae6f5ab52173e4`.
 - The self-contained Windows installer passed its embedded-resource and disposable lifecycle self-test. All three exact-head GitHub checks passed on PR #13.
 

@@ -67,7 +67,7 @@
     "latestFindings": {"critical": 0, "high": 0, "medium": 0, "low": 0, "remediatedAfterScan": false},
     "previousSealedScan": {
       "id": "63440b76-b835-4767-80ca-21dd80597eb3",
-      "snapshot": "codex-security-snapshot/v1:sha256:29845d397c45cb6c5fcd5cba29f9a5e2f10bf645cbe81b3454813ef71535142c",
+      "snapshot": "security-snapshot/v1:sha256:29845d397c45cb6c5fcd5cba29f9a5e2f10bf645cbe81b3454813ef71535142c",
       "findings": {"medium": 0, "low": 3, "remediatedAfterScan": true}
     },
     "cumulativeRemediatedFindings": 11,

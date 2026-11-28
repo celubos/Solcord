@@ -153,7 +153,6 @@ Current presentation assets include:
 - `assets/branding/solcord-social-preview.svg`
 - `assets/branding/solcord-social-preview.png`
 - `assets/branding/icons/solcord-mark-*.png`
-- `docs/evidence/branding/solcord-concept-*.png`
 
 ### 4. README and maintainer documentation
 
@@ -165,8 +164,6 @@ Current presentation assets include:
 - performance, compatibility, privacy, suite, build, and attribution sections;
 - direct links into audit, security, roadmap, and handoff documents;
 - no broken direct links to historical pre-rename binaries.
-
-`AGENTS.md` records architecture boundaries, Bun commands, generated-file rules, compatibility invariants, UI and performance rules, reproduction requirements, upstream synchronization, and definition of done.
 
 ### 5. Repeatable repository audit
 
@@ -301,7 +298,6 @@ git diff --find-renames bec561cf10837bacfe587be9be4a08abf9891224...audit/solcord
 ### Presentation and maintainer changes
 
 - `README.md`
-- `AGENTS.md`
 - `assets/branding/solcord-social-preview.png`
 - `docs/archive/V2_ENGINEERING_HANDOFF.md`
 
@@ -471,7 +467,7 @@ After the release candidate is evidence-backed, start Control Center decompositi
 
 ## Resume instructions
 
-1. Read `AGENTS.md`.
+1. Read the [contributing guide](../../CONTRIBUTING.md).
 2. Read this handoff.
 3. Read `docs/audit/FULL_REPOSITORY_AUDIT.md`.
 4. Read `docs/audit/PLUGIN_BASELINE_REVIEW.md`.

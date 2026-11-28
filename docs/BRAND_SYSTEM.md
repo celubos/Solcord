@@ -31,8 +31,6 @@ At 16–24 pixels use the mark only; do not use the wordmark. Preserve its trans
 
 ## Asset provenance
 
-Concept studies are not bundled in Solcord. Their source, hashes, and review decisions are retained in the [branding records](evidence/branding/README.md).
-
 Production PNG sizes are rendered from the SVG by `scripts/render-solcord-mark.cjs`. The runtime uses that vector and the separately licensed local font described above. See the [provenance registry](PROVENANCE_REGISTRY.md) for source and license details.
 
 Current production-source hashes:
