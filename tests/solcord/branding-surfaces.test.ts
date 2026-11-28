@@ -22,12 +22,14 @@ describe("Solcord brand surfaces", () => {
         expect(commands).not.toContain("%3Crect width='64'");
     });
 
-    test("renders the production cord-cut silhouette in the editor loader", () => {
+    test("renders the production mark in the editor loader", () => {
         const editor = read("src/editor/index.html");
 
         expect(editor).toContain("Loading Solcord editor…");
-        expect(editor).toContain("d=\"M52 12C43 5 26 6 17 14C8 22 13 30 28 32\"");
-        expect(editor).toContain("d=\"M36 32C51 34 56 42 47 50C38 58 21 59 12 52\"");
+        expect(editor).toContain("d=\"M40.2 15.7A10.5 10.5 0 1 0 25.7 30.6\"");
+        expect(editor).toContain("d=\"M38.3 33.4A10.5 10.5 0 1 1 23.8 48.3\"");
+        expect(editor).toContain("editor-tile");
+        expect(editor).not.toContain("M52 12C43 5 26 6 17 14");
         expect(editor).toContain("#bd-icon::before,");
         expect(editor).toContain("content: none;");
         expect(editor).toContain("prefers-reduced-motion: reduce");

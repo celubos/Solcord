@@ -331,7 +331,12 @@ describe("Solcord installer security contracts", () => {
     test("supports a bounded noninteractive update for an explicitly selected Discord channel", () => {
         expect(selfTest).toContain("args.Contains(\"--update\"");
         expect(selfTest).toContain("--update --channel Stable|PTB|Canary");
-        expect(selfTest).toContain("args.Length != 3");
+        expect(selfTest).toContain("args.Length != (closeDiscord ? 4 : 3)");
+        // Command-line modes never close a running Discord without --close-discord.
+        expect(selfTest).toContain("if (running.Count > 0 && !closeDiscord)");
+        expect(selfTest).toContain("if (install) engine.InstallNew(target);");
+        expect(selfTest.match(/RequireDiscordClosedOrConsent\(engine, closeDiscord\);/g)?.length).toBe(2);
+        expect(selfTest).toMatch(/RequireDiscordClosedOrConsent\(engine, closeDiscord\);\r?\n\s+engine\.Uninstall\(target\);/);
         expect(selfTest).toContain("engine.Update(target)");
         expect(selfTest).not.toContain("engine.Uninstall(target);\n            return 0;");
     });

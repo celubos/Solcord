@@ -12,7 +12,7 @@ The source delivery branch is `main`; `development` remains the upstream integra
 
 ## What changed
 
-2.0.4 makes the Control Center consistent (one switch layout, readable setup steps, a single dialog title, teal links in Solcord Dark), shares the encrypted-storage code between all private stores, and finishes Setup: one options list, an install summary, safer self-removal, and a friendly message for any newer installation. See the [2.0.4 release notes](releases/2.0.4.md).
+2.0.4 introduces a new logo and a redesigned Setup, makes the Control Center consistent (one switch layout, readable setup steps, a single dialog title, teal links in Solcord Dark), shares the encrypted-storage code between all private stores, and finishes Setup: one options list, an install summary, safer self-removal, and a friendly message for any newer installation. See the [2.0.4 release notes](releases/2.0.4.md).
 
 ### 2.0.3
 

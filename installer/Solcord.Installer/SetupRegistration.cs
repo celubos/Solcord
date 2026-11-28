@@ -72,6 +72,7 @@ internal sealed class SetupRegistration
         key.SetValue("InstallLocation", SetupDirectory);
         key.SetValue("InstallDate", DateTime.Now.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture));
         key.SetValue("UninstallString", $"{quoted} --uninstall");
+        key.SetValue("QuietUninstallString", $"{quoted} --uninstall --quiet");
         key.SetValue("ModifyPath", quoted);
         key.SetValue("URLInfoAbout", "https://github.com/celubos/Solcord");
         key.SetValue("EstimatedSize", (int)Math.Min(int.MaxValue, new FileInfo(SetupExecutable).Length / 1024), RegistryValueKind.DWord);

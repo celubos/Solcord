@@ -20,14 +20,14 @@ The runtime bundles Hanken Grotesk for interface text from the official Google F
 
 ## Mark
 
-The mark is a cord-cut `S`, with teal and bone strokes separated by a small ember break. Active sources:
+The mark is a white `S` made of two cords on a rounded teal tile, with an ember spark where the cords are cut. Tile gradient `#2cc7b3` to `#0a5a54`; cords `#ffffff` and `#fff1de`; spark `#ffd08a` to `#ff6a3d`. Active sources:
 
 - `assets/branding/solcord-mark.svg`
 - `assets/branding/solcord-wordmark.svg`
 - `assets/branding/solcord-social-preview.svg`
 - `assets/branding/icons/solcord-mark-{16,24,32,64,256}.png`
 
-At 16–24 pixels use the mark only; do not use the wordmark. Preserve its transparent field and center break. Do not recolor it to Discord blurple or place it inside a Discord-shaped silhouette.
+At 16–24 pixels use the mark only; do not use the wordmark. Keep the tile, both cords, and the cut around the spark. Do not recolor it to Discord blurple or place it inside a Discord-shaped silhouette. `assets/branding/icons/solcord.ico` (the executable icon) is built from the 256-pixel export.
 
 ## Asset provenance
 
@@ -37,15 +37,15 @@ Current production-source hashes:
 
 | Asset | SHA-256 |
 | --- | --- |
-| `assets/branding/solcord-mark.svg` | `6c95fa4585fdc153d75c5eb0ded40e20bddb77fcd950ef5ef49780ddeeb7534b` |
-| `assets/branding/solcord-wordmark.svg` | `44e0ff79467b6ea35b92f42bf57139d9f19f54ace4288ecf415e3dfb6ed6e63d` |
-| `assets/branding/solcord-social-preview.svg` | `9e1efbee3ce862ddfa947db4f433ef1e3f9e79ac5e9fb2fe889c2be3417f42e0` |
-| `assets/branding/solcord-social-preview.png` | `e0b4553e07f4383e3cc3a508ac22db119e29e896f619bacccb4d80a5972d5223` |
-| `assets/branding/icons/solcord-mark-16.png` | `8e3b10bb5094c65c497cd4fd1b60e5e670f0f9775ee1a42ba1e77883a1a32387` |
-| `assets/branding/icons/solcord-mark-24.png` | `cae50045e449673aea5f919cf94d69cb14d7f7bbc24efffbdbc56488ecee591f` |
-| `assets/branding/icons/solcord-mark-32.png` | `868bdb6498d99ce69bea29f0737ea6c05c5f47f459985b6b0f748f5253d4d20a` |
-| `assets/branding/icons/solcord-mark-64.png` | `2c43fee1e0c5756a32bb602d90e3c0684adcce14a347f2185a0834806932414b` |
-| `assets/branding/icons/solcord-mark-256.png` | `2a0b0f786c9f5e0effe9ca7113a08f47a974d54b0efeff9b9dfba59e9bd2f746` |
+| `assets/branding/solcord-mark.svg` | `c3e7ce9bf98220ed845a313951a8576ce27053c40d6a136598d675891bd2cce0` |
+| `assets/branding/solcord-wordmark.svg` | `d5f9996a5c8095601637328fa234d9fa51f780ce84ecef9779f332aba44493bc` |
+| `assets/branding/solcord-social-preview.svg` | `a0a9031d684cb700665843622b4683cab1e568f9027b62705e84c35528ec599c` |
+| `assets/branding/solcord-social-preview.png` | `e025b367c4e219b520e39d13cf76c191b0afd5bab15c16b8823163ec636dadbd` |
+| `assets/branding/icons/solcord-mark-16.png` | `e3de5149146c6d9c36cf1a40d8d0cdaf31ba009fe9e7bcccf4aa0216a76ae4da` |
+| `assets/branding/icons/solcord-mark-24.png` | `25cf972b38ca153866579f1920f4b58fc1522cb12371b62918cca563818c486d` |
+| `assets/branding/icons/solcord-mark-32.png` | `fe2aea4bfb8f7950720c61bcb55c5c9554855c9750aca8f67fef5e306a8f5f22` |
+| `assets/branding/icons/solcord-mark-64.png` | `1d6002ae9a28e24fbb2d82ea47b6eedee10ee21a1030222ae1a72e590a888426` |
+| `assets/branding/icons/solcord-mark-256.png` | `95248b2dbf812094da064ee5131eba80fa16c704f3e8f7bbb1f3aa124414aa55` |
 
 ## Theme family
 
