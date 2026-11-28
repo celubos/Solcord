@@ -1,19 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title description">
   <title id="title">Solcord</title>
-  <desc id="description">Solcord cord-cut S on a graphite field with a concise product description.</desc>
+  <desc id="description">The Solcord mark on a graphite field with a concise product description.</desc>
   <rect width="1200" height="630" fill="#171a1c"/>
   <rect x="64" y="64" width="1072" height="502" rx="12" fill="#1d2224" stroke="#343b3e" stroke-width="2"/>
-  <g transform="translate(112 151) scale(4.7)" fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M52 12C43 5 26 6 17 14C8 22 13 30 28 32" stroke="#0f1112" stroke-width="11"/>
-    <path d="M52 12C43 5 26 6 17 14C8 22 13 30 28 32" stroke="#4b9d96" stroke-width="6.5"/>
-    <path d="M36 32C51 34 56 42 47 50C38 58 21 59 12 52" stroke="#0f1112" stroke-width="11"/>
-    <path d="M36 32C51 34 56 42 47 50C38 58 21 59 12 52" stroke="#f0e5d5" stroke-width="6.5"/>
-    <path d="M27.6 32L24.8 31.2" stroke="#df6b52" stroke-width="4"/>
+  <g transform="translate(112 165) scale(4.6)">
+    <defs>
+        <linearGradient id="social-tile" x1="6" y1="2" x2="58" y2="62" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#2cc7b3"/>
+          <stop offset="1" stop-color="#0a5a54"/>
+        </linearGradient>
+        <radialGradient id="social-spark" cx="32" cy="32" r="4.2" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#ffd08a"/>
+          <stop offset="1" stop-color="#ff6a3d"/>
+        </radialGradient>
+      </defs>
+      <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#social-tile)"/>
+      <rect x="2.5" y="2.5" width="59" height="59" rx="14.5" fill="none" stroke="#ffffff" stroke-opacity="0.14"/>
+      <g fill="none" stroke-linecap="round" stroke-width="7.6">
+        <path d="M40.2 15.7A10.5 10.5 0 1 0 25.7 30.6" stroke="#ffffff"/>
+        <path d="M38.3 33.4A10.5 10.5 0 1 1 23.8 48.3" stroke="#fff1de"/>
+      </g>
+      <circle cx="32" cy="32" r="5.9" fill="url(#social-tile)"/>
+      <circle cx="32" cy="32" r="3.3" fill="url(#social-spark)"/>
   </g>
   <text x="448" y="270" fill="#f0e5d5" font-family="Segoe UI, Arial, sans-serif" font-size="102" font-weight="700" letter-spacing="-5">Solcord</text>
-  <text x="453" y="326" fill="#aab1b3" font-family="Segoe UI, Arial, sans-serif" font-size="28">A private, inspectable Discord desktop fork.</text>
-  <path d="M454 370H684" stroke="#4b9d96" stroke-width="5"/>
-  <path d="M684 370H729" stroke="#df6b52" stroke-width="5"/>
-  <text x="453" y="420" fill="#d6d1c9" font-family="Segoe UI, Arial, sans-serif" font-size="23">Activity compatibility  ·  recovery tools  ·  local-first controls</text>
-  <text x="453" y="500" fill="#7f898d" font-family="Segoe UI, Arial, sans-serif" font-size="18">Based on BetterDiscord. No hidden telemetry.</text>
+  <text x="453" y="326" fill="#aab1b3" font-family="Segoe UI, Arial, sans-serif" font-size="28">Discord, your way.</text>
+  <path d="M454 370H684" stroke="#2cc7b3" stroke-width="5"/>
+  <path d="M684 370H729" stroke="#ff6a3d" stroke-width="5"/>
+  <text x="453" y="420" fill="#d6d1c9" font-family="Segoe UI, Arial, sans-serif" font-size="23">Themes  ·  privacy controls  ·  Message History  ·  one-click undo</text>
+  <text x="453" y="500" fill="#7f898d" font-family="Segoe UI, Arial, sans-serif" font-size="18">Built on BetterDiscord. Free and open source.</text>
 </svg>

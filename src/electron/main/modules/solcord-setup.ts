@@ -7,6 +7,7 @@ import {app, net} from "electron";
 import {SOLCORD_RUNTIME_ADDONS, SOLCORD_RUNTIME_DEPENDENCIES, SOLCORD_RUNTIME_THEMES} from "@common/solcord/addon-catalog.generated";
 
 import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
+import {assertSolcordPathInside, ensureSolcordManagedDirectory, SolcordSerialQueue, writeSolcordTextAtomically, type SolcordManagedDirectoryMessages} from "./solcord-private-store-files";
 
 
 type AddonCandidate = typeof SOLCORD_RUNTIME_ADDONS[number];
@@ -82,6 +83,11 @@ const TRANSACTION_ID = /^[a-z0-9]+-[0-9a-f]{16}$/;
 const TRANSACTION_JOURNAL = /^([a-z0-9]+-[0-9a-f]{16})\.json$/;
 const TRANSACTION_INTENT = /^([a-z0-9]+-[0-9a-f]{16})\.intent\.json$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+const MANAGED_DIRECTORY_MESSAGES: SolcordManagedDirectoryMessages = {
+    escapesRoot: "Managed directory escapes the BetterDiscord root.",
+    unsafeNode: "Managed directory is a link or non-directory.",
+    resolvesOutside: "Managed directory resolves through a link outside BetterDiscord."
+};
 const LEGACY_SOLCORD_THEME_SHA256: Readonly<Record<string, ReadonlySet<string>>> = {
     // Exact hashes from shipped, completed setup generations. A completed
     // journal remains verifiable after an upgrade without accepting arbitrary
@@ -109,24 +115,6 @@ export function isReviewedLegacySolcordTheme(fileName: string, sha256: string): 
     if (!SHA256.test(sha256)) return false;
     try {return LEGACY_SOLCORD_THEME_SHA256[safeFileName(fileName, "theme")]?.has(sha256) === true;}
     catch {return false;}
-}
-
-function atomicWrite(target: string, content: string): void {
-    const temporary = `${target}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
-    const descriptor = fs.openSync(temporary, "wx", 0o600);
-    try {
-        fs.writeFileSync(descriptor, content, {encoding: "utf8"});
-        fs.fsyncSync(descriptor);
-        fs.closeSync(descriptor);
-        fs.renameSync(temporary, target);
-    }
-    catch (error) {
-        try {fs.closeSync(descriptor);}
-        catch {/* already closed */}
-        try {if (fs.existsSync(temporary)) fs.unlinkSync(temporary);}
-        catch {/* best effort */}
-        throw error;
-    }
 }
 
 export function validatePinnedSourceUrl(value: string): URL {
@@ -172,10 +160,10 @@ async function readBoundedResponse(response: Response): Promise<Buffer> {
 }
 
 export class SolcordSetupTransactions {
-    #queue = Promise.resolve();
+    #queue = new SolcordSerialQueue();
 
     apply(rawRequest: unknown): Promise<{transactionId: string; added: TransactionFile[]; reused: TransactionFile[]; selectedTheme: string;}> {
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             this.#recoverIncompleteTransactions(new Set());
             const request = this.#normalizeRequest(rawRequest);
             const selected = request.selectedAddons.map(name => {
@@ -221,7 +209,7 @@ export class SolcordSetupTransactions {
                 const journalRoot = this.#journalRoot();
                 this.#ensureSafeDirectory(journalRoot, true);
                 intentFile = path.join(journalRoot, `${transactionId}.intent.json`);
-                atomicWrite(intentFile, `${JSON.stringify(intent, null, 2)}\n`);
+                writeSolcordTextAtomically(intentFile, `${JSON.stringify(intent, null, 2)}\n`);
 
                 for (const candidate of pluginCandidates) this.#applyStaged(transactionId, candidate.fileName, candidate.sourceSha256, "plugin", stage, added, reused);
                 for (const theme of SOLCORD_RUNTIME_THEMES) {
@@ -241,7 +229,7 @@ export class SolcordSetupTransactions {
                 };
                 const serialized = `${JSON.stringify(journal, null, 2)}\n`;
                 journalFile = path.join(journalRoot, `${transactionId}.json`);
-                atomicWrite(journalFile, serialized);
+                writeSolcordTextAtomically(journalFile, serialized);
                 // The renderer must durably record the matching settings
                 // transaction before this becomes complete. Recovery either
                 // acknowledges a known prepared id or rolls its owned files
@@ -274,11 +262,11 @@ export class SolcordSetupTransactions {
     }
 
     acknowledge(transactionId: unknown): Promise<{transactionId: string; complete: true;}> {
-        return this.#serialized(async () => this.#commitPreparedTransaction(transactionId));
+        return this.#queue.run(async () => this.#commitPreparedTransaction(transactionId));
     }
 
     reconcile(rawTransactionIds: unknown): Promise<{committed: string[]; rolledBack: string[];}> {
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (!Array.isArray(rawTransactionIds) || rawTransactionIds.length > 10) throw new TypeError("Invalid Solcord transaction reconciliation request.");
             const known = new Set<string>();
             for (const transactionId of rawTransactionIds) {
@@ -290,7 +278,7 @@ export class SolcordSetupTransactions {
     }
 
     rollback(transactionId: unknown): Promise<SetupRollbackResult> {
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (typeof transactionId !== "string" || !TRANSACTION_ID.test(transactionId)) throw new TypeError("Invalid Solcord transaction id.");
             const journalRoot = this.#journalRoot();
             if (!this.#ensureSafeDirectory(journalRoot, false)) throw new Error("Solcord transaction journal not found.");
@@ -363,7 +351,7 @@ export class SolcordSetupTransactions {
     }
 
     auditIntegrity(): Promise<SetupIntegrityRecord[]> {
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             const records: SetupIntegrityRecord[] = [];
             for (const candidate of SOLCORD_RUNTIME_ADDONS) records.push(this.#auditCandidate("addon", candidate.name, "plugin", candidate.fileName, candidate.sourceSha256));
             for (const candidate of SOLCORD_RUNTIME_DEPENDENCIES) records.push(this.#auditCandidate("dependency", candidate.name, "plugin", candidate.fileName, candidate.sourceSha256));
@@ -397,10 +385,7 @@ export class SolcordSetupTransactions {
 
     async #stageRemote(candidate: AddonCandidate | DependencyCandidate, kind: "plugin", stage: string, reused: TransactionFile[]): Promise<void> {
         const fileName = safeFileName(candidate.fileName, kind);
-        if (!SHA256.test(candidate.sourceSha256)) throw new TypeError(`Invalid reviewed hash for ${fileName}.`);
-        const targetRoot = this.#targetRoot(kind);
-        this.#ensureSafeDirectory(targetRoot, true);
-        const target = path.join(targetRoot, fileName);
+        const {targetRoot, target} = this.#reviewedTarget(fileName, candidate.sourceSha256, kind);
         if (fs.existsSync(target)) {
             const current = this.#digestManagedFile(target, targetRoot);
             if (current !== candidate.sourceSha256) throw new Error(`${fileName} already exists with a different hash; Solcord will not overwrite it.`);
@@ -424,12 +409,17 @@ export class SolcordSetupTransactions {
         fs.writeFileSync(path.join(stage, fileName), bytes, {flag: "wx", mode: 0o600});
     }
 
+    /** Rejects a malformed reviewed hash, then returns where `fileName` installs, creating that folder if needed. */
+    #reviewedTarget(fileName: string, sourceSha256: string, kind: ManagedKind): {targetRoot: string; target: string;} {
+        if (!SHA256.test(sourceSha256)) throw new TypeError(`Invalid reviewed hash for ${fileName}.`);
+        const targetRoot = this.#targetRoot(kind);
+        this.#ensureSafeDirectory(targetRoot, true);
+        return {targetRoot, target: path.join(targetRoot, fileName)};
+    }
+
     #stageTheme(theme: ThemeCandidate, stage: string, reused: TransactionFile[], legacyReplacements: Map<string, string>): void {
         const fileName = safeFileName(theme.fileName, "theme");
-        if (!SHA256.test(theme.sourceSha256)) throw new TypeError(`Invalid reviewed hash for ${fileName}.`);
-        const targetRoot = this.#targetRoot("theme");
-        this.#ensureSafeDirectory(targetRoot, true);
-        const target = path.join(targetRoot, fileName);
+        const {targetRoot, target} = this.#reviewedTarget(fileName, theme.sourceSha256, "theme");
         if (fs.existsSync(target)) {
             const current = this.#digestManagedFile(target, targetRoot);
             if (current === theme.sourceSha256) {
@@ -607,7 +597,7 @@ export class SolcordSetupTransactions {
         const root = this.#journalRoot();
         this.#ensureSafeDirectory(root, true);
         const receipt: TransactionReceipt = {version: 1, transactionId, file, ...identity};
-        atomicWrite(this.#receiptPath(transactionId, file), `${JSON.stringify(receipt, null, 2)}\n`);
+        writeSolcordTextAtomically(this.#receiptPath(transactionId, file), `${JSON.stringify(receipt, null, 2)}\n`);
     }
 
     #readReceipt(transactionId: string, file: TransactionFile): TransactionReceipt | undefined {
@@ -663,33 +653,7 @@ export class SolcordSetupTransactions {
     }
 
     #ensureSafeDirectory(target: string, create: boolean): boolean {
-        const base = path.resolve(this.#betterDiscordRoot());
-        const resolved = path.resolve(target);
-        if (resolved !== base && !resolved.startsWith(`${base}${path.sep}`)) throw new TypeError("Managed directory escapes the BetterDiscord root.");
-
-        if (!fs.existsSync(base)) {
-            if (!create) return false;
-            fs.mkdirSync(base, {recursive: true, mode: 0o700});
-        }
-        this.#assertDirectoryNode(base);
-        if (resolved === base) return true;
-
-        if (!fs.existsSync(resolved)) {
-            if (!create) return false;
-            const parent = path.dirname(resolved);
-            if (parent !== base) this.#ensureSafeDirectory(parent, true);
-            fs.mkdirSync(resolved, {recursive: false, mode: 0o700});
-        }
-        this.#assertDirectoryNode(resolved);
-        const realBase = fs.realpathSync.native(base);
-        const realTarget = fs.realpathSync.native(resolved);
-        if (realTarget !== realBase && !realTarget.startsWith(`${realBase}${path.sep}`)) throw new TypeError("Managed directory resolves through a link outside BetterDiscord.");
-        return true;
-    }
-
-    #assertDirectoryNode(directory: string): void {
-        const stat = fs.lstatSync(directory);
-        if (!stat.isDirectory() || stat.isSymbolicLink()) throw new TypeError("Managed directory is a link or non-directory.");
+        return ensureSolcordManagedDirectory(target, create, MANAGED_DIRECTORY_MESSAGES);
     }
 
     #assertExistingSafeDirectory(directory: string): void {
@@ -697,9 +661,7 @@ export class SolcordSetupTransactions {
     }
 
     #assertInside(target: string, root: string): void {
-        const resolvedRoot = path.resolve(root);
-        const resolvedTarget = path.resolve(target);
-        if (resolvedTarget === resolvedRoot || !resolvedTarget.startsWith(`${resolvedRoot}${path.sep}`)) throw new Error("Unsafe Solcord managed path.");
+        assertSolcordPathInside(target, root, "Unsafe Solcord managed path.", Error);
     }
 
     #removeStage(stage: string): void {
@@ -728,7 +690,7 @@ export class SolcordSetupTransactions {
             if (existing !== content) throw new TypeError("Solcord transaction marker conflicts with the current transaction.");
             return;
         }
-        atomicWrite(target, `${content}\n`);
+        writeSolcordTextAtomically(target, `${content}\n`);
     }
 
     #readMarker(target: string, root: string): string {
@@ -891,12 +853,6 @@ export class SolcordSetupTransactions {
         }
         if (ambiguous) throw new Error("Solcord found an ambiguous transaction journal; setup is paused for manual review.");
         return {committed, rolledBack: rolledBackIds};
-    }
-
-    #serialized<T>(task: () => Promise<T>): Promise<T> {
-        const result = this.#queue.then(task, task);
-        this.#queue = result.then(() => undefined, () => undefined);
-        return result;
     }
 }
 

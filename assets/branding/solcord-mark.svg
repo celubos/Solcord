@@ -1,11 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title description">
-  <title id="title">Solcord cord-cut S mark</title>
-  <desc id="description">Two asymmetrical signal cords form an S with a deliberate break at its center.</desc>
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M52 12C43 5 26 6 17 14C8 22 13 30 28 32" stroke="#171a1c" stroke-width="11"/>
-    <path d="M52 12C43 5 26 6 17 14C8 22 13 30 28 32" stroke="#4b9d96" stroke-width="6.5"/>
-    <path d="M36 32C51 34 56 42 47 50C38 58 21 59 12 52" stroke="#171a1c" stroke-width="11"/>
-    <path d="M36 32C51 34 56 42 47 50C38 58 21 59 12 52" stroke="#f0e5d5" stroke-width="6.5"/>
-    <path d="M27.6 32L24.8 31.2" stroke="#df6b52" stroke-width="4"/>
+  <title id="title">Solcord</title>
+  <desc id="description">A white S made of two cords on a teal tile, with an ember spark where the cords are cut.</desc>
+  <defs>
+    <linearGradient id="solcord-tile" x1="6" y1="2" x2="58" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2cc7b3"/>
+      <stop offset="1" stop-color="#0a5a54"/>
+    </linearGradient>
+    <radialGradient id="solcord-spark" cx="32" cy="32" r="4.2" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd08a"/>
+      <stop offset="1" stop-color="#ff6a3d"/>
+    </radialGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#solcord-tile)"/>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="14.5" fill="none" stroke="#ffffff" stroke-opacity="0.14"/>
+  <g fill="none" stroke-linecap="round" stroke-width="7.6">
+    <path d="M40.2 15.7A10.5 10.5 0 1 0 25.7 30.6" stroke="#ffffff"/>
+    <path d="M38.3 33.4A10.5 10.5 0 1 1 23.8 48.3" stroke="#fff1de"/>
   </g>
+  <circle cx="32" cy="32" r="5.9" fill="url(#solcord-tile)"/>
+  <circle cx="32" cy="32" r="3.3" fill="url(#solcord-spark)"/>
 </svg>

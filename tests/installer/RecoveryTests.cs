@@ -308,6 +308,13 @@ static class RecoveryTests
         File.WriteAllText(receipt, "{\"Version\":\"9.1.0\",\"CandidateLabel\":\"v9.1.0\",\"FutureField\":{\"x\":1},\"SourceCommit\":\"not-a-commit\"}");
         Check(engine.InstalledPackageLabel() == "v9.1.0", "A future receipt label was not read leniently");
         Check(engine.InstalledPackageIsNewer(), "A future receipt was not reported as newer");
+        // Missing fields must read as an unrecognized receipt, not crash strict validation.
+        File.WriteAllText(receipt, "{\"Version\":\"9.1.0\",\"CandidateLabel\":\"v9.1.0\"}");
+        Check(engine.InstalledPackageIsNewer() && engine.HasManagedInstall(), "A minimal future receipt was not reported as newer");
+        try {engine.ManagedTarget(); throw new InvalidOperationException("A minimal future receipt was accepted as this Setup's receipt");}
+        catch (InvalidDataException) {}
+        try {engine.Update(target); throw new InvalidOperationException("An older Setup updated over a newer receipt");}
+        catch (InvalidDataException) {}
         File.WriteAllText(receipt, "{\"Version\":\"not a version\"}");
         Check(engine.InstalledPackageLabel() is null && !engine.InstalledPackageIsNewer(), "A malformed receipt produced a label");
         File.WriteAllText(receipt, "{\"Version\":\"1.0.0\"}");

@@ -24,7 +24,8 @@ internal static class Program
                 return 1;
             }
         }
-        if (args.Contains("--update", StringComparer.OrdinalIgnoreCase)) return RunUpdate(args);
+        if (args.Contains("--install", StringComparer.OrdinalIgnoreCase) || args.Contains("--update", StringComparer.OrdinalIgnoreCase)) return RunUpdate(args);
+        if (args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase) && args.Contains("--quiet", StringComparer.OrdinalIgnoreCase)) return RunQuietUninstall(args);
         InstallerStartup startup = args.Contains("--launch", StringComparer.OrdinalIgnoreCase) ? InstallerStartup.Heal
             : args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase) ? InstallerStartup.Uninstall
             : InstallerStartup.Normal;
@@ -38,7 +39,8 @@ internal static class Program
             // The Start Menu "Solcord" entry: when nothing needs attention, open
             // Discord straight away without showing Setup at all.
             if (startup == InstallerStartup.Heal && TryLaunchVerified(engine)) return 0;
-            Application.Run(new InstallerForm(bundle.Root, engine, startup, registration));
+            try {Application.Run(new InstallerForm(bundle.Root, engine, startup, registration));}
+            finally {registration.FinishAfterExit();}
             return 0;
         }
         catch (Exception error)
@@ -67,30 +69,89 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// Command-line modes never close a running Discord unless --close-discord says so,
+    /// so nothing in progress (a call, an upload) is ended without the person's consent.
+    /// </summary>
+    private static void RequireDiscordClosedOrConsent(InstallerEngine engine, bool closeDiscord)
+    {
+        IReadOnlyList<string> running = engine.RunningDiscordChannels();
+        if (running.Count > 0 && !closeDiscord)
+            throw new InvalidOperationException($"Discord {string.Join(", ", running)} is running. Quit it, or add --close-discord to let Setup close it.");
+    }
+
     private static int RunUpdate(string[] args)
     {
         try
         {
+            bool install = args.Contains("--install", StringComparer.OrdinalIgnoreCase);
+            bool closeDiscord = args.Contains("--close-discord", StringComparer.OrdinalIgnoreCase);
             int channelFlag = Array.FindIndex(args, value => value.Equals("--channel", StringComparison.OrdinalIgnoreCase));
-            if (args.Length != 3 || channelFlag < 0 || channelFlag + 1 >= args.Length)
-                throw new ArgumentException("Usage: SolcordInstaller.exe --update --channel Stable|PTB|Canary");
+            if (args.Length != (closeDiscord ? 4 : 3) || channelFlag < 0 || channelFlag + 1 >= args.Length)
+                throw new ArgumentException("Usage: SolcordInstaller.exe --install|--update --channel Stable|PTB|Canary [--close-discord]");
             string channel = args[channelFlag + 1];
             if (channel is not ("Stable" or "PTB" or "Canary"))
                 throw new ArgumentException("The Discord channel must be Stable, PTB, or Canary.");
 
             using EmbeddedInstallerBundle bundle = EmbeddedInstallerBundle.ExtractVerified();
-            var engine = new InstallerEngine(
-                bundle.Root,
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var registration = new SetupRegistration(local, roaming);
+            var engine = new InstallerEngine(bundle.Root, local, roaming) {SetupExecutable = registration.SetupExecutable};
             DiscordTarget target = engine.DetectTargets().SingleOrDefault(candidate => candidate.Channel == channel)
                 ?? throw new InvalidOperationException($"Discord {channel} is not installed.");
-            engine.Update(target);
+            RequireDiscordClosedOrConsent(engine, closeDiscord);
+            if (install) engine.InstallNew(target);
+            else engine.Update(target);
+            // Keep "Solcord Setup", the Settings > Apps entry, and the Start menu
+            // shortcut on this version too, exactly as an update from the window does.
+            try
+            {
+                registration.Ensure(Environment.ProcessPath ?? Application.ExecutablePath, engine.LoadManifest());
+                DiscordTarget? managed = engine.ManagedTarget();
+                if (managed is not null) engine.RefreshLauncher(managed);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or System.Security.SecurityException or PlatformNotSupportedException or System.Runtime.InteropServices.COMException)
+            {
+                Console.Error.WriteLine($"setup-entry:{error.GetType().Name}");
+            }
             return 0;
         }
         catch (Exception error)
         {
             Console.Error.WriteLine($"update:{error.GetType().Name}:{error.Message}");
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// "--uninstall --quiet [--close-discord]": the Settings &gt; Apps quiet uninstall. Removes
+    /// Solcord from its recorded Discord app plus Setup's own entries; user data stays.
+    /// </summary>
+    private static int RunQuietUninstall(string[] args)
+    {
+        try
+        {
+            bool closeDiscord = args.Contains("--close-discord", StringComparer.OrdinalIgnoreCase);
+            using EmbeddedInstallerBundle bundle = EmbeddedInstallerBundle.ExtractVerified();
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var registration = new SetupRegistration(local, roaming);
+            var engine = new InstallerEngine(bundle.Root, local, roaming) {SetupExecutable = registration.SetupExecutable};
+            DiscordTarget target = engine.ManagedTarget() ?? throw new InvalidOperationException("Solcord is not installed.");
+            RequireDiscordClosedOrConsent(engine, closeDiscord);
+            engine.Uninstall(target);
+            try {registration.Remove(Environment.ProcessPath ?? Application.ExecutablePath);}
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or System.Security.SecurityException)
+            {
+                Console.Error.WriteLine($"setup-entry:{error.GetType().Name}");
+            }
+            registration.FinishAfterExit();
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"uninstall:{error.GetType().Name}:{error.Message}");
             return 1;
         }
     }
@@ -128,11 +189,18 @@ internal static class InstallerSelfTest
             if (!registration.IsRegistered()) throw new InvalidDataException("setup-registration: the Settings > Apps entry is missing");
             using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(testKey)!)
             {
-                if (key.GetValue("UninstallString") as string != $"\"{copy}\" --uninstall" || key.GetValue("DisplayVersion") as string != manifest.Version || key.GetValue("DisplayName") as string != "Solcord")
+                if (key.GetValue("UninstallString") as string != $"\"{copy}\" --uninstall" || key.GetValue("QuietUninstallString") as string != $"\"{copy}\" --uninstall --quiet" || key.GetValue("DisplayVersion") as string != manifest.Version || key.GetValue("DisplayName") as string != "Solcord")
                     throw new InvalidDataException("setup-registration: the Settings > Apps entry has the wrong values");
             }
             registration.Ensure(copy, manifest);
             if (File.ReadAllText(copy) != "setup-bytes") throw new InvalidDataException("setup-registration: running from the copy damaged it");
+            // Uninstalling from the copy itself keeps the window usable: entries go now, the copy after exit.
+            registration.Remove(copy);
+            if (!File.Exists(copy) || !registration.DeletesCopyAfterExit || File.Exists(registration.ShortcutPath) || registration.IsRegistered())
+                throw new InvalidDataException("setup-registration: uninstall from the running copy did not defer deleting the copy");
+            registration.Ensure(copy, manifest);
+            if (registration.DeletesCopyAfterExit || !registration.IsRegistered())
+                throw new InvalidDataException("setup-registration: reinstalling from the copy did not cancel its pending deletion");
             registration.Remove(download);
             if (File.Exists(copy) || File.Exists(registration.ShortcutPath) || registration.IsRegistered() || Directory.Exists(registration.SetupDirectory))
                 throw new InvalidDataException("setup-registration: uninstall left the Setup copy, shortcut, or apps entry");

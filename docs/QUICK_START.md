@@ -1,96 +1,78 @@
 # Solcord quick start
 
-Use this guide for the **Solcord 2.0.3** Windows installer. Mac users should read the separate [macOS preview guide](MACOS.md).
-
-Allow about one minute on a typical PC **after download**. Windows prompts, Discord shutdown, or recovery can take longer.
-
-## Before you start
-
-- Use Windows x64 with the official Discord desktop app installed.
-- Open ordinary Discord at least once so it can finish installing.
-- You do not need to install Bun, Git, .NET, plugin libraries, or BetterDiscord separately.
-- Save unfinished drafts and leave voice/video calls before continuing.
-
-> [!WARNING]
-> This build is unsigned. Windows may show an unknown-publisher warning. Download only from `celubos/Solcord`, compare the hash below, and do not disable Windows security to install it.
+Getting Solcord running takes about a minute. You need Windows x64 and the normal Discord desktop app (open it once first so it finishes installing). On a Mac, read the [macOS preview guide](MACOS.md) instead.
 
 ## 1. Download
 
-Download both files into the same folder:
+Download **[SolcordInstaller.exe](https://github.com/celubos/Solcord/releases/latest/download/SolcordInstaller.exe)** from the latest release.
 
-- [SolcordInstaller.exe](https://github.com/celubos/Solcord/releases/download/v2.0.3/SolcordInstaller.exe)
-- [SHA256SUMS.txt](https://github.com/celubos/Solcord/releases/download/v2.0.3/SHA256SUMS.txt)
+Solcord isn't code-signed yet, so Windows SmartScreen may say it doesn't recognize the app. If you downloaded it from the link above, choose **More info**, then **Run anyway**. Never turn off Windows security to install anything.
+
+<details>
+<summary><strong>Check the download (optional)</strong></summary>
 
 ### Check the download
 
-Open PowerShell in your download folder and run:
+Download **[SHA256SUMS.txt](https://github.com/celubos/Solcord/releases/latest/download/SHA256SUMS.txt)** into the same folder, open PowerShell there, and run:
 
 ```powershell
 Get-FileHash .\SolcordInstaller.exe -Algorithm SHA256
 ```
 
-Compare the result with the `SolcordInstaller.exe` line in **SHA256SUMS.txt** from the same release. Do not run a file whose hash differs. **RELEASE-SHA256SUMS.txt** additionally covers every Windows and Mac release attachment.
+The result must match the `SolcordInstaller.exe` line in **SHA256SUMS.txt**. If it doesn't, delete the file and don't run it. **RELEASE-SHA256SUMS.txt** on the release page covers every Windows and Mac file.
 
-## 2. Save anything in progress
+</details>
 
-Solcord's core is shared by Discord Stable, PTB, and Canary. When changing that core, the installer closes running Discord processes whose executable paths it verifies, including another installed channel. It does not close unrelated applications. If a process cannot be verified or stopped, installation stops with an error.
+## 2. Install
 
-## 3. Install
+Open **SolcordInstaller.exe** and choose **Install Solcord**.
 
-Open **SolcordInstaller.exe**. In **Discord app**, choose the Discord installation you use. The version is detected from your PC, not fixed by this guide. Choose **Refresh** or press **F5** after installing or updating Discord. Actions stay disabled while Setup checks the selected app.
+![Solcord Setup, ready to install](images/setup.png)
 
-Choose the large recommended action. It will say **Install Solcord**, **Update Solcord**, **Repair Solcord**, or **Turn Solcord back on** according to the files on your PC. Wait for the success status. Do not move or delete backups while an action is running.
+- If Discord is open, Setup asks before closing it for a moment. Save drafts and leave calls first.
+- Setup finds your Discord by itself. If you use PTB or Canary, pick it under **Discord app**.
+- When it says **Solcord is on**, choose **Open Discord**.
 
-Setup keeps a copy of itself on your PC, so you can delete the download afterwards. Open it any time as **Solcord Setup** from the Start menu, or from **Settings → Apps → Installed apps → Solcord**.
+Setup keeps a copy of itself, so you can delete the download. From now on:
 
-## 4. Open Discord
+- **Solcord** in the Start menu opens Discord, and turns Solcord back on first if a Discord update switched it off.
+- **Solcord Setup** in the Start menu (and in **Settings → Apps → Installed apps**) updates, repairs, or removes Solcord.
 
-When Setup says **Solcord is on**, choose **Open Discord**. This launches your existing Discord installation; you do not need a separate account or a new Discord profile. **Check files** compares the installed files with this version without changing anything.
+## 3. Open the settings
 
-From now on you can open Discord with the **Solcord** entry in the Start menu. If a Discord update turned Solcord off while Discord was closed, that entry turns it back on first.
+In Discord, open **User Settings**, scroll to the bottom of the list, and choose **Open Solcord Suite**.
 
-## 5. Complete First Setup
+The first time, a short setup walks you through privacy, appearance, and features. Nothing changes until you choose **Apply**, and **Finish later** keeps your place. You can reopen it any time from **Recovery → First Setup**.
 
-A fresh installation opens **Solcord Suite** at **Welcome** once Discord is ready. Follow Welcome, Privacy, Appearance, Features, and Review and Apply.
-
-To open settings later, open Discord **User Settings**, scroll to the bottom of the sidebar, and click **Open Solcord Suite**. This entry opens an independent Control Center even when Discord changes its own settings layout.
-
-**Back** keeps the draft. **Finish later** saves your place without applying the proposed choices. Existing completed profiles do not reopen setup after an update or repair. To reopen it manually, open **Solcord Suite**, choose **Recovery**, then choose **First Setup**.
-
-Recommended first check:
-
-1. Choose a theme and leave optional private/history features off until you need them.
-2. Try one built-in at a time in its matching workspace.
-3. Open **Recovery**, then **Plugin Doctor**, if a tool reports a problem.
-4. Leave Experimental tools off. Audience Guard stays unarmed until you explicitly arm it for a call.
-
-Translation is optional. On-device translation requires a compatible engine in your Discord build and a supported language pair. DeepL and LibreTranslate need an explicit provider choice and may require a credential; no remote provider is silently selected.
+A good start: pick a theme, leave Message History and other private features off until you want them, and try one feature at a time.
 
 ## Updating
 
-Download the new release's installer and checksum file, verify the download, and choose **Update Solcord**. Plugins, themes, settings, and private stores remain in place. **Repair** reinstalls the exact package you opened; it does not download an update.
+Solcord keeps working when Discord updates itself, so normally there's nothing to do.
 
-Discord updates itself in the background. Solcord attaches to the new Discord version while Discord is running, so you normally don't need to do anything.
+For a new version of Solcord, download the latest installer and choose **Update Solcord**. Your settings come along, and **Roll back** in Solcord Setup undoes the update if you need to.
 
-## Recovery
+## If something goes wrong
 
-| Problem | Next step |
+| What you see | What to do |
 | --- | --- |
-| Discord does not appear in Discord app | Open the official desktop app once, quit it, then choose **Refresh** in Setup. |
-| Discord cannot close | Quit it from the Windows system tray, then retry. The installer will not guess at an unverified process. |
+| Setup says **Solcord is off** | Discord updated without Solcord. Choose **Turn Solcord back on**. |
+| Solcord disappeared after a Discord update | Open Discord from the **Solcord** Start menu entry, or open **Solcord Setup** and choose **Turn Solcord back on**. |
+| Setup says **Newer version installed** | You opened an old installer. Use **Solcord Setup** from the Start menu, or download the latest one. |
+| Setup can't close Discord | Quit Discord from the system tray (next to the clock), then try again. |
+| Your Discord isn't listed | Open Discord once, quit it, then choose **Refresh** in Setup. |
+| Something broke after a change | Open **Solcord Setup** and choose **Roll back**. |
 | Files are missing or damaged | Open **Solcord Setup** and choose **Repair**. |
-| Setup reports an error | Choose **Error details** for the complete local error and recovery path. Nothing is uploaded automatically. |
-| Setup says **Solcord is off** | Discord updated without Solcord. Choose **Turn Solcord back on**. Uninstall waits until you do. |
-| Discord updated and Solcord disappeared | Open Discord from the **Solcord** Start menu entry, or open **Solcord Setup** and choose **Turn Solcord back on**. |
-| Setup says **Newer version installed** | You opened an older installer. Use **Solcord Setup** from the Start menu or download the latest release. |
-| The new core will not start | Use **Roll back** to restore the verified pre-change backup. |
-| A feature says Unavailable | Check Plugin Doctor; the current Discord build may not support that adapter. |
-| A background is not moving | In Appearance, select a background rather than Signal or Off. Check the effective motion policy; Lean and reduced motion stop ambient animation. |
+| Setup shows an error | Choose **Error details** to read the full message. Nothing is sent anywhere. |
+| A feature says **Unavailable** | Discord changed something that feature needs. Check **Recovery → Plugin Doctor**. |
+| A background isn't moving | In **Appearance**, pick a background instead of Signal or Off, and check that reduced motion is off. |
 
-**Open backups folder** shows local backups and receipts. Do not delete `%APPDATA%\BetterDiscord`, plugins, themes, Custom CSS, or private databases to troubleshoot.
+Setup's **Backups** row opens the folder with the backup it makes before every change. Please don't delete `%APPDATA%\BetterDiscord` to fix problems; it holds your plugins, themes, and settings.
 
 ## Removing Solcord
 
-Choose **Uninstall** in **Solcord Setup**, or uninstall **Solcord** from **Settings → Apps → Installed apps**. It removes the core/injector, the Start menu entries, and Setup's own copy, and keeps plugins, themes, settings, private stores, and backups. This is deliberately not a data-wipe action. To remove saved deleted/edited messages too, choose **Erase history** in Solcord's **Message History** first.
+Open **Settings → Apps → Installed apps**, find **Solcord**, and choose **Uninstall** (or use **Uninstall** in Solcord Setup). Discord goes back to normal, and the Start menu entries are removed.
 
-For manual recovery and backup details, read [Install and rollback](INSTALL_AND_ROLLBACK.md).
+Your plugins, themes, settings, and backups stay on your PC in case you come back. To also delete saved messages, choose **Erase history** in **Message History** before uninstalling.
+
+More detail on backups and recovery: [Install and rollback](INSTALL_AND_ROLLBACK.md).

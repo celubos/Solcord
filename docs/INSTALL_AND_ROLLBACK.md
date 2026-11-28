@@ -13,7 +13,7 @@ For a first installation, follow [Quick start](QUICK_START.md). Use the verified
 | Turn Solcord back on | Discord updated and Solcord is off | Everything; this is Repair (same release) or Update (newer release) for the new Discord version |
 | Uninstall | You want to remove Solcord | Plugins, themes, settings, private stores, and recovery files |
 | Check files | You want to check the installed package | Everything; this checks files without replacing them |
-| Open backups folder | You need the receipts or backups | Everything |
+| Backups (Open) | You need the receipts or backups | Everything |
 
 Repair does not download a newer Solcord release. Rollback uses the backup recorded by the installer; it does not install an arbitrary older release. A normal update refuses a downgrade.
 

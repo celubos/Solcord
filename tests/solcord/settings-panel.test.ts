@@ -300,7 +300,7 @@ describe("Solcord Control Center clarity", () => {
         expect(styles).toContain(".solcord-setting-row > span:first-child { display: grid; gap: 8px;");
         for (const primitive of [
             ".solcord-setting-rows { display: grid; gap: 4px; }",
-            ".solcord-setting-list { display: grid; gap: 4px; max-width: 700px; }",
+            ".solcord-setting-list { display: grid; gap: 4px; max-width: var(--sc-row-measure); }",
             ".solcord-module-table { display: grid; gap: 4px; overflow: hidden; }",
             ".solcord-native-ledger { display: grid; gap: 4px; }",
             ".solcord-privacy-capabilities { display: grid; gap: 4px; margin-top: 14px; }",

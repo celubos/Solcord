@@ -4,13 +4,17 @@
 
 | Platform | Distribution | Limits |
 | --- | --- | --- |
-| Windows x64 | [Solcord 2.0.3](https://github.com/celubos/Solcord/releases/tag/v2.0.3), self-contained installer | Unsigned; Windows may show an unknown-publisher warning |
+| Windows x64 | [Solcord 2.0.4](https://github.com/celubos/Solcord/releases/tag/v2.0.4), self-contained installer | Unsigned; Windows may show an unknown-publisher warning |
 | macOS Apple Silicon and Intel | Separate command-line preview archives in the same release | Locally ad-hoc signed, not Developer ID signed or notarized; live Discord acceptance remains outstanding |
 | Linux | Source tests and core build | No supported consumer installer in this release |
 
 The source delivery branch is `main`; `development` remains the upstream integration branch. Use the version, source commit, and hashes in the downloaded package manifests to identify a build. Historical candidates are not relabeled or overwritten.
 
 ## What changed
+
+2.0.4 introduces a new logo and a redesigned Setup, makes the Control Center consistent (one switch layout, readable setup steps, a single dialog title, teal links in Solcord Dark), shares the encrypted-storage code between all private stores, and finishes Setup: one options list, an install summary, safer self-removal, and a friendly message for any newer installation. See the [2.0.4 release notes](releases/2.0.4.md).
+
+### 2.0.3
 
 2.0.3 keeps Solcord on when Discord updates itself in the background (it attaches while Discord runs, and the Start menu **Solcord** entry turns it back on if needed), and makes Setup clearer: plain-language states, a **Turn Solcord back on** button, a **Newer version installed** message instead of a validation error, and a persistent **Solcord Setup** in the Start menu and Settings → Apps. See the [2.0.3 release notes](releases/2.0.3.md).
 
@@ -24,7 +28,7 @@ The 2.0.1 line repairs modern Discord startup, late-login initialization, and th
 
 The audited fixes cover file confinement, redirect credentials, interrupted installer recovery, Timeline persistence and privacy filtering, recording/playback races, bounded DOM work, and startup catalog loading. Setup now offers refresh, disables actions while checking a selected Discord app, explains busy states, and exposes full local error details.
 
-See the [changelog](../CHANGELOG.md), release notes for [2.0.3](releases/2.0.3.md), [2.0.2](releases/2.0.2.md) and [2.0.1](releases/2.0.1.md), and [automated checks](https://github.com/celubos/Solcord/actions/workflows/solcord-ci.yml).
+See the [changelog](../CHANGELOG.md), release notes for [2.0.4](releases/2.0.4.md), [2.0.3](releases/2.0.3.md), [2.0.2](releases/2.0.2.md) and [2.0.1](releases/2.0.1.md), and [automated checks](https://github.com/celubos/Solcord/actions/workflows/solcord-ci.yml).
 
 ## Evidence and package integrity
 

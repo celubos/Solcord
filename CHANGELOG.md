@@ -1,5 +1,14 @@
 # Solcord Changelog
 
+## 2.0.4 - Finished and consistent
+
+- New logo: a white two-cord S on a teal tile with an ember spark, used for the app icon, Setup, the Control Center, and all brand images.
+- Redesigned Setup: dark branded header, rounded status card with state icons, rounded buttons, a framed options card, and proper fonts on Windows 10. New `--install` and quiet `--uninstall` command-line modes that never close Discord without `--close-discord`.
+- Control Center: every switch sits at the end of its row on one shared width, setup step names stay readable at every size, the settings dialog has a single title row with Back and Continue always reachable, and Solcord Dark links are teal instead of nearly matching the danger colour.
+- Setup: Check files and Backups join the other actions in one list, Ready to install says what installing does, uninstalling from Solcord Setup no longer leaves its copy behind, `--update` keeps the Start menu and Settings entries current, and a newer installation always shows **Newer version installed** instead of an error.
+- All encrypted private stores (People and Spaces, Audience Guard, Local Identity Notes, Friend Watch, translation credentials) share one storage module with unchanged files, messages and recovery behavior.
+- Simpler install guide and README.
+
 ## 2.0.3 - Stays on after Discord updates
 
 - Solcord now attaches to a Discord update while Discord is still running (once its files are complete and stable) instead of only when Discord quits, so background updates no longer switch it off.

@@ -45,6 +45,8 @@ queueMicrotask,
         React,
 ModalRoot,
 ErrorBoundary,
+Config: {isCleanCandidateBuild: true},
+solcordMark: "solcord-mark.svg",
 Settings: {panels},
         Modals: {openModal(render: unknown, options: unknown) {opens++; return open.call(modalOwner, render, options);}},
         toasts: {error: (message: string) => failures.push(message)}
@@ -61,6 +63,11 @@ describe("owned settings entry with unavailable native layout and optional modal
         await act(async () => {expect(f.navigate()).toBe(true);});
         expect(document.querySelector("[role=\"dialog\"]")).not.toBeNull();
         expect(document.querySelector("[aria-label=\"Solcord Control Center\"]")?.textContent).toContain("Solcord");
+        // One title row: the dialog bar names the product; no separate "Solcord Suite" title above the panel.
+        expect(document.querySelectorAll(".solcord-control-center-dialog-header h2")).toHaveLength(1);
+        expect(document.querySelector(".solcord-control-center-dialog-header h2")?.textContent).toBe("Solcord Control Center");
+        expect(document.querySelector(".solcord-control-center-dialog-header")?.textContent).not.toContain("Suite");
+        expect(document.querySelector(".solcord-control-center-dialog-header .solcord-build-warning")).toBeNull();
         expect(document.activeElement?.getAttribute("aria-label")).toBe("Close Solcord settings");
         await act(async () => {expect(f.navigate()).toBe(true);});
         expect(f.opens()).toBe(1); expect(f.closes()).toBe(0);

@@ -1,4 +1,4 @@
-# Solcord audit and Codex handoff
+# Solcord audit and handoff
 
 **Audited source** [celubos/Solcord at 9b3004f](https://github.com/celubos/Solcord/tree/9b3004ff8c25c9879803a6c07fa8b28d04731438), the main-branch revision targeted by [v2.0.0](https://github.com/celubos/Solcord/releases/tag/v2.0.0). Audited November 7, 2026, US Central. All code anchors in this handoff refer to that revision. The handoff includes review material, diagnostic probes and the repository's regenerated document inventory.
 
@@ -46,7 +46,7 @@ All **625 tracked Git blobs** were inventoried and independently matched to the 
 
 **Player scope.** Discord owns the underlying audio/video player. Solcord ships a local volume control, voice-note download/capture UI, embed controls, host media-key integration and a changelog media component. `BetterMediaPlayer` is an optional third-party catalog record with `runtimeStatus: PENDING` and `installable: false`. The review covers the integration and first-party code. Independently installed third-party player code and Discord's own implementation are outside this Git tree.
 
-## Codex implementation contract
+## Implementation contract
 
 Use a new implementation branch from the current target and compare it with the audited SHA before editing. Preserve the BdApi surface, addon identifiers and paths, settings migrations, offline setup, user-controlled audio actions, keyboard navigation and recoverability. Prefer one focused change and a causal regression test per defect. Couple changes only where a single invariant spans a boundary, such as a confirmed preview plus its eventual native action.
 

@@ -185,7 +185,9 @@ describe("Solcord installer security contracts", () => {
         expect(installerForm).toContain("ButtonTone.Primary");
         expect(installerForm).toContain("_recommendedKey");
         expect(installerForm).toContain("_targets.TabIndex = 0");
-        expect(installerForm).toContain("_verifyAction.TabIndex = 5");
+        expect(installerForm).toContain("ActionRow(\"verify\", \"Check files\"");
+        expect(installerForm).toContain("buttonAccessibleName: \"Open backups folder\"");
+        expect(installerForm).toContain("_installNotes.Visible = recommendedKey == \"install\";");
         expect(installerForm).toContain("Open backups folder");
         expect(installerForm).toContain("MinimumSize = new Size(0, 44)");
         expect(installerForm).toContain("Height = 36");
@@ -329,7 +331,12 @@ describe("Solcord installer security contracts", () => {
     test("supports a bounded noninteractive update for an explicitly selected Discord channel", () => {
         expect(selfTest).toContain("args.Contains(\"--update\"");
         expect(selfTest).toContain("--update --channel Stable|PTB|Canary");
-        expect(selfTest).toContain("args.Length != 3");
+        expect(selfTest).toContain("args.Length != (closeDiscord ? 4 : 3)");
+        // Command-line modes never close a running Discord without --close-discord.
+        expect(selfTest).toContain("if (running.Count > 0 && !closeDiscord)");
+        expect(selfTest).toContain("if (install) engine.InstallNew(target);");
+        expect(selfTest.match(/RequireDiscordClosedOrConsent\(engine, closeDiscord\);/g)?.length).toBe(2);
+        expect(selfTest).toMatch(/RequireDiscordClosedOrConsent\(engine, closeDiscord\);\r?\n\s+engine\.Uninstall\(target\);/);
         expect(selfTest).toContain("engine.Update(target)");
         expect(selfTest).not.toContain("engine.Uninstall(target);\n            return 0;");
     });

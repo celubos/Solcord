@@ -6,6 +6,7 @@ import path from "node:path";
 import {app, safeStorage} from "electron";
 
 import {resolveSolcordBetterDiscordRoot} from "./solcord-data-root";
+import {recoverSolcordReplacedFile, SolcordIdentityKeyFile, solcordReplacementArtifacts, SolcordSerialQueue, writeSolcordFileAtomically} from "./solcord-private-store-files";
 
 
 interface CredentialRecord {
@@ -45,19 +46,17 @@ export class SolcordTranslationCredentialStorage {
     #session = new Map<string, CredentialRecord>();
     #sessionPreferred = new Set<string>();
     #cleanupAttention = new Set<string>();
-    #identity?: Buffer;
-    #queue = Promise.resolve();
+    // Created exclusively ("wx"), so two processes cannot both mint an identity.
+    #identity = new SolcordIdentityKeyFile({
+        maxWrappedBytes: MAX_WRAPPED_BYTES,
+        write: (file, wrapped) => fs.writeFileSync(file, wrapped, {flag: "wx", mode: 0o600}),
+        messages: {invalidFile: "Invalid translation identity key.", invalidKey: "Invalid translation identity key."}
+    });
+    #queue = new SolcordSerialQueue();
 
     read(rawAccount: unknown, rawRequest: unknown): Promise<{credential: string; persistent: boolean; complete: boolean;}> {
-        const account = this.#account(rawAccount);
-        if (!rawRequest || typeof rawRequest !== "object" || Array.isArray(rawRequest)) throw new TypeError("Invalid translation credential request.");
-        const request = rawRequest as Record<string, unknown>;
-        if (Object.keys(request).some(key => key !== "provider" && key !== "endpoint")) throw new TypeError("Invalid translation credential fields.");
-        const provider = request.provider;
-        if (provider !== "deepl" && provider !== "libretranslate") throw new TypeError("Invalid translation provider.");
-        const binding = endpointHash(request.endpoint);
-        const key = `${account}:${provider}:${binding}`;
-        return this.#serialized(async () => {
+        const {account, provider, binding, key} = this.#scope(rawAccount, rawRequest);
+        return this.#queue.run(async () => {
             if (this.#cleanupAttention.has(key)) {
                 try {
                     const file = this.#file(account, provider, binding, false);
@@ -93,7 +92,7 @@ export class SolcordTranslationCredentialStorage {
         const record = normalizeRecord(rawRequest);
         const key = `${account}:${record.provider}:${record.endpointHash}`;
         this.#session.set(key, record);
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             if (!this.#secureAvailable()) {
                 this.#sessionPreferred.add(key);
                 return {persistent: false, complete: true};
@@ -117,16 +116,9 @@ export class SolcordTranslationCredentialStorage {
     }
 
     clear(rawAccount: unknown, rawRequest: unknown): Promise<{persistent: boolean; complete: boolean;}> {
-        const account = this.#account(rawAccount);
-        if (!rawRequest || typeof rawRequest !== "object" || Array.isArray(rawRequest)) throw new TypeError("Invalid translation credential request.");
-        const request = rawRequest as Record<string, unknown>;
-        if (Object.keys(request).some(key => key !== "provider" && key !== "endpoint")) throw new TypeError("Invalid translation credential fields.");
-        const provider = request.provider;
-        if (provider !== "deepl" && provider !== "libretranslate") throw new TypeError("Invalid translation provider.");
-        const binding = endpointHash(request.endpoint);
-        const key = `${account}:${provider}:${binding}`;
+        const {account, provider, binding, key} = this.#scope(rawAccount, rawRequest);
         this.#session.delete(key);
-        return this.#serialized(async () => {
+        return this.#queue.run(async () => {
             try {
                 const file = this.#file(account, provider, binding, false);
                 if (file) {
@@ -150,6 +142,18 @@ export class SolcordTranslationCredentialStorage {
         return value;
     }
 
+    /** Validates a read or clear request; `key` names the credential in the session maps. */
+    #scope(rawAccount: unknown, rawRequest: unknown): {account: string; provider: CredentialRecord["provider"]; binding: string; key: string;} {
+        const account = this.#account(rawAccount);
+        if (!rawRequest || typeof rawRequest !== "object" || Array.isArray(rawRequest)) throw new TypeError("Invalid translation credential request.");
+        const request = rawRequest as Record<string, unknown>;
+        if (Object.keys(request).some(key => key !== "provider" && key !== "endpoint")) throw new TypeError("Invalid translation credential fields.");
+        const provider = request.provider;
+        if (provider !== "deepl" && provider !== "libretranslate") throw new TypeError("Invalid translation provider.");
+        const binding = endpointHash(request.endpoint);
+        return {account, provider, binding, key: `${account}:${provider}:${binding}`};
+    }
+
     #secureAvailable(): boolean {
         try {return safeStorage.isEncryptionAvailable();}
         catch {return false;}
@@ -159,7 +163,7 @@ export class SolcordTranslationCredentialStorage {
         if (!SHA256.test(binding)) throw new TypeError("Invalid translation endpoint binding.");
         const root = this.#root(create);
         if (!root) return;
-        const identity = this.#identityKey(create);
+        const identity = this.#identity.get(() => this.#root(create), create);
         if (!identity) return;
         let opaqueAccount: string;
         try {opaqueAccount = crypto.createHmac("sha256", identity).update(account, "utf8").digest("hex").slice(0, 40);}
@@ -225,30 +229,6 @@ export class SolcordTranslationCredentialStorage {
         return root;
     }
 
-    #identityKey(create: boolean): Buffer | undefined {
-        if (this.#identity) return Buffer.from(this.#identity);
-        const root = this.#root(create);
-        if (!root) return;
-        const file = path.join(root, "identity.sc-key");
-        if (!fs.existsSync(file)) {
-            if (!create) return;
-            const identity = crypto.randomBytes(32);
-            try {
-                const wrapped = safeStorage.encryptString(identity.toString("base64"));
-                fs.writeFileSync(file, wrapped, {flag: "wx", mode: 0o600});
-                this.#identity = Buffer.from(identity);
-                return identity;
-            }
-            catch (error) {identity.fill(0); throw error;}
-        }
-        const stat = fs.lstatSync(file);
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > MAX_WRAPPED_BYTES) throw new TypeError("Invalid translation identity key.");
-        const identity = Buffer.from(safeStorage.decryptString(fs.readFileSync(file)), "base64");
-        if (identity.length !== 32) throw new TypeError("Invalid translation identity key.");
-        this.#identity = Buffer.from(identity);
-        return identity;
-    }
-
     #readRecord(file: string, provider: CredentialRecord["provider"], binding: string): CredentialRecord {
         const stat = fs.lstatSync(file);
         if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > MAX_WRAPPED_BYTES) throw new TypeError("Invalid translation credential file.");
@@ -258,64 +238,21 @@ export class SolcordTranslationCredentialStorage {
     }
 
     #recoverFile(file: string, provider: CredentialRecord["provider"], binding: string): void {
-        const directory = path.dirname(file);
-        const base = path.basename(file);
-        const names = fs.readdirSync(directory);
-        const backups = names.filter(name => name.startsWith(base) && /^\.\d+\.[0-9a-f]{8}\.old$/.test(name.slice(base.length)));
-        const temporary = names.filter(name => name.startsWith(base) && /^\.\d+\.[0-9a-f]{8}\.tmp$/.test(name.slice(base.length)));
-        if (backups.length > 1) throw new TypeError("Ambiguous translation credential recovery state.");
-        for (const name of [...backups, ...temporary]) {
-            const candidate = path.join(directory, name);
-            const stat = fs.lstatSync(candidate);
-            if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError("Unsafe translation credential recovery artifact.");
-        }
-        if (!fs.existsSync(file) && backups.length === 1) fs.renameSync(path.join(directory, backups[0]), file);
-        const backup = backups.map(name => path.join(directory, name)).find(fs.existsSync);
-        if (fs.existsSync(file) && backup) {
-            try {this.#readRecord(file, provider, binding); fs.unlinkSync(backup);}
-            catch {
-                const displaced = `${file}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.old`;
-                fs.renameSync(file, displaced);
-                try {fs.renameSync(backup, file); this.#readRecord(file, provider, binding); fs.unlinkSync(displaced);}
-                catch (error) {if (!fs.existsSync(file) && fs.existsSync(displaced)) fs.renameSync(displaced, file); throw error;}
-            }
-        }
-        for (const name of temporary) fs.unlinkSync(path.join(directory, name));
+        recoverSolcordReplacedFile(file, {
+            artifacts: solcordReplacementArtifacts(path.basename(file)),
+            verify: target => {this.#readRecord(target, provider, binding);},
+            messages: {ambiguous: "Ambiguous translation credential recovery state.", unsafeArtifact: "Unsafe translation credential recovery artifact."}
+        });
     }
 
+    /** Replaces the credential file; the new file must read back with the same binding, even when nothing was replaced. */
     #atomicReplace(file: string, wrapped: Buffer, provider: CredentialRecord["provider"], binding: string): void {
-        const temporary = `${file}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
-        const descriptor = fs.openSync(temporary, "wx", 0o600);
-        try {fs.writeFileSync(descriptor, wrapped); fs.fsyncSync(descriptor);}
-        finally {fs.closeSync(descriptor);}
-        try {
-            if (fs.existsSync(file)) {
-                const stat = fs.lstatSync(file);
-                if (!stat.isFile() || stat.isSymbolicLink()) throw new TypeError("Translation credential target is unsafe.");
-                const backup = `${file}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.old`;
-                fs.renameSync(file, backup);
-                try {
-                    fs.renameSync(temporary, file);
-                    this.#readRecord(file, provider, binding);
-                    fs.unlinkSync(backup);
-                }
-                catch (error) {
-                    if (!fs.existsSync(file) && fs.existsSync(backup)) fs.renameSync(backup, file);
-                    throw error;
-                }
-            }
-            else {fs.renameSync(temporary, file); this.#readRecord(file, provider, binding);}
-        }
-        finally {
-            try {if (fs.existsSync(temporary)) fs.unlinkSync(temporary);}
-            catch {/* preserve primary error */}
-        }
-    }
-
-    #serialized<T>(operation: () => Promise<T>): Promise<T> {
-        const result = this.#queue.then(operation, operation);
-        this.#queue = result.then(() => undefined, () => undefined);
-        return result;
+        writeSolcordFileAtomically(file, wrapped, {
+            replace: true,
+            unsafeTarget: "Translation credential target is unsafe.",
+            verify: target => {this.#readRecord(target, provider, binding);},
+            verifyNewFile: true
+        });
     }
 }
 

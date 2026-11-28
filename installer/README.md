@@ -7,9 +7,11 @@ This is Solcord's self-contained Windows x64 installer. Its branded action cente
 - **Repair Solcord** reinstalls the exact package already recorded by the installer.
 - **Roll Back** restores the receipt-bound state captured before the current installation.
 - **Uninstall Solcord** removes only the recognized Solcord core and injector, returns the selected channel to vanilla Discord, and preserves a verified recovery copy.
-- **Check files**, **Open Discord**, and **Open backups folder** remain secondary utilities.
+- **Check files** and **Backups** (opens the backups folder) sit in the same **More options** list, and **Open Discord** is the recommended action once Solcord is on.
 
 Each state is named in plain words (**Solcord is on**, **Solcord is off**, **Update available**, **Needs repair**, **Unfinished change**, **Ready to install**) with one recommended button. After a Discord update the button reads **Turn Solcord back on** and runs Repair (same release) or Update (newer release). An installer older than the recorded installation reads that receipt leniently, says **Newer version installed**, and offers no action.
+
+Command line: `--install --channel Stable|PTB|Canary`, `--update --channel …`, and `--uninstall --quiet` (registered as the Settings → Apps quiet uninstall). Each refuses while Discord is running unless `--close-discord` is added, so nothing in progress ends without consent. Exit code 0 means success; errors are written to standard error.
 
 After a successful change Setup keeps `%LOCALAPPDATA%\Solcord\Setup\SolcordSetup.exe`, a **Solcord Setup** Start menu shortcut, and a per-user Settings → Apps entry (`HKCU\...\Uninstall\Solcord`, `--uninstall`). The **Solcord** shortcut runs `SolcordSetup.exe --launch`: it opens Discord directly when Solcord is verified on the newest Discord version; after a Discord update, and only while Discord is closed, it turns Solcord back on and then opens Discord; otherwise it shows Setup. Without the Setup copy the shortcut starts Discord's own launcher (`<channel>\Discord.exe --processStart`), falling back to Squirrel's `Update.exe`. Uninstall removes the copy and entries only when they point at Setup's own files.
 
