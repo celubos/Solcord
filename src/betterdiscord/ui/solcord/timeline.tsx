@@ -209,11 +209,11 @@ export default function MessageTimelinePanel() {
     return <section className="solcord-section solcord-history" aria-labelledby="solcord-history-title">
         <div className="solcord-history-intro">
             <div className="solcord-history-switch">
-                <SolcordSwitch label="Save deleted and edited messages" checked={policy.enabled} onChange={value => update({enabled: value})} />
                 <div>
                     <h3 id="solcord-history-title">Deleted &amp; Edited Messages</h3>
                     <p>{policy.enabled ? <>On · saving {scopeLabel(policy)}.</> : "Off · nothing new is being saved."}</p>
                 </div>
+                <SolcordSwitch label="Save deleted and edited messages" checked={policy.enabled} onChange={value => update({enabled: value})} />
             </div>
             <p>When this is on, Solcord keeps a private copy of messages it sees in the conversations you choose. If someone later deletes or edits one, you can still read it here. It cannot recover messages deleted before Solcord saw them, and it never reads hidden channels or fetches old history.</p>
             <dl className="solcord-facts solcord-history-facts">
@@ -274,10 +274,10 @@ export default function MessageTimelinePanel() {
                 {!currentChannel.eligible && <p className="solcord-empty">To add a server channel, open it in Discord, then come back here.</p>}
             </div>
             <div className="solcord-control-grid">
-                {SKIP_FILTERS.map(([key, label]) => <label key={key}><SolcordSwitch label={label} checked={policy.filters[key]} onChange={value => update({filters: {...policy.filters, [key]: value}})} /> {label}</label>)}
-                <label><SolcordSwitch label="Always save direct messages, even when muted" checked={policy.filters.alwaysLogDms} onChange={value => update({filters: {...policy.filters, alwaysLogDms: value}})} /> Always save direct messages, even when muted</label>
-                <label><SolcordSwitch label="Always keep messages that mentioned me" checked={policy.filters.alwaysLogGhostPings} onChange={value => update({filters: {...policy.filters, alwaysLogGhostPings: value}})} /> Always keep messages that mentioned me (ghost pings), even from skipped authors</label>
-                <label><SolcordSwitch label="Show bulk-deleted messages" checked={policy.display.showPurgedMessages} onChange={value => update({display: {...policy.display, showPurgedMessages: value}})} /> Show bulk-deleted messages</label>
+                {SKIP_FILTERS.map(([key, label]) => <label key={key}><span>{label}</span><SolcordSwitch label={label} checked={policy.filters[key]} onChange={value => update({filters: {...policy.filters, [key]: value}})} /></label>)}
+                <label><span>Always save direct messages, even when muted</span><SolcordSwitch label="Always save direct messages, even when muted" checked={policy.filters.alwaysLogDms} onChange={value => update({filters: {...policy.filters, alwaysLogDms: value}})} /></label>
+                <label><span>Always keep messages that mentioned me (ghost pings), even from skipped authors</span><SolcordSwitch label="Always keep messages that mentioned me" checked={policy.filters.alwaysLogGhostPings} onChange={value => update({filters: {...policy.filters, alwaysLogGhostPings: value}})} /></label>
+                <label><span>Show bulk-deleted messages</span><SolcordSwitch label="Show bulk-deleted messages" checked={policy.display.showPurgedMessages} onChange={value => update({display: {...policy.display, showPurgedMessages: value}})} /></label>
             </div>
         </details>
 

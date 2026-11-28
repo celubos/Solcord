@@ -50,6 +50,20 @@ function contrast(first: string, second: string): number {
     return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
+function hue(hex: string): number {
+    const [red, green, blue] = [1, 3, 5].map(index => Number.parseInt(hex.slice(index, index + 2), 16) / 255);
+    const max = Math.max(red, green, blue);
+    const delta = max - Math.min(red, green, blue);
+    if (!delta) return 0;
+    const sector = max === red ? ((green - blue) / delta) % 6 : max === green ? (blue - red) / delta + 2 : (red - green) / delta + 4;
+    return (sector * 60 + 360) % 360;
+}
+
+function hueDistance(first: string, second: string): number {
+    const distance = Math.abs(hue(first) - hue(second));
+    return Math.min(distance, 360 - distance);
+}
+
 function ruleProperty(css: string, selector: string, name: string): string {
     const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const block = css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]+)}`, "s"))?.[1];
@@ -163,6 +177,8 @@ describe("Solcord theme presentation", () => {
                 const color = ruleProperty(SOLCORD_UI_CSS, selector, property);
                 expect(Math.min(...surfaces.map(surface => contrast(color, surface))), `${mode} ${property}`).toBeGreaterThanOrEqual(4.5);
             }
+            // Ordinary links must not read as warnings: keep them well away from the danger hue.
+            expect(hueDistance(ruleProperty(SOLCORD_UI_CSS, selector, "--sc-app-link"), ruleProperty(SOLCORD_UI_CSS, selector, "--sc-app-danger")), `${mode} link vs danger hue`).toBeGreaterThanOrEqual(90);
         }
     });
 

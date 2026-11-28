@@ -29,6 +29,8 @@ import type {GroupOnChange} from "./settings/group";
 import {normalizeSettingsSearchTerms, resolveAddonDisplayNames} from "./settings/addon-names";
 import Logger from "@common/logger";
 import ModalRoot from "./modals/root";
+import Config from "@stores/config";
+import solcordMark from "@assets/branding/solcord-mark.svg";
 import ErrorBoundary from "./errorboundary";
 import type {Webpack} from "@typed/discord";
 
@@ -484,9 +486,15 @@ const SettingsRenderer = new class SettingsRenderer {
             this.controlCenterModal = Modals.openModal(rawProps => {
                 const props = (rawProps ?? {}) as {onClose?(): void; transitionState?: number;};
                 const close = () => {retired(); props.onClose?.();};
+                // One title row: the dialog bar carries the product identity, so the
+                // panel's own header is hidden here instead of stacking a second title.
                 return <ModalRoot className="solcord-control-center-dialog" transitionState={props.transitionState}>
                     <div className="solcord-control-center-dialog-header">
-                        <h2>Solcord Suite</h2>
+                        <div className="solcord-control-center-dialog-title">
+                            <span className="solcord-mark" aria-hidden="true"><img src={solcordMark} alt="" /></span>
+                            <h2>Solcord <span>Control Center</span></h2>
+                            {!Config.isCleanCandidateBuild && <span className="solcord-build-warning" role="status">Diagnostic build</span>}
+                        </div>
                         <button type="button" onClick={close} aria-label="Close Solcord settings">Close</button>
                     </div>
                     <div className="solcord-control-center-dialog-content">
